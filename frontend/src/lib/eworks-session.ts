@@ -1,0 +1,367 @@
+import { getApiUrl } from "@/lib/api";
+import type { AttachmentMeta } from "@/lib/eworks-calculate-schema";
+
+export type Step1Snapshot = {
+  quote_number: string;
+  job_number: string;
+  external_job_id?: string | null;
+  engineer_name?: string | null;
+  client_name: string;
+  trade_name: string;
+  property_address: string;
+  property_manager_name?: string | null;
+  property_manager_email?: string | null;
+  property_manager_phone?: string | null;
+  tenant_name?: string | null;
+  tenant_phone?: string | null;
+  access_notes?: string | null;
+  original_job_description?: string | null;
+  booked_by?: string | null;
+  contact?: string | null;
+  quote_screening_answers?: string | null;
+  date_visited?: string | null;
+  travel_time_minutes?: number;
+  travel_notes?: string | null;
+  parking_notes?: string | null;
+  total_time_for_job?: string | null;
+  quote_description?: string | null;
+  findings_report?: string | null;
+  congestion_required: boolean;
+  congestion_amount: number | string;
+  travel: number | string;
+};
+
+export type MaterialOrderRow = {
+  link?: string | null;
+  quantity: number | string;
+  cost: number | string;
+};
+
+export type WorkBlockSnapshot = {
+  scope?: string | null;
+  materials_to_order?: MaterialOrderRow[];
+  shelf_materials_rows?: MaterialOrderRow[];
+  shelf_materials?: string | null;
+  shelf_materials_cost?: number | string;
+  skill_required?: string | null;
+  best_engineer?: string | null;
+  subcontractors?: string | null;
+  engineers_required?: boolean;
+  engineers_needed?: number | null;
+  engineer_time_unit?: string | null;
+  engineer_time_value?: number | string;
+  labour_required?: boolean;
+  labour_needed?: number | null;
+  labour_time_value?: number | string;
+  time_frame?: string | null;
+  other_notes?: string | null;
+  attachments?: AttachmentMeta[];
+  findings?: string | null;
+  engineers?: number;
+  labourers?: number;
+  labourer_days?: number | string;
+  labour_type?: string;
+  hours?: number | string;
+  days?: number | string;
+  markup_value?: number | string;
+};
+
+export type Step2Snapshot = {
+  works?: WorkBlockSnapshot[];
+  scope?: string | null;
+  materials_to_order?: MaterialOrderRow[];
+  shelf_materials_rows?: MaterialOrderRow[];
+  shelf_materials?: string | null;
+  shelf_materials_cost?: number | string;
+  skill_required?: string | null;
+  best_engineer?: string | null;
+  subcontractors?: string | null;
+  time_frame?: string | null;
+  engineers_needed?: number | null;
+  other_notes?: string | null;
+  attachments?: AttachmentMeta[];
+  findings?: string | null;
+  engineers?: number;
+  labourers?: number;
+  labourer_days?: number | string;
+  labour_type?: string;
+  hours?: number | string;
+  days?: number | string;
+  markup_value?: number | string;
+  parking_required?: boolean;
+  parking_type?: string | null;
+  parking_rate_per_hour?: number | string | null;
+  parking_hours?: number | string | null;
+  parking_fixed_amount?: number | string | null;
+  congestion_required?: boolean;
+  congestion_amount?: number | string;
+  travel_charge?: number | string;
+  other_charge?: number | string;
+  other_charge_reason?: string | null;
+};
+
+export type ResolvedRuleInfo = {
+  client_id: string;
+  trade_id: string;
+  rule_id: string;
+  rule_version: string;
+  formula_source: string;
+  xlsx_client_name?: string | null;
+  xlsx_trade_name?: string | null;
+};
+
+export type SessionUiState = {
+  current_step: number;
+  max_reachable_step: number;
+  last_result?: CalculateResponse | null;
+};
+
+export type FromLinkResponse = {
+  session_id: string;
+  session_token: string;
+  step1: Step1Snapshot;
+  step2?: Step2Snapshot | null;
+  resolved: ResolvedRuleInfo;
+  expires_at: string;
+  ui_state?: SessionUiState | null;
+  resumed?: boolean;
+};
+
+export type CalculationBreakdown = {
+  labour: { label: string; formula: string; total: number | string }[];
+  materials: { label: string; formula: string; total: number | string }[];
+  charges: { label: string; formula: string; total: number | string }[];
+  subtotal: number | string;
+  vat_total: number | string;
+  final_total: number | string;
+  formula_source?: string;
+  internal_notes?: string;
+  profit_gbp?: number | string;
+  profit_pct?: number | string;
+  direct_labour_cost?: number | string;
+  labour_charge_to_client?: number | string;
+  materials_parking_cc_charge?: number | string;
+};
+
+export type WorkBreakdownResult = {
+  work_index: number;
+  scope?: string | null;
+  breakdown: CalculationBreakdown;
+  internal_notes?: string | null;
+};
+
+export type AggregatedQuoteSummary = {
+  work_count: number;
+  labour_type: string;
+  quoted_engineer_hours?: number | string | null;
+  quoted_engineer_days?: number | string | null;
+  quoted_labour_days?: number | string | null;
+  uses_mixed_units?: boolean;
+  converted_from_hours?: boolean;
+  mixed_skills?: boolean;
+  skills?: string[];
+  subtitle: string;
+};
+
+export type CalculateResponse = {
+  breakdown: CalculationBreakdown;
+  work_breakdowns?: WorkBreakdownResult[];
+  aggregated_summary?: AggregatedQuoteSummary | null;
+  internal_view: Record<string, unknown>;
+  internal_notes?: string | null;
+  client_view: Record<string, unknown>;
+};
+
+function hashPayload(value: unknown): string {
+  const raw = JSON.stringify(value);
+  let hash = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = (hash << 5) - hash + raw.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16);
+}
+
+function buildIdempotencyKey(scope: string, payload: unknown): string {
+  return `${scope}-${hashPayload(payload)}`;
+}
+
+async function sessionFetch<T>(path: string, sessionToken: string, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+    "X-Session-Token": sessionToken,
+  };
+  if (!(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(`${getApiUrl()}${path}`, { ...options, headers });
+  const payload = await response.json();
+  if (!response.ok) {
+    const message = payload?.detail?.error?.message || payload?.detail || "Request failed";
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+  return payload.data as T;
+}
+
+export async function createSessionFromLink(payload: string, sig?: string | null) {
+  let response: Response;
+  try {
+    response = await fetch(`${getApiUrl()}/api/v1/calculation-session/from-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload, sig: sig ?? null }),
+    });
+  } catch {
+    throw new Error(
+      `Could not reach the API at ${getApiUrl()}. Check that the backend is running and migrations are up to date.`,
+    );
+  }
+  let body: { success?: boolean; data?: FromLinkResponse; detail?: unknown };
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error(
+      response.ok
+        ? "Unexpected response from the server."
+        : `Server error (${response.status}). Check backend logs and run: docker compose exec backend alembic upgrade head`,
+    );
+  }
+  if (!response.ok) {
+    const message = (body?.detail as { error?: { message?: string } })?.error?.message || body?.detail || "Request failed";
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+  return body as { success: boolean; data: FromLinkResponse };
+}
+
+export async function createDevTestSession() {
+  let response: Response;
+  try {
+    response = await fetch(`${getApiUrl()}/api/v1/calculation-session/dev-bootstrap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch {
+    throw new Error(
+      `Could not reach the API at ${getApiUrl()}. Check that the backend is running.`,
+    );
+  }
+  let body: { success?: boolean; data?: FromLinkResponse; detail?: unknown };
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error(`Server error (${response.status}).`);
+  }
+  if (!response.ok) {
+    const message = (body?.detail as { error?: { message?: string } })?.error?.message || body?.detail || "Request failed";
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+  return body as { success: boolean; data: FromLinkResponse };
+}
+
+export async function patchSession(
+  sessionId: string,
+  sessionToken: string,
+  payload: { step2?: Step2Snapshot; ui_state?: SessionUiState },
+) {
+  const idempotencyKey = buildIdempotencyKey(`eworks-${sessionId}-patch`, payload);
+  return sessionFetch<{ step2?: Step2Snapshot; ui_state?: SessionUiState }>(
+    `/api/v1/calculation-session/${sessionId}`,
+    sessionToken,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+      headers: { "Idempotency-Key": idempotencyKey },
+    },
+  );
+}
+
+export async function patchSessionStep2(sessionId: string, sessionToken: string, step2: Step2Snapshot) {
+  return patchSession(sessionId, sessionToken, { step2 });
+}
+
+function sessionStorageKey(quoteNumber: string, jobNumber: string) {
+  return `eworks-session:${quoteNumber}:${jobNumber}`;
+}
+
+export function storeSessionCredentials(quoteNumber: string, jobNumber: string, sessionId: string, sessionToken: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    sessionStorageKey(quoteNumber, jobNumber),
+    JSON.stringify({ sessionId, sessionToken }),
+  );
+}
+
+export function readStoredSessionCredentials(quoteNumber: string, jobNumber: string) {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(sessionStorageKey(quoteNumber, jobNumber));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { sessionId?: string; sessionToken?: string };
+    if (!parsed.sessionId || !parsed.sessionToken) return null;
+    return { sessionId: parsed.sessionId, sessionToken: parsed.sessionToken };
+  } catch {
+    return null;
+  }
+}
+
+export async function uploadSessionAttachment(
+  sessionId: string,
+  sessionToken: string,
+  file: File,
+  workIndex = 0,
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return sessionFetch<AttachmentMeta>(
+    `/api/v1/calculation-session/${sessionId}/attachments?work_index=${workIndex}`,
+    sessionToken,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
+export async function calculateSession(sessionId: string, sessionToken: string, step2?: Step2Snapshot) {
+  const body = step2 ? { step2 } : {};
+  const idempotencyKey = buildIdempotencyKey(`eworks-${sessionId}-calculate`, body);
+  return sessionFetch<CalculateResponse>(`/api/v1/calculation-session/${sessionId}/calculate`, sessionToken, {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+}
+
+export async function downloadSessionPdf(
+  sessionId: string,
+  sessionToken: string,
+  options?: { isDraft?: boolean },
+): Promise<void> {
+  const response = await fetch(`${getApiUrl()}/api/v1/calculation-session/${sessionId}/pdf`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": sessionToken,
+    },
+    body: JSON.stringify({ is_draft: options?.isDraft ?? false }),
+  });
+  if (!response.ok) {
+    let message = "PDF download failed";
+    try {
+      const payload = await response.json();
+      message = payload?.detail?.error?.message || payload?.detail || message;
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition");
+  const fileName = disposition?.match(/filename="([^"]+)"/)?.[1] ?? "quote.pdf";
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}

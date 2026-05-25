@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --optimal-bg: #000000;
+  --optimal-bg-elevated: #141414;
+  --optimal-orange: #f9a825;
+  --optimal-orange-dark: #e09400;
+  --optimal-field: #cfd2d6;
+  --optimal-field-text: #1f2937;
+  --optimal-muted: #9ca3af;
+  --background: #ffffff;
+  --foreground: #111827;
+}
+
+html {
+  background: #ffffff;
+}
+
+body {
+  color: var(--foreground);
+  background: #ffffff;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .touch-manipulation {
+    touch-action: manipulation;
+  }
+}

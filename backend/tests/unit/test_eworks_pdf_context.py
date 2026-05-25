@@ -1,0 +1,166 @@
+from decimal import Decimal
+
+from app.schemas.calculation import CalculationBreakdown
+from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnapshot
+from app.services.eworks_pdf_context_service import build_eworks_estimate_pdf_context
+
+
+def _step1(**overrides) -> Step1Snapshot:
+    base = {
+        "quote_number": "Q21863",
+        "job_number": "33629",
+        "engineer_name": "Alex Alves",
+        "client_name": "Lamberts Chartered Surveyors",
+        "trade_name": "Carpenter",
+        "property_address": "The Factory, 1 Nile Street",
+        "property_manager_name": "Kira Mcintyre",
+        "access_notes": "To meet caretaker on site on 22nd May at 8am. Alex - 07960696064",
+        "original_job_description": "Please can you provide a quote\nTo upgrade all doors marked for upgrade",
+        "booked_by": "Billie",
+        "travel_notes": "1st appt",
+        "quote_screening_answers": "1. Unfortunately we do not have any pictures.\n2. We would like it back ASAP",
+        "congestion_required": False,
+        "congestion_amount": Decimal("0"),
+        "travel": Decimal("0"),
+    }
+    base.update(overrides)
+    return Step1Snapshot(**base)
+
+
+def test_build_eworks_pdf_cover_matches_reference_fields():
+    step1 = _step1()
+    step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                scope="Door no 12. B2. Stairwell entrance 8, single timber, FD30S\n"
+                "1. Recommend the 5mm gap is monitored\n"
+                "Supply and fit hardwood lipping\n"
+                "Supply and fit push plate",
+                findings="1. Recommend the 5mm gap is monitored",
+                time_frame="1 day",
+                materials_to_order=[{"link": "Lipping", "quantity": 1, "cost": 30}],
+                shelf_materials_rows=[{"link": "Push plate", "quantity": 1, "cost": 40}],
+            )
+        ]
+    )
+    breakdown = CalculationBreakdown(
+        labour=[],
+        materials=[],
+        charges=[],
+        subtotal=Decimal("120"),
+        vat_rate=Decimal("20"),
+        vat_total=Decimal("24"),
+        final_total=Decimal("144"),
+        formula_version="test",
+    )
+    context = build_eworks_estimate_pdf_context(
+        step1=step1,
+        step2=step2,
+        breakdown=breakdown,
+        client_view={"calculation": breakdown.model_dump(mode="json")},
+    )
+
+    assert context["document_title"] == "OPTIMAL ESTIMATE"
+    assert context["header_line"] == "Alex Alves Q21863 33629"
+    assert context["property_address"] == "The Factory, 1 Nile Street"
+    assert "Kira Mcintyre" in context["estimation_fields"][8]["value"]
+    assert context["work_forms"][0]["scope"].startswith("Door no 12")
+    assert context["work_forms"][0]["materials_to_order"][0]["cost"] == "£30.00"
+    assert context["total_pages"] == 3
+
+
+def test_render_eworks_estimate_document_includes_form_sections():
+    from app.adapters.pdf_renderer import render_eworks_estimate_document
+
+    context = build_eworks_estimate_pdf_context(
+        step1=_step1(),
+        step2=Step2Snapshot(works=[WorkBlockSnapshot(scope="Door no 11. B2 stairwell", time_frame="2 hours")]),
+        breakdown=CalculationBreakdown(
+            labour=[],
+            materials=[],
+            charges=[],
+            subtotal=Decimal("100"),
+            vat_rate=Decimal("20"),
+            vat_total=Decimal("20"),
+            final_total=Decimal("120"),
+            formula_version="test",
+        ),
+        client_view={"calculation": {"subtotal": 100, "vat_rate": 20, "vat_total": 20, "final_total": 120}},
+    )
+    context["quote_number"] = "Q21863"
+    content, file_name, media_type = render_eworks_estimate_document(context, is_draft=False)
+    html = content.decode("utf-8") if media_type != "application/pdf" else ""
+    if media_type == "application/pdf":
+        assert content.startswith(b"%PDF")
+    else:
+        assert "OPTIMAL ESTIMATE" in html
+        assert "Estimation Form" in html
+        assert "Estimating Questionnaire" in html
+        assert "Scope of Works" in html
+        assert "Door no 11. B2 stairwell" in html
+        assert "#000000" in html
+        assert "#f9a825" in html
+        assert "-- 1 of" in html
+    assert file_name.startswith("document_Q21863")
+
+
+def test_pdf_charges_fixed_parking_omits_hourly_fields():
+    step2 = Step2Snapshot(
+        parking_required=True,
+        parking_type="fixed",
+        parking_rate_per_hour=Decimal("30"),
+        parking_hours=Decimal("1"),
+        parking_fixed_amount=Decimal("100"),
+        congestion_required=True,
+        congestion_amount=Decimal("100"),
+    )
+    context = build_eworks_estimate_pdf_context(
+        step1=_step1(),
+        step2=step2,
+        breakdown=CalculationBreakdown(
+            labour=[],
+            materials=[],
+            charges=[],
+            subtotal=Decimal("565"),
+            vat_rate=Decimal("20"),
+            vat_total=Decimal("113"),
+            final_total=Decimal("678"),
+            formula_version="test",
+        ),
+        client_view={"calculation": {"subtotal": 565, "vat_rate": 20, "vat_total": 113, "final_total": 678}},
+    )
+    labels = [field["label"] for field in context["charges_fields"]]
+    assert "Parking fixed amount (£)" in labels
+    assert "Parking rate per hour (£)" not in labels
+    assert "Parking hours" not in labels
+    fixed = next(field for field in context["charges_fields"] if field["label"] == "Parking fixed amount (£)")
+    assert fixed["value"] == "£100.00"
+
+
+def test_pdf_charges_hourly_parking_shows_rate_and_hours():
+    step2 = Step2Snapshot(
+        parking_required=True,
+        parking_type="hourly",
+        parking_rate_per_hour=Decimal("30"),
+        parking_hours=Decimal("2"),
+        parking_fixed_amount=Decimal("100"),
+    )
+    context = build_eworks_estimate_pdf_context(
+        step1=_step1(),
+        step2=step2,
+        breakdown=CalculationBreakdown(
+            labour=[],
+            materials=[],
+            charges=[],
+            subtotal=Decimal("100"),
+            vat_rate=Decimal("20"),
+            vat_total=Decimal("20"),
+            final_total=Decimal("120"),
+            formula_version="test",
+        ),
+        client_view={"calculation": {"subtotal": 100, "vat_rate": 20, "vat_total": 20, "final_total": 120}},
+    )
+    labels = [field["label"] for field in context["charges_fields"]]
+    assert "Parking rate per hour (£)" in labels
+    assert "Parking hours" in labels
+    assert "Parking fixed amount (£)" not in labels

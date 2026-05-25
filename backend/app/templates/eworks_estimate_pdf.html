@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ document_title }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 12mm 14mm 16mm;
+      background: #000000;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000000;
+      color: #ffffff;
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 10pt;
+      line-height: 1.4;
+    }
+
+    .page {
+      page-break-after: always;
+      position: relative;
+      min-height: 255mm;
+      background: #000000;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+    }
+
+    .doc-header {
+      display: table;
+      width: 100%;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+    }
+
+    .doc-header-main,
+    .doc-header-brand {
+      display: table-cell;
+      vertical-align: top;
+    }
+
+    .doc-header-brand {
+      text-align: right;
+      width: 38%;
+      color: #f9a825;
+      font-size: 11pt;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .doc-title {
+      margin: 0;
+      font-size: 18pt;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #ffffff;
+    }
+
+    .doc-subtitle {
+      margin: 4px 0 0;
+      color: #9ca3af;
+      font-size: 10pt;
+    }
+
+    .section-title {
+      margin: 14px 0 8px;
+      color: #f9a825;
+      font-size: 11pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .field-grid {
+      display: table;
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 8px 10px;
+      margin-bottom: 4px;
+    }
+
+    .field-row {
+      display: table-row;
+    }
+
+    .field-cell {
+      display: table-cell;
+      vertical-align: top;
+      width: 33.33%;
+    }
+
+    .field-cell.span-2 {
+      width: 66.66%;
+    }
+
+    .field-cell.full {
+      width: 100%;
+      display: table-row;
+    }
+
+    .field-block {
+      margin-bottom: 10px;
+    }
+
+    .field-label {
+      margin: 0 0 4px;
+      color: #f9a825;
+      font-size: 9pt;
+      font-weight: 600;
+    }
+
+    .field-box {
+      background: #cfd2d6;
+      color: #1f2937;
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-height: 18px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .field-box.tall {
+      min-height: 72px;
+    }
+
+    .work-card {
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: #141414;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .work-card-title {
+      margin: 0 0 10px;
+      color: #ffffff;
+      font-size: 12pt;
+      font-weight: 700;
+    }
+
+    .materials-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #cfd2d6;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .materials-table th {
+      padding: 7px 8px;
+      text-align: left;
+      color: #000000;
+      font-size: 8pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #cfd2d6;
+    }
+
+    .materials-table td {
+      padding: 7px 8px;
+      color: #1f2937;
+      border-top: 1px solid #b8bcc2;
+      font-size: 9pt;
+      vertical-align: top;
+    }
+
+    .engineer-panel {
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 8px;
+    }
+
+    .checkbox-line {
+      margin: 0 0 8px;
+      color: #ffffff;
+      font-size: 10pt;
+      font-weight: 600;
+    }
+
+    .summary-box {
+      border: 1px solid rgba(249, 168, 37, 0.35);
+      background: #141414;
+      border-radius: 8px;
+      padding: 14px;
+      max-width: 320px;
+      margin-left: auto;
+    }
+
+    .summary-row {
+      display: table;
+      width: 100%;
+      margin: 6px 0;
+      color: #ffffff;
+    }
+
+    .summary-row > span {
+      display: table-cell;
+    }
+
+    .summary-row > span:last-child {
+      text-align: right;
+      font-weight: 600;
+    }
+
+    .summary-total {
+      margin-top: 10px;
+      background: #f9a825;
+      color: #000000;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-weight: 700;
+      font-size: 12pt;
+    }
+
+    .summary-total .summary-row > span {
+      color: #000000;
+    }
+
+    .muted {
+      color: #9ca3af;
+      font-size: 9pt;
+    }
+
+    .page-footer {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      text-align: center;
+      font-size: 9pt;
+      color: #9ca3af;
+    }
+
+    {% if is_draft %}
+    .draft-watermark {
+      position: fixed;
+      top: 42%;
+      left: 8%;
+      font-size: 72px;
+      color: rgba(200, 0, 0, 0.12);
+      transform: rotate(-30deg);
+      z-index: -1;
+    }
+    {% endif %}
+  </style>
+</head>
+<body>
+  {% if is_draft %}<div class="draft-watermark">DRAFT</div>{% endif %}
+
+  <section class="page">
+    <div class="doc-header">
+      <div class="doc-header-main">
+        <h1 class="doc-title">{{ document_title }}</h1>
+        <p class="doc-subtitle">{{ estimation_form_title }}</p>
+      </div>
+      <div class="doc-header-brand">OPTIMAL GROUP</div>
+    </div>
+
+    <div class="field-grid">
+      {% for row in estimation_field_rows %}
+      <div class="field-row">
+        {% for field in row %}
+        <div class="field-cell">
+          <div class="field-block">
+            <p class="field-label">{{ field.label }}</p>
+            <div class="field-box">{{ field.value }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <p class="section-title">Description of what quoting for</p>
+    <div class="field-box tall">{{ quote_description }}</div>
+
+    <p class="section-title">Findings Report for what has been requested</p>
+    <div class="field-box tall">{{ findings_report }}</div>
+
+    <p class="muted">Trade: {{ trade_name }}</p>
+    <div class="page-footer">-- 1 of {{ total_pages }} --</div>
+  </section>
+
+  <section class="page">
+    <div class="doc-header">
+      <div class="doc-header-main">
+        <h1 class="doc-title">{{ document_title }}</h1>
+        <p class="doc-subtitle">{{ questionnaire_title }}</p>
+      </div>
+      <div class="doc-header-brand">OPTIMAL GROUP</div>
+    </div>
+
+    {% for work in work_forms %}
+    <div class="work-card">
+      <h2 class="work-card-title">{{ work.title }}</h2>
+
+      <p class="section-title">Scope of Works</p>
+      <div class="field-box tall">{{ work.scope }}</div>
+
+      <p class="section-title">Materials to Order and Cost</p>
+      <table class="materials-table">
+        <thead>
+          <tr>
+            <th>Link</th>
+            <th style="width: 18%;">Quantity</th>
+            <th style="width: 18%;">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in work.materials_to_order %}
+          <tr>
+            <td>{{ row.link }}</td>
+            <td>{{ row.quantity }}</td>
+            <td>{{ row.cost }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <p class="section-title">Materials bought off the Shelf and Cost</p>
+      <table class="materials-table">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th style="width: 18%;">Quantity</th>
+            <th style="width: 18%;">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in work.shelf_materials_rows %}
+          <tr>
+            <td>{{ row.link }}</td>
+            <td>{{ row.quantity }}</td>
+            <td>{{ row.cost }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="field-grid">
+        <div class="field-row">
+          <div class="field-cell">
+            <div class="field-block">
+              <p class="field-label">Skill Required</p>
+              <div class="field-box">{{ work.skill_required }}</div>
+            </div>
+          </div>
+          <div class="field-cell">
+            <div class="field-block">
+              <p class="field-label">Best Engineer</p>
+              <div class="field-box">{{ work.best_engineer }}</div>
+            </div>
+          </div>
+          <div class="field-cell">
+            <div class="field-block">
+              <p class="field-label">Subcontractors</p>
+              <div class="field-box">{{ work.subcontractors }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="engineer-panel">
+        <p class="checkbox-line">Engineer needed: {{ work.engineer.required }}</p>
+        <div class="field-grid">
+          <div class="field-row">
+            <div class="field-cell">
+              <div class="field-block">
+                <p class="field-label">Number of engineers</p>
+                <div class="field-box">{{ work.engineer.count }}</div>
+              </div>
+            </div>
+            <div class="field-cell">
+              <div class="field-block">
+                <p class="field-label">Hours or Days</p>
+                <div class="field-box">{{ work.engineer.unit }}</div>
+              </div>
+            </div>
+            <div class="field-cell">
+              <div class="field-block">
+                <p class="field-label">Duration</p>
+                <div class="field-box">{{ work.engineer.duration }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if work.labour.required == "Yes" %}
+      <div class="engineer-panel">
+        <p class="checkbox-line">Labour needed: {{ work.labour.required }}</p>
+        <div class="field-grid">
+          <div class="field-row">
+            <div class="field-cell">
+              <div class="field-block">
+                <p class="field-label">Number of labour</p>
+                <div class="field-box">{{ work.labour.count }}</div>
+              </div>
+            </div>
+            <div class="field-cell">
+              <div class="field-block">
+                <p class="field-label">Duration</p>
+                <div class="field-box">{{ work.labour.duration }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <p class="section-title">Any Other Notes</p>
+      <div class="field-box">{{ work.other_notes }}</div>
+    </div>
+    {% endfor %}
+
+    <div class="page-footer">-- 2 of {{ total_pages }} --</div>
+  </section>
+
+  <section class="page">
+    <div class="doc-header">
+      <div class="doc-header-main">
+        <h1 class="doc-title">{{ document_title }}</h1>
+        <p class="doc-subtitle">{{ charges_title }} &amp; {{ summary_title }}</p>
+      </div>
+      <div class="doc-header-brand">OPTIMAL GROUP</div>
+    </div>
+
+    <div class="field-grid">
+      {% for row in charges_field_rows %}
+      <div class="field-row">
+        {% for field in row %}
+        <div class="field-cell">
+          <div class="field-block">
+            <p class="field-label">{{ field.label }}</p>
+            <div class="field-box">{{ field.value }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <p class="section-title">{{ summary_title }}</p>
+    <div class="summary-box">
+      <div class="summary-row">
+        <span>Subtotal</span>
+        <span>{{ summary.subtotal }}</span>
+      </div>
+      <div class="summary-row">
+        <span>VAT ({{ summary.vat_rate }}%)</span>
+        <span>{{ summary.vat_total }}</span>
+      </div>
+      <div class="summary-total">
+        <div class="summary-row">
+          <span>Final total</span>
+          <span>{{ summary.final_total }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-footer">-- {{ total_pages }} of {{ total_pages }} --</div>
+  </section>
+</body>
+</html>
