@@ -1,7 +1,13 @@
 from decimal import Decimal
 
-from app.schemas.calculation import CalculationBreakdown
-from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnapshot
+from app.schemas.calculation import CalculationBreakdown, LineBreakdown
+from app.schemas.eworks_link import (
+    AggregatedQuoteSummary,
+    Step1Snapshot,
+    Step2Snapshot,
+    WorkBlockSnapshot,
+    WorkBreakdownResult,
+)
 from app.services.eworks_pdf_context_service import build_eworks_estimate_pdf_context
 
 
@@ -66,7 +72,8 @@ def test_build_eworks_pdf_cover_matches_reference_fields():
     assert "Kira Mcintyre" in context["estimation_fields"][8]["value"]
     assert context["work_forms"][0]["scope"].startswith("Door no 12")
     assert context["work_forms"][0]["materials_to_order"][0]["cost"] == "£30.00"
-    assert context["total_pages"] == 3
+    assert context["total_pages"] == 4
+    assert context["combined_page"] == 4
 
 
 def test_render_eworks_estimate_document_includes_form_sections():
@@ -101,6 +108,7 @@ def test_render_eworks_estimate_document_includes_form_sections():
         assert "#000000" in html
         assert "#f9a825" in html
         assert "-- 1 of" in html
+        assert "Combined Quote" in html
     assert file_name.startswith("document_Q21863")
 
 
@@ -164,3 +172,94 @@ def test_pdf_charges_hourly_parking_shows_rate_and_hours():
     assert "Parking rate per hour (£)" in labels
     assert "Parking hours" in labels
     assert "Parking fixed amount (£)" not in labels
+
+
+def test_build_eworks_pdf_results_context():
+    breakdown = CalculationBreakdown(
+        labour=[LineBreakdown(label="Labour", formula="x", total=Decimal("145"))],
+        materials=[LineBreakdown(label="Materials", formula="x", total=Decimal("260"))],
+        charges=[LineBreakdown(label="Congestion", formula="x", total=Decimal("18"))],
+        subtotal=Decimal("405"),
+        vat_rate=Decimal("20"),
+        vat_total=Decimal("81"),
+        final_total=Decimal("486"),
+        formula_version="test",
+        labour_charge_to_client=Decimal("145"),
+        materials_parking_cc_charge=Decimal("260"),
+        profit_gbp=Decimal("153"),
+        internal_notes="BUDGET: Materials: £190 / Parking: £0 / CC: £18",
+    )
+    work_breakdowns = [
+        WorkBreakdownResult(
+            work_index=0,
+            scope="Work one scope",
+            breakdown=CalculationBreakdown(
+                labour=[LineBreakdown(label="Labour", formula="x", total=Decimal("80"))],
+                materials=[LineBreakdown(label="Materials", formula="x", total=Decimal("90"))],
+                charges=[],
+                subtotal=Decimal("170"),
+                vat_rate=Decimal("20"),
+                vat_total=Decimal("34"),
+                final_total=Decimal("204"),
+                formula_version="test",
+                internal_notes="Work one notes",
+            ),
+            internal_notes="Work one notes",
+        ),
+        WorkBreakdownResult(
+            work_index=1,
+            scope="Work two scope",
+            breakdown=CalculationBreakdown(
+                labour=[LineBreakdown(label="Labour", formula="x", total=Decimal("65"))],
+                materials=[LineBreakdown(label="Materials", formula="x", total=Decimal("170"))],
+                charges=[],
+                subtotal=Decimal("235"),
+                vat_rate=Decimal("20"),
+                vat_total=Decimal("47"),
+                final_total=Decimal("282"),
+                formula_version="test",
+                internal_notes="Work two notes",
+            ),
+            internal_notes="Work two notes",
+        ),
+    ]
+    context = build_eworks_estimate_pdf_context(
+        step1=_step1(),
+        step2=Step2Snapshot(
+            works=[
+                WorkBlockSnapshot(scope="Work one scope"),
+                WorkBlockSnapshot(scope="Work two scope"),
+            ]
+        ),
+        breakdown=breakdown,
+        client_view={"calculation": breakdown.model_dump(mode="json")},
+        work_breakdowns=work_breakdowns,
+        aggregated_summary=AggregatedQuoteSummary(
+            work_count=2,
+            labour_type="hourly",
+            subtitle="3 hours total across 2 works",
+        ),
+        internal_notes=breakdown.internal_notes,
+    )
+
+    assert context["results"]["has_multiple_works"] is True
+    assert len(context["results"]["works"]) == 2
+    assert context["results"]["combined"]["profit"] == "£153.00"
+    assert context["results"]["combined"]["subtitle"] == "3 hours total across 2 works"
+    assert context["results"]["internal_notes"] == breakdown.internal_notes
+    assert context["per_work_page"] == 4
+    assert context["combined_page"] == 5
+    assert context["notes_page"] == 6
+    assert context["total_pages"] == 6
+
+    from app.adapters.pdf_renderer import render_eworks_estimate_document
+
+    context["quote_number"] = "Q21863"
+    content, _, media_type = render_eworks_estimate_document(context, is_draft=False)
+    if media_type != "application/pdf":
+        html = content.decode("utf-8")
+        assert "Per-work Breakdown" in html
+        assert "Combined Quote" in html
+        assert "Internal Notes (Combined)" in html
+        assert "£153.00" in html
+        assert "BUDGET: Materials: £190 / Parking: £0 / CC: £18" in html

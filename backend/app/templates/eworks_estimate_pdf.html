@@ -246,6 +246,84 @@
       color: #9ca3af;
     }
 
+    .results-grid {
+      display: table;
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 8px 10px;
+      margin: 10px 0 14px;
+    }
+
+    .results-grid-row {
+      display: table-row;
+    }
+
+    .results-grid-cell {
+      display: table-cell;
+      width: 50%;
+      vertical-align: top;
+    }
+
+    .results-metric {
+      background: #cfd2d6;
+      color: #1f2937;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 9pt;
+    }
+
+    .results-metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 11pt;
+      color: #000000;
+    }
+
+    .results-final-total {
+      background: #f9a825;
+      color: #000000;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-weight: 700;
+      font-size: 12pt;
+      margin: 10px 0 14px;
+    }
+
+    .line-items {
+      margin-top: 10px;
+    }
+
+    .line-item {
+      display: table;
+      width: 100%;
+      margin: 4px 0;
+      color: #d1d5db;
+      font-size: 9pt;
+    }
+
+    .line-item > span {
+      display: table-cell;
+    }
+
+    .line-item > span:last-child {
+      text-align: right;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .notes-block {
+      background: #cfd2d6;
+      color: #1f2937;
+      border-radius: 6px;
+      padding: 10px 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 8pt;
+      line-height: 1.45;
+      page-break-inside: auto;
+    }
+
     {% if is_draft %}
     .draft-watermark {
       position: fixed;
@@ -473,7 +551,104 @@
       </div>
     </div>
 
-    <div class="page-footer">-- {{ total_pages }} of {{ total_pages }} --</div>
+    <div class="page-footer">-- 3 of {{ total_pages }} --</div>
   </section>
+
+  {% if results.has_multiple_works %}
+  <section class="page">
+    <div class="doc-header">
+      <div class="doc-header-main">
+        <h1 class="doc-title">{{ document_title }}</h1>
+        <p class="doc-subtitle">Per-work Breakdown</p>
+      </div>
+      <div class="doc-header-brand">OPTIMAL GROUP</div>
+    </div>
+
+    {% for work in results.works %}
+    <div class="work-card">
+      <h2 class="work-card-title">{{ work.title }}{% if work.scope and work.scope != "—" %}: {{ work.scope }}{% endif %}</h2>
+      <div class="results-grid">
+        <div class="results-grid-row">
+          <div class="results-grid-cell">
+            <div class="results-metric">Labour subtotal<strong>{{ work.labour_subtotal }}</strong></div>
+          </div>
+          <div class="results-grid-cell">
+            <div class="results-metric">Materials subtotal<strong>{{ work.materials_subtotal }}</strong></div>
+          </div>
+        </div>
+      </div>
+      {% if work.internal_notes %}
+      <p class="section-title">Internal notes</p>
+      <div class="notes-block">{{ work.internal_notes }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    <div class="page-footer">-- {{ per_work_page }} of {{ total_pages }} --</div>
+  </section>
+  {% endif %}
+
+  <section class="page">
+    <div class="doc-header">
+      <div class="doc-header-main">
+        <h1 class="doc-title">{{ document_title }}</h1>
+        <p class="doc-subtitle">Combined Quote</p>
+      </div>
+      <div class="doc-header-brand">OPTIMAL GROUP</div>
+    </div>
+
+    {% if results.combined.subtitle %}
+    <p class="muted">{{ results.combined.subtitle }}</p>
+    {% endif %}
+
+    <div class="results-grid">
+      <div class="results-grid-row">
+        <div class="results-grid-cell">
+          <div class="results-metric">Labour charge<strong>{{ results.combined.labour_charge }}</strong></div>
+        </div>
+        <div class="results-grid-cell">
+          <div class="results-metric">Materials / parking / CC<strong>{{ results.combined.materials_parking_cc }}</strong></div>
+        </div>
+      </div>
+      <div class="results-grid-row">
+        <div class="results-grid-cell">
+          <div class="results-metric">Profit<strong>{{ results.combined.profit }}</strong></div>
+        </div>
+        <div class="results-grid-cell">
+          <div class="results-final-total">Final total: {{ results.combined.final_total }}</div>
+        </div>
+      </div>
+    </div>
+
+    {% if results.combined.lines %}
+    <p class="section-title">Line items</p>
+    <div class="line-items">
+      {% for line in results.combined.lines %}
+      <div class="line-item">
+        <span>{{ line.label }}</span>
+        <span>{{ line.total }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="page-footer">-- {{ combined_page }} of {{ total_pages }} --</div>
+  </section>
+
+  {% if results.internal_notes %}
+  <section class="page">
+    <div class="doc-header">
+      <div class="doc-header-main">
+        <h1 class="doc-title">{{ document_title }}</h1>
+        <p class="doc-subtitle">Internal Notes (Combined)</p>
+      </div>
+      <div class="doc-header-brand">OPTIMAL GROUP</div>
+    </div>
+
+    <div class="notes-block">{{ results.internal_notes }}</div>
+
+    <div class="page-footer">-- {{ notes_page }} of {{ total_pages }} --</div>
+  </section>
+  {% endif %}
 </body>
 </html>

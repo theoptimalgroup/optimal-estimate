@@ -709,6 +709,7 @@ function EworksCalculateContent() {
                   {downloadingPdf ? "Generating PDF…" : "Download PDF"}
                 </EworksButton>
               </div>
+              <p className="mt-2 text-xs text-optimal-muted">PDF includes calculation results and internal notes.</p>
               <p className="mt-3 text-sm leading-relaxed text-optimal-muted">
                 Scope: {(results.client_view.scope as string) ?? values.works.map((work) => work.scope).join("\n\n")}
               </p>

@@ -5,8 +5,15 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from app.schemas.calculation import CalculationBreakdown
-from app.schemas.eworks_link import MaterialOrderRow, Step1Snapshot, Step2Snapshot, WorkBlockSnapshot
+from app.schemas.calculation import CalculationBreakdown, LineBreakdown
+from app.schemas.eworks_link import (
+    AggregatedQuoteSummary,
+    MaterialOrderRow,
+    Step1Snapshot,
+    Step2Snapshot,
+    WorkBlockSnapshot,
+    WorkBreakdownResult,
+)
 from app.services.eworks_questionnaire_service import format_time_frame
 
 
@@ -162,12 +169,93 @@ def _chunk_fields(fields: list[dict[str, str]], size: int) -> list[list[dict[str
     return rows
 
 
+def _sum_lines(lines: list[LineBreakdown]) -> Decimal:
+    return sum((line.total for line in lines), Decimal("0"))
+
+
+def _truncate_scope(scope: str | None, *, limit: int = 80) -> str:
+    text = (scope or "").strip()
+    if not text:
+        return "—"
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}…"
+
+
+def _format_line_items(breakdown: CalculationBreakdown) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for line in breakdown.labour:
+        items.append({"label": line.label, "total": _money(line.total)})
+    for line in breakdown.materials:
+        items.append({"label": line.label, "total": _money(line.total)})
+    for line in breakdown.charges:
+        items.append({"label": line.label, "total": _money(line.total)})
+    return items
+
+
+def _format_work_results(work_breakdowns: list[WorkBreakdownResult]) -> list[dict[str, object]]:
+    works: list[dict[str, object]] = []
+    for work in work_breakdowns:
+        labour_total = _sum_lines(work.breakdown.labour)
+        materials_total = _sum_lines(work.breakdown.materials)
+        works.append(
+            {
+                "index": work.work_index + 1,
+                "title": f"Work {work.work_index + 1}",
+                "scope": _truncate_scope(work.scope),
+                "labour_subtotal": _money(labour_total),
+                "materials_subtotal": _money(materials_total),
+                "internal_notes": (work.internal_notes or work.breakdown.internal_notes or "").strip() or None,
+            }
+        )
+    return works
+
+
+def _format_combined_quote(
+    breakdown: CalculationBreakdown,
+    aggregated_summary: AggregatedQuoteSummary | None,
+) -> dict[str, object]:
+    return {
+        "subtitle": aggregated_summary.subtitle if aggregated_summary else None,
+        "labour_charge": _money(breakdown.labour_charge_to_client),
+        "materials_parking_cc": _money(breakdown.materials_parking_cc_charge),
+        "profit": _money(breakdown.profit_gbp),
+        "final_total": _money(breakdown.final_total),
+        "lines": _format_line_items(breakdown),
+    }
+
+
+def _build_results_pages(
+    *,
+    work_breakdowns: list[WorkBreakdownResult],
+    internal_notes: str | None,
+) -> tuple[int | None, int, int | None, int]:
+    base_pages = 3
+    has_multiple_works = len(work_breakdowns) > 1
+    has_internal_notes = bool((internal_notes or "").strip())
+    page = base_pages
+    per_work_page = None
+    if has_multiple_works:
+        page += 1
+        per_work_page = page
+    page += 1
+    combined_page = page
+    notes_page = None
+    if has_internal_notes:
+        page += 1
+        notes_page = page
+    return per_work_page, combined_page, notes_page, page
+
+
 def build_eworks_estimate_pdf_context(
     *,
     step1: Step1Snapshot,
     step2: Step2Snapshot,
     breakdown: CalculationBreakdown,
     client_view: dict,
+    work_breakdowns: list[WorkBreakdownResult] | None = None,
+    aggregated_summary: AggregatedQuoteSummary | None = None,
+    internal_notes: str | None = None,
 ) -> dict:
     calc = client_view.get("calculation", {})
     works = step2.works or []
@@ -179,6 +267,13 @@ def build_eworks_estimate_pdf_context(
     charges_fields = _charges_fields(step2)
     # Legacy keys retained for tests and compatibility.
     header_parts = [part for part in (step1.engineer_name, step1.quote_number, step1.job_number) if part]
+
+    work_results = work_breakdowns or []
+    combined_notes = (internal_notes or breakdown.internal_notes or "").strip() or None
+    per_work_page, combined_page, notes_page, total_pages = _build_results_pages(
+        work_breakdowns=work_results,
+        internal_notes=combined_notes,
+    )
 
     return {
         "document_title": "OPTIMAL ESTIMATE",
@@ -207,5 +302,14 @@ def build_eworks_estimate_pdf_context(
             if step1.property_manager_name
             else step1.client_name
         ),
-        "total_pages": 2 + len(work_forms),
+        "results": {
+            "has_multiple_works": len(work_results) > 1,
+            "works": _format_work_results(work_results),
+            "combined": _format_combined_quote(breakdown, aggregated_summary),
+            "internal_notes": combined_notes,
+        },
+        "per_work_page": per_work_page,
+        "combined_page": combined_page,
+        "notes_page": notes_page,
+        "total_pages": total_pages,
     }

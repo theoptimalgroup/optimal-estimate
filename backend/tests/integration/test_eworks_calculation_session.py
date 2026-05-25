@@ -574,6 +574,9 @@ def test_session_pdf_download(eworks_api_client):
         body = pdf_response.content.decode("utf-8")
         assert "Lambert" in body or "Lamberts" in body
         assert "-- 1 of" in body
+        assert "Combined Quote" in body
+        assert "Internal Notes (Combined)" in body
+        assert "BUDGET:" in body
 
 
 def test_attachment_upload_targets_work_index(eworks_api_client, tmp_path, monkeypatch):

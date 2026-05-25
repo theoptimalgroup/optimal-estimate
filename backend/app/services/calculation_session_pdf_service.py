@@ -42,6 +42,9 @@ def render_session_quote_pdf(
         step2=step2_data,
         breakdown=result.breakdown,
         client_view=client_view,
+        work_breakdowns=result.work_breakdowns,
+        aggregated_summary=result.aggregated_summary,
+        internal_notes=result.internal_notes or result.breakdown.internal_notes,
     )
     context["quote_number"] = step1.quote_number
     return render_eworks_estimate_document(context, is_draft=is_draft)
