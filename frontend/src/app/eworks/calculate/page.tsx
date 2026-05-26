@@ -9,16 +9,11 @@ import { EworksQuestionnaireStep } from "@/components/eworks-questionnaire-step"
 import {
   EworksButton,
   EworksCard,
-  EworksCheckbox,
-  EworksFieldError,
-  EworksInput,
-  EworksLabel,
   EworksLoadingScreen,
   EworksPageShell,
   EworksSaveStatus,
   EworksSectionTitle,
   EworksStepIndicator,
-  eworksInputClass,
 } from "@/components/eworks-ui";
 import {
   calculateSession,
@@ -33,7 +28,6 @@ import {
   type SessionUiState,
 } from "@/lib/eworks-session";
 import {
-  CHARGES_FIELDS,
   defaultQuestionnaireValues,
   EWORKS_STEPS,
   questionnaireToStep2,
@@ -41,7 +35,6 @@ import {
   step2ToQuestionnaire,
   type QuestionnaireFormValues,
 } from "@/lib/eworks-calculate-schema";
-import { numberFieldOptions } from "@/lib/form-number";
 import { fetchAllTrades } from "@/lib/trades";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -157,6 +150,8 @@ function EworksCalculateContent() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [focusWorkIndex, setFocusWorkIndex] = useState<number | null>(null);
   const autoSaveReady = useRef(false);
+  const lastSavedStep2Ref = useRef<string | null>(null);
+  const lastSavedUiRef = useRef<string | null>(null);
   const isDev = process.env.NODE_ENV === "development";
 
   const form = useForm<QuestionnaireFormValues>({
@@ -184,15 +179,20 @@ function EworksCalculateContent() {
         data.session_id,
         data.session_token,
       );
-      reset(
-        step2ToQuestionnaire(data.step2, data.step1.trade_name, {
-          congestion_required: data.step1.congestion_required,
-          congestion_amount: Number(data.step1.congestion_amount ?? 0),
-          travel_charge: Number(data.step1.travel ?? 0),
-        }),
-      );
+      const questionnaire = step2ToQuestionnaire(data.step2, data.step1.trade_name);
+      // Seed link-level congestion/travel into work 0 only when no saved step2 charges exist
+      if (!data.step2?.works?.[0]?.congestion_required && data.step1.congestion_required) {
+        questionnaire.works[0].congestion_required = true;
+        questionnaire.works[0].congestion_amount = Number(data.step1.congestion_amount ?? 0);
+      }
+      if (!data.step2?.works?.[0]?.travel_charge && Number(data.step1.travel ?? 0) > 0) {
+        questionnaire.works[0].travel_charge = Number(data.step1.travel ?? 0);
+      }
+      reset(questionnaire);
       restoreUiState(data.ui_state, { setStep, setMaxReachableStep, setResults });
       autoSaveReady.current = false;
+      lastSavedStep2Ref.current = null;
+      lastSavedUiRef.current = null;
       window.setTimeout(() => {
         autoSaveReady.current = true;
       }, 500);
@@ -266,17 +266,21 @@ function EworksCalculateContent() {
 
   const autosave = useCallback(
     async (formValues: QuestionnaireFormValues) => {
-      if (!session || !autoSaveReady.current || step === 0 || step === 3) return;
+      if (!session || !autoSaveReady.current || step === 0 || step === 2) return;
+      const step2 = questionnaireToStep2(formValues);
+      const step2Key = JSON.stringify(step2);
+      if (step2Key === lastSavedStep2Ref.current) return;
       setSaveStatus("saving");
       try {
         await patchSession(session.session_id, session.session_token, {
-          step2: questionnaireToStep2(formValues),
+          step2,
           ui_state: {
             current_step: step,
             max_reachable_step: maxReachableStep,
             last_result: results,
           },
         });
+        lastSavedStep2Ref.current = step2Key;
         setSaveStatus("saved");
       } catch {
         setSaveStatus("error");
@@ -287,21 +291,19 @@ function EworksCalculateContent() {
 
   const saveProgress = useCallback(async () => {
     if (!session || !autoSaveReady.current) return;
+    const uiState = { current_step: step, max_reachable_step: maxReachableStep, last_result: results };
+    const uiKey = JSON.stringify(uiState);
+    if (uiKey === lastSavedUiRef.current) return;
     try {
-      await patchSession(session.session_id, session.session_token, {
-        ui_state: {
-          current_step: step,
-          max_reachable_step: maxReachableStep,
-          last_result: results,
-        },
-      });
+      await patchSession(session.session_id, session.session_token, { ui_state: uiState });
+      lastSavedUiRef.current = uiKey;
     } catch {
       // ignore background progress save failures
     }
   }, [session, step, maxReachableStep, results]);
 
   useEffect(() => {
-    if (!session || step === 0 || step === 3) return;
+    if (!session || step === 0 || step === 2) return;
     const timer = window.setTimeout(() => {
       void autosave(values);
     }, 800);
@@ -339,7 +341,7 @@ function EworksCalculateContent() {
   );
 
   const validateCurrentStep = useCallback(async () => {
-    if (step === 0 || step === 3) return true;
+    if (step === 0 || step === 2) return true;
     if (step === 1) {
       const valid = await trigger([...QUESTIONNAIRE_FIELDS]);
       if (!valid) {
@@ -348,16 +350,6 @@ function EworksCalculateContent() {
           questionnaireValidationMessage(currentErrors) ?? "Please complete all required fields in the questionnaire.",
         );
         setFocusWorkIndex(firstInvalidWorkIndex(currentErrors));
-      }
-      return valid;
-    }
-    if (step === 2) {
-      const valid = await trigger([...CHARGES_FIELDS]);
-      if (!valid) {
-        const currentErrors = form.formState.errors;
-        setValidationError(
-          currentErrors.other_charge_reason?.message ?? "Please complete the required charge fields.",
-        );
       }
       return valid;
     }
@@ -395,17 +387,11 @@ function EworksCalculateContent() {
     if (!valid) {
       const currentErrors = form.formState.errors;
       const workIndex = firstInvalidWorkIndex(currentErrors);
-      if (workIndex !== null) {
-        setStep(1);
-        setFocusWorkIndex(workIndex);
-        setValidationError(
-          questionnaireValidationMessage(currentErrors) ?? "Please complete all required questionnaire fields.",
-        );
-      } else {
-        setValidationError(
-          currentErrors.other_charge_reason?.message ?? "Please complete all required fields before calculating.",
-        );
-      }
+      setStep(1);
+      setFocusWorkIndex(workIndex);
+      setValidationError(
+        questionnaireValidationMessage(currentErrors) ?? "Please complete all required fields before calculating.",
+      );
       return;
     }
     setCalcError(null);
@@ -417,7 +403,7 @@ function EworksCalculateContent() {
       );
       setResults(res);
       setMaxReachableStep(EWORKS_STEPS.length - 1);
-      setStep(3);
+      setStep(2);
     } catch (error) {
       setCalcError(error instanceof Error ? error.message : "Calculation failed");
     }
@@ -508,7 +494,7 @@ function EworksCalculateContent() {
           </p>
         ) : undefined
       }
-      saveStatus={step > 0 && step < 3 ? <EworksSaveStatus status={saveStatus} /> : undefined}
+      saveStatus={step > 0 && step < 2 ? <EworksSaveStatus status={saveStatus} /> : undefined}
       stepIndicator={
         <EworksStepIndicator
           steps={EWORKS_STEPS}
@@ -528,12 +514,12 @@ function EworksCalculateContent() {
             <EworksButton variant="secondary" className="flex-1 sm:flex-none sm:min-w-[120px]" disabled={step === 0} onClick={goBack}>
               Back
             </EworksButton>
-            {step < 2 && (
+            {step < 1 && (
               <EworksButton className="flex-[2] sm:flex-1" onClick={() => void goNext()}>
                 Continue
               </EworksButton>
             )}
-            {step === 2 && (
+            {step === 1 && (
               <EworksButton className="flex-[2] sm:flex-1" onClick={() => void runCalculate()}>
                 Calculate
               </EworksButton>
@@ -560,72 +546,7 @@ function EworksCalculateContent() {
           />
         )}
 
-        {step === 2 && (
-          <div className="space-y-5">
-            <p className="text-sm text-optimal-muted">Parking, congestion, and travel.</p>
-            <div className="grid gap-4 sm:grid-cols-2">
-            <EworksCheckbox label="Parking charge required" className="sm:col-span-2" {...register("parking_required")} />
-            {values.parking_required && (
-              <>
-                <EworksLabel>
-                  Parking type
-                  <select className={eworksInputClass()} {...register("parking_type")}>
-                    <option value="fixed">Fixed</option>
-                    <option value="hourly">Hourly</option>
-                  </select>
-                </EworksLabel>
-                {values.parking_type === "hourly" ? (
-                  <>
-                    <EworksLabel>
-                      Rate per hour
-                      <EworksInput type="number" {...register("parking_rate_per_hour", numberFieldOptions(0))} />
-                    </EworksLabel>
-                    <EworksLabel>
-                      Hours
-                      <EworksInput type="number" {...register("parking_hours", numberFieldOptions(0))} />
-                    </EworksLabel>
-                  </>
-                ) : (
-                  <EworksLabel>
-                    Fixed amount
-                    <EworksInput type="number" {...register("parking_fixed_amount", numberFieldOptions(0))} />
-                  </EworksLabel>
-                )}
-              </>
-            )}
-            {!step1.congestion_required && (
-              <EworksCheckbox
-                label="Add congestion charge"
-                className="sm:col-span-2"
-                {...register("congestion_required", {
-                  onChange: (event) => setValue("congestion_required", event.target.checked, { shouldValidate: true }),
-                })}
-              />
-            )}
-            {(values.congestion_required || step1.congestion_required) && (
-              <EworksLabel>
-                Congestion amount (£)
-                <EworksInput type="number" {...register("congestion_amount", numberFieldOptions(0))} />
-              </EworksLabel>
-            )}
-            <EworksLabel>
-              Travel charge (£)
-              <EworksInput type="number" {...register("travel_charge", numberFieldOptions(0))} />
-            </EworksLabel>
-            <EworksLabel>
-              Other charge (£)
-              <EworksInput type="number" {...register("other_charge", numberFieldOptions(0))} />
-            </EworksLabel>
-            <EworksLabel className="sm:col-span-2">
-              Other charge reason
-              <EworksInput hasError={!!errors.other_charge_reason} {...register("other_charge_reason")} />
-              <EworksFieldError message={errors.other_charge_reason?.message} />
-            </EworksLabel>
-            </div>
-          </div>
-        )}
-
-        {step === 3 && results && (
+        {step === 2 && results && (
           <div className="space-y-6">
             <p className="text-sm text-optimal-muted">Combined estimate breakdown.</p>
             {results.work_breakdowns && results.work_breakdowns.length > 0 && (
@@ -662,31 +583,65 @@ function EworksCalculateContent() {
               </section>
             )}
 
-            <section className="rounded-lg border border-optimal-orange/30 bg-optimal-elevated p-4 sm:p-5">
-              <EworksSectionTitle title="Combined quote" />
-              {results.aggregated_summary?.subtitle && (
-                <p className="mt-2 text-sm text-optimal-muted">{results.aggregated_summary.subtitle}</p>
-              )}
-              <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Labour charge: <span className="font-semibold">{money(results.breakdown.labour_charge_to_client)}</span></p>
-                <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Materials / parking / CC: <span className="font-semibold">{money(results.breakdown.materials_parking_cc_charge)}</span></p>
-                <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Profit: <span className="font-semibold">{money(results.breakdown.profit_gbp)}</span></p>
-                <p className="rounded-lg bg-optimal-orange px-3 py-2.5 font-semibold text-optimal-bg sm:col-span-2">
-                  Final total: <span className="text-lg font-bold">{money(results.breakdown.final_total)}</span>
-                </p>
-              </div>
-              <div className="mt-4 space-y-1.5 text-sm text-optimal-muted">
-                {results.breakdown.labour?.map((line) => (
-                  <p key={line.label}>{line.label}: {money(line.total)}</p>
+            {results.skill_group_breakdowns && results.skill_group_breakdowns.length > 1 ? (
+              <>
+                {results.skill_group_breakdowns.map(({ skill, breakdown: gb }) => (
+                  <section key={skill} className="rounded-lg border border-optimal-orange/30 bg-optimal-elevated p-4 sm:p-5">
+                    <EworksSectionTitle title={`Combined quote — ${skill}`} />
+                    <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                      <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Labour charge: <span className="font-semibold">{money(gb.labour_charge_to_client)}</span></p>
+                      <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Materials / parking / CC: <span className="font-semibold">{money(gb.materials_parking_cc_charge)}</span></p>
+                      <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Profit: <span className="font-semibold">{money(gb.profit_gbp)}</span></p>
+                      <p className="rounded-lg bg-optimal-orange px-3 py-2.5 font-semibold text-optimal-bg sm:col-span-2">
+                        Total: <span className="text-lg font-bold">{money(gb.final_total)}</span>
+                      </p>
+                    </div>
+                    <div className="mt-4 space-y-1.5 text-sm text-optimal-muted">
+                      {gb.charges?.map((line) => (
+                        <p key={line.label}>{line.label}: {money(line.total)}</p>
+                      ))}
+                    </div>
+                  </section>
                 ))}
-                {results.breakdown.materials?.map((line) => (
-                  <p key={line.label}>{line.label}: {money(line.total)}</p>
-                ))}
-                {results.breakdown.charges?.map((line) => (
-                  <p key={line.label}>{line.label}: {money(line.total)}</p>
-                ))}
-              </div>
-            </section>
+                <section className="rounded-lg border border-white/20 bg-optimal-elevated p-4 sm:p-5">
+                  <EworksSectionTitle title="Grand total (all trades)" />
+                  {results.aggregated_summary?.subtitle && (
+                    <p className="mt-2 text-sm text-optimal-muted">{results.aggregated_summary.subtitle}</p>
+                  )}
+                  <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                    <p className="rounded-lg bg-optimal-orange px-3 py-2.5 font-semibold text-optimal-bg sm:col-span-2">
+                      Grand total: <span className="text-lg font-bold">{money(results.breakdown.final_total)}</span>
+                    </p>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <section className="rounded-lg border border-optimal-orange/30 bg-optimal-elevated p-4 sm:p-5">
+                <EworksSectionTitle title="Combined quote" />
+                {results.aggregated_summary?.subtitle && (
+                  <p className="mt-2 text-sm text-optimal-muted">{results.aggregated_summary.subtitle}</p>
+                )}
+                <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                  <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Labour charge: <span className="font-semibold">{money(results.breakdown.labour_charge_to_client)}</span></p>
+                  <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Materials / parking / CC: <span className="font-semibold">{money(results.breakdown.materials_parking_cc_charge)}</span></p>
+                  <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Profit: <span className="font-semibold">{money(results.breakdown.profit_gbp)}</span></p>
+                  <p className="rounded-lg bg-optimal-orange px-3 py-2.5 font-semibold text-optimal-bg sm:col-span-2">
+                    Final total: <span className="text-lg font-bold">{money(results.breakdown.final_total)}</span>
+                  </p>
+                </div>
+                <div className="mt-4 space-y-1.5 text-sm text-optimal-muted">
+                  {results.breakdown.labour?.map((line) => (
+                    <p key={line.label}>{line.label}: {money(line.total)}</p>
+                  ))}
+                  {results.breakdown.materials?.map((line) => (
+                    <p key={line.label}>{line.label}: {money(line.total)}</p>
+                  ))}
+                  {results.breakdown.charges?.map((line) => (
+                    <p key={line.label}>{line.label}: {money(line.total)}</p>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {(results.internal_notes || results.breakdown.internal_notes) && (
               <section className="rounded-lg border border-white/10 bg-optimal-elevated p-4">

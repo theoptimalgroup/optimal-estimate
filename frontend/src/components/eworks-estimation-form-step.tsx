@@ -76,14 +76,7 @@ export function EworksEstimationFormStep({ step1, resolved }: Props) {
           <ReadOnlyField label="Quote Number" value={step1.quote_number} />
           <ReadOnlyField label="Job Number" value={step1.job_number} />
         </div>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <ReadOnlyField label="Property Address" value={step1.property_address} />
-          <ReadOnlyField label="Congestion Charge" value={step1.congestion_required ? "Yes" : "No"} />
-        </div>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <ReadOnlyTextBlock label="Parking Notes" value={step1.parking_notes} rows={4} />
-          <ReadOnlyTextBlock label="Total Time for job" value={step1.total_time_for_job} rows={4} />
-        </div>
+        <ReadOnlyField label="Property Address" value={step1.property_address} />
         <div className="grid gap-5 sm:grid-cols-3">
           <ReadOnlyField label="Client" value={step1.client_name} />
           <ReadOnlyField label="PM" value={step1.property_manager_name} />

@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.deps import DbSession
+from app.db.session import DbSession
 from app.core.exceptions import AppError, success_response
 from app.models.rate_rule import RateRule
 from app.schemas.eworks_link import (

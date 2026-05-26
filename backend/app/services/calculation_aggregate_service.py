@@ -17,7 +17,7 @@ from app.schemas.calculation import (
     LineBreakdown,
     MaterialInput,
 )
-from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnapshot, step2_session_charges
+from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnapshot, aggregate_work_charges
 from app.services.eworks_link_service import collect_work_skills, resolve_skill_trade, work_skill_name
 from app.services.eworks_questionnaire_service import (
     build_material_items,
@@ -178,7 +178,7 @@ def build_combined_calculation_inputs(
     aggregated = aggregate_work_blocks(step2.works)
     labour, _ = build_skill_group_labour_inputs(step2.works, trade_id=trade_id)
     materials = build_combined_material_inputs(step1, step2)
-    charges = step2_session_charges(step1, step2)
+    charges = aggregate_work_charges(step1, step2.works)
     return labour, materials, charges, aggregated
 
 

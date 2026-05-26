@@ -72,10 +72,21 @@ def seed() -> None:
 
         multi_trader = _get_or_create_trade(db, "Multi-trader", "General multi-trade works")
         carpenter = _get_or_create_trade(db, "Carpenter", "Carpentry and joinery")
-        handyman = _get_or_create_trade(db, "Handyman", "General handyman tasks")
-        plumbing = _get_or_create_trade(db, "Plumbing", "General plumbing works")
-        _get_or_create_trade(db, "Electrical", "Electrical repairs and installations")
-        _get_or_create_trade(db, "HVAC", "Heating and ventilation")
+        _get_or_create_trade(db, "Doors, Windows & Locks", "Door, window and lock works")
+        _get_or_create_trade(db, "Drains & Blockages", "Drainage and blockage clearance")
+        _get_or_create_trade(db, "Electrician", "Electrical repairs and installations")
+        _get_or_create_trade(db, "Fencing & Decking", "Fencing and decking works")
+        _get_or_create_trade(db, "Flooring (Carpet, Laminate, Vinyl Etc)", "Flooring works")
+        _get_or_create_trade(db, "Gardening", "Gardening and landscaping")
+        _get_or_create_trade(db, "Gas Safe", "Gas safe registered works")
+        _get_or_create_trade(db, "Painter & Decorator", "Painting and decorating")
+        _get_or_create_trade(db, "Paths & Patios", "Paths and patio works")
+        _get_or_create_trade(db, "Plasterer & Tiller", "Plastering and tiling works")
+        _get_or_create_trade(db, "Plumber", "Plumbing works")
+        _get_or_create_trade(db, "Roofer", "Roofing works")
+        _get_or_create_trade(db, "Scaffolder", "Scaffolding works")
+        _get_or_create_trade(db, "Specialist Subby", "Specialist subcontractor works")
+        _get_or_create_trade(db, "Steel Worker", "Steel and metalwork")
 
         common = dict(
             minimum_hours=Decimal("1.0"),
@@ -124,34 +135,6 @@ def seed() -> None:
             minimum_charge=Decimal("70.00"),
             material_markup_value=Decimal("15.00"),
             approval_threshold=Decimal("4500.00"),
-            minimum_margin_percentage=Decimal("10.00"),
-            **common,
-        )
-        _add_rule_if_missing(
-            db,
-            client_id=napier.id,
-            trade_id=handyman.id,
-            version="nw-handyman-1.0",
-            hourly_rate=Decimal("75.00"),
-            half_day_rate=Decimal("280.00"),
-            day_rate=Decimal("520.00"),
-            minimum_charge=Decimal("75.00"),
-            material_markup_value=Decimal("20.00"),
-            approval_threshold=Decimal("3500.00"),
-            minimum_margin_percentage=Decimal("10.00"),
-            **common,
-        )
-        _add_rule_if_missing(
-            db,
-            client_id=atkinson.id,
-            trade_id=plumbing.id,
-            version="am-plumbing-1.0",
-            hourly_rate=Decimal("75.00"),
-            half_day_rate=Decimal("280.00"),
-            day_rate=Decimal("520.00"),
-            minimum_charge=Decimal("75.00"),
-            material_markup_value=Decimal("15.00"),
-            approval_threshold=Decimal("5000.00"),
             minimum_margin_percentage=Decimal("10.00"),
             **common,
         )

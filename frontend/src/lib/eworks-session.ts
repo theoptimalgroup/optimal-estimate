@@ -64,6 +64,17 @@ export type WorkBlockSnapshot = {
   hours?: number | string;
   days?: number | string;
   markup_value?: number | string;
+  // Per-work charges
+  parking_required?: boolean;
+  parking_type?: string | null;
+  parking_fixed_amount?: number | string | null;
+  parking_rate_per_hour?: number | string | null;
+  parking_hours?: number | string | null;
+  congestion_required?: boolean;
+  congestion_amount?: number | string;
+  travel_charge?: number | string;
+  other_charge?: number | string;
+  other_charge_reason?: string | null;
 };
 
 export type Step2Snapshot = {
@@ -150,6 +161,11 @@ export type WorkBreakdownResult = {
   internal_notes?: string | null;
 };
 
+export type SkillGroupBreakdown = {
+  skill: string;
+  breakdown: CalculationBreakdown;
+};
+
 export type AggregatedQuoteSummary = {
   work_count: number;
   labour_type: string;
@@ -167,6 +183,7 @@ export type CalculateResponse = {
   breakdown: CalculationBreakdown;
   work_breakdowns?: WorkBreakdownResult[];
   aggregated_summary?: AggregatedQuoteSummary | null;
+  skill_group_breakdowns?: SkillGroupBreakdown[];
   internal_view: Record<string, unknown>;
   internal_notes?: string | null;
   client_view: Record<string, unknown>;

@@ -139,6 +139,17 @@ class WorkBlockSnapshot(BaseModel):
     material_name: str = "Materials"
     quantity: Decimal = Decimal("1")
     unit_cost: Decimal = Decimal("0")
+    # Per-work charges
+    parking_required: bool = False
+    parking_type: str | None = None
+    parking_fixed_amount: Decimal | None = None
+    parking_rate_per_hour: Decimal | None = None
+    parking_hours: Decimal | None = None
+    congestion_required: bool = False
+    congestion_amount: Decimal = Decimal("0")
+    travel_charge: Decimal = Decimal("0")
+    other_charge: Decimal = Decimal("0")
+    other_charge_reason: str | None = None
 
     @model_validator(mode="after")
     def ensure_shelf_rows(self) -> "WorkBlockSnapshot":
@@ -239,6 +250,11 @@ class WorkBreakdownResult(BaseModel):
     internal_notes: str | None = None
 
 
+class SkillGroupBreakdown(BaseModel):
+    skill: str
+    breakdown: CalculationBreakdown
+
+
 class SessionUiState(BaseModel):
     current_step: int = 0
     max_reachable_step: int = 0
@@ -295,6 +311,7 @@ class CalculateSessionResponse(BaseModel):
     breakdown: CalculationBreakdown
     work_breakdowns: list[WorkBreakdownResult] = Field(default_factory=list)
     aggregated_summary: AggregatedQuoteSummary | None = None
+    skill_group_breakdowns: list[SkillGroupBreakdown] = Field(default_factory=list)
     internal_view: dict
     internal_notes: str | None = None
     client_view: dict
@@ -349,6 +366,41 @@ def step2_to_calculation_inputs(
         other_charge_reason=step2.other_charge_reason,
     )
     return [labour], materials, charges
+
+
+def aggregate_work_charges(step1: Step1Snapshot, works: list[WorkBlockSnapshot]) -> ChargeInput:
+    """Aggregate per-work charges from individual WorkBlockSnapshot entries.
+
+    Falls back to step1 link-level values when no per-work values are set.
+    """
+    has_parking = any(b.parking_required for b in works)
+    parking_total = Decimal("0")
+    for b in works:
+        if not b.parking_required:
+            continue
+        if b.parking_type == "hourly" and b.parking_rate_per_hour and b.parking_hours:
+            parking_total += b.parking_rate_per_hour * b.parking_hours
+        elif b.parking_fixed_amount:
+            parking_total += b.parking_fixed_amount
+    has_congestion = any(b.congestion_required for b in works) or step1.congestion_required
+    congestion_total = sum((b.congestion_amount for b in works if b.congestion_required), Decimal("0"))
+    if not congestion_total and step1.congestion_required:
+        congestion_total = step1.congestion_amount
+    travel_total = sum((b.travel_charge for b in works), Decimal("0")) or step1.travel
+    other_total = sum((b.other_charge for b in works), Decimal("0"))
+    other_reasons = " / ".join(
+        b.other_charge_reason for b in works if b.other_charge_reason and b.other_charge_reason.strip()
+    )
+    return ChargeInput(
+        parking_required=has_parking,
+        parking_type="fixed" if has_parking else None,
+        parking_fixed_amount=parking_total if has_parking else None,
+        congestion_required=has_congestion,
+        congestion_amount=congestion_total,
+        travel_charge=travel_total,
+        other_charge=other_total,
+        other_charge_reason=other_reasons or None,
+    )
 
 
 def step2_session_charges(step1: Step1Snapshot, step2: Step2Snapshot) -> ChargeInput:

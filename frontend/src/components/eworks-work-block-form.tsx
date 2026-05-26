@@ -474,6 +474,94 @@ export function EworksWorkBlockForm({
         </div>
       )}
 
+      <div className="space-y-4 rounded-lg border border-white/10 bg-white/5 p-4">
+        <EworksSectionTitle title="Charges" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Controller
+            name={fieldPath(workIndex, "parking_required")}
+            control={control}
+            render={({ field }) => (
+              <EworksCheckbox
+                label="Parking charge required"
+                className="sm:col-span-2"
+                name={field.name}
+                ref={field.ref}
+                checked={field.value === true}
+                onBlur={field.onBlur}
+                onChange={(e) => field.onChange(e.target.checked)}
+              />
+            )}
+          />
+          {values.parking_required && (
+            <>
+              <EworksLabel>
+                Parking type
+                <select className={eworksInputClass()} {...register(fieldPath(workIndex, "parking_type"))}>
+                  <option value="fixed">Fixed</option>
+                  <option value="hourly">Hourly</option>
+                </select>
+              </EworksLabel>
+              {values.parking_type === "hourly" ? (
+                <>
+                  <EworksLabel>
+                    Rate per hour
+                    <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "parking_rate_per_hour"), numberFieldOptions(0))} />
+                  </EworksLabel>
+                  <EworksLabel>
+                    Hours
+                    <EworksInput type="number" min="0" step="0.5" {...register(fieldPath(workIndex, "parking_hours"), numberFieldOptions(0))} />
+                  </EworksLabel>
+                </>
+              ) : (
+                <EworksLabel>
+                  Fixed amount (£)
+                  <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "parking_fixed_amount"), numberFieldOptions(0))} />
+                </EworksLabel>
+              )}
+            </>
+          )}
+          <Controller
+            name={fieldPath(workIndex, "congestion_required")}
+            control={control}
+            render={({ field }) => (
+              <EworksCheckbox
+                label="Add congestion charge"
+                className="sm:col-span-2"
+                name={field.name}
+                ref={field.ref}
+                checked={field.value === true}
+                onBlur={field.onBlur}
+                onChange={(e) => field.onChange(e.target.checked)}
+              />
+            )}
+          />
+          {values.congestion_required && (
+            <EworksLabel>
+              Congestion amount (£)
+              <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "congestion_amount"), numberFieldOptions(0))} />
+            </EworksLabel>
+          )}
+          <EworksLabel>
+            Travel charge (£)
+            <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "travel_charge"), numberFieldOptions(0))} />
+          </EworksLabel>
+          <EworksLabel>
+            Other charge (£)
+            <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "other_charge"), numberFieldOptions(0))} />
+          </EworksLabel>
+          {values.other_charge > 0 && (
+            <EworksLabel className="sm:col-span-2">
+              Other charge reason
+              <EworksInput
+                hasError={!!workErrors?.other_charge_reason}
+                {...register(fieldPath(workIndex, "other_charge_reason"))}
+              />
+              <EworksFieldError message={workErrors?.other_charge_reason?.message} />
+            </EworksLabel>
+          )}
+        </div>
+      </div>
+
       <div className="space-y-2">
         <EworksSectionTitle title="Any Other Notes" />
         <EworksTextarea rows={4} {...register(fieldPath(workIndex, "other_notes"))} />

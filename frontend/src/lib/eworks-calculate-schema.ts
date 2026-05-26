@@ -89,6 +89,16 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
     labour_needed: work.labour_required ? (toNumericValue(work.labour_needed) as number) : 0,
     labour_time_value: work.labour_required ? (toNumericValue(work.labour_time_value) as number) : 0,
     markup_value: Number.isFinite(Number(work.markup_value)) ? Number(work.markup_value) : 20,
+    parking_required: Boolean(work.parking_required),
+    parking_type: work.parking_type === "hourly" ? "hourly" : "fixed",
+    parking_fixed_amount: toNumericValue(work.parking_fixed_amount) ?? 0,
+    parking_rate_per_hour: toNumericValue(work.parking_rate_per_hour) ?? 0,
+    parking_hours: toNumericValue(work.parking_hours) ?? 0,
+    congestion_required: Boolean(work.congestion_required),
+    congestion_amount: toNumericValue(work.congestion_amount) ?? 0,
+    travel_charge: toNumericValue(work.travel_charge) ?? 0,
+    other_charge: toNumericValue(work.other_charge) ?? 0,
+    other_charge_reason: toStringValue(work.other_charge_reason),
   };
 }
 
@@ -161,6 +171,21 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
       });
     }
   }
+  if (data.parking_required && data.parking_type === "hourly") {
+    if (!data.parking_hours || data.parking_hours <= 0) {
+      ctx.addIssue({ code: "custom", message: "Parking hours required for hourly parking", path: [path("parking_hours")] });
+    }
+    if (!data.parking_rate_per_hour || data.parking_rate_per_hour <= 0) {
+      ctx.addIssue({ code: "custom", message: "Parking rate required for hourly parking", path: [path("parking_rate_per_hour")] });
+    }
+  }
+  if (data.other_charge > 0 && !data.other_charge_reason?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Reason required when other charge is greater than 0",
+      path: [path("other_charge_reason")],
+    });
+  }
 }
 
 export const workBlockFieldsSchema = z.object({
@@ -180,6 +205,17 @@ export const workBlockFieldsSchema = z.object({
   other_notes: z.string().optional(),
   attachments: z.array(attachmentMetaSchema),
   markup_value: z.number({ error: "Enter markup percentage" }).min(0),
+  // Per-work charges
+  parking_required: z.boolean(),
+  parking_type: z.enum(["fixed", "hourly"]),
+  parking_fixed_amount: z.number().min(0),
+  parking_rate_per_hour: z.number().min(0),
+  parking_hours: z.number().min(0),
+  congestion_required: z.boolean(),
+  congestion_amount: z.number({ error: "Enter congestion amount" }).min(0),
+  travel_charge: z.number({ error: "Enter travel charge" }).min(0),
+  other_charge: z.number({ error: "Enter other charge" }).min(0),
+  other_charge_reason: z.string().optional(),
 });
 
 export const workBlockSchema = workBlockFieldsSchema.superRefine((data, ctx) => {
@@ -189,34 +225,9 @@ export const workBlockSchema = workBlockFieldsSchema.superRefine((data, ctx) => 
 export const questionnaireSchema = z
   .object({
     works: z.array(workBlockSchema).min(1, "At least one work block is required"),
-    parking_required: z.boolean(),
-    parking_type: z.string().optional(),
-    parking_rate_per_hour: z.number().optional(),
-    parking_hours: z.number().optional(),
-    parking_fixed_amount: z.number().optional(),
-    congestion_required: z.boolean(),
-    congestion_amount: z.number({ error: "Enter congestion amount" }).min(0),
-    travel_charge: z.number({ error: "Enter travel charge" }).min(0),
-    other_charge: z.number({ error: "Enter other charge" }).min(0),
-    other_charge_reason: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     data.works.forEach((work, index) => validateWorkBlock(work, ctx, `works.${index}`));
-    if (data.parking_required && data.parking_type === "hourly") {
-      if (!data.parking_hours || data.parking_hours <= 0) {
-        ctx.addIssue({ code: "custom", message: "Parking hours required for hourly parking", path: ["parking_hours"] });
-      }
-      if (!data.parking_rate_per_hour || data.parking_rate_per_hour <= 0) {
-        ctx.addIssue({ code: "custom", message: "Parking rate required for hourly parking", path: ["parking_rate_per_hour"] });
-      }
-    }
-    if (data.other_charge > 0 && !data.other_charge_reason?.trim()) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Reason required when other charge is greater than 0",
-        path: ["other_charge_reason"],
-      });
-    }
   });
 
 export type WorkBlockFormValues = z.infer<typeof workBlockSchema>;
@@ -231,18 +242,11 @@ function toNumericValueOr(value: unknown, fallback: number): number {
 /** React Hook Form can store numeric inputs as strings; normalize before Zod validation. */
 export function coerceQuestionnaireValues(values: QuestionnaireFormValues): QuestionnaireFormValues {
   return {
-    ...values,
-    parking_rate_per_hour: toNumericValue(values.parking_rate_per_hour),
-    parking_hours: toNumericValue(values.parking_hours),
-    parking_fixed_amount: toNumericValue(values.parking_fixed_amount),
-    congestion_amount: toNumericValueOr(values.congestion_amount, 0),
-    travel_charge: toNumericValueOr(values.travel_charge, 0),
-    other_charge: toNumericValueOr(values.other_charge, 0),
     works: values.works.map((work) => normalizeWorkBlockValues(work)),
   };
 }
 
-export const EWORKS_STEPS = ["Estimation Form", "Estimating Questionnaire", "Charges", "Results"] as const;
+export const EWORKS_STEPS = ["Estimation Form", "Estimating Questionnaire", "Results"] as const;
 
 export function formatTimeFrame(unit: TimeUnit, value: number): string {
   if (unit === "hours") {
@@ -286,36 +290,24 @@ export function defaultWorkBlockValues(tradeName: string): WorkBlockFormValues {
     other_notes: "",
     attachments: [],
     markup_value: 20,
+    parking_required: false,
+    parking_type: "fixed",
+    parking_fixed_amount: 0,
+    parking_rate_per_hour: 0,
+    parking_hours: 0,
+    congestion_required: false,
+    congestion_amount: 0,
+    travel_charge: 0,
+    other_charge: 0,
+    other_charge_reason: "",
   });
 }
 
 export const defaultQuestionnaireValues: QuestionnaireFormValues = {
   works: [defaultWorkBlockValues("")],
-  parking_required: false,
-  parking_type: "fixed",
-  parking_rate_per_hour: 0,
-  parking_hours: 0,
-  parking_fixed_amount: 0,
-  congestion_required: false,
-  congestion_amount: 0,
-  travel_charge: 0,
-  other_charge: 0,
-  other_charge_reason: "",
 };
 
-export const CHARGES_FIELDS: (keyof QuestionnaireFormValues)[] = [
-  "parking_required",
-  "parking_type",
-  "parking_rate_per_hour",
-  "parking_hours",
-  "parking_fixed_amount",
-  "congestion_required",
-  "congestion_amount",
-  "travel_charge",
-  "other_charge",
-  "other_charge_reason",
-];
-
+export const CHARGES_FIELDS: never[] = [];
 export const QUESTIONNAIRE_FIELDS = ["works"] as const;
 
 export function shelfRowsFromLegacy(
@@ -370,12 +362,58 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
     labour_type: primaryUnit === "hours" ? "hourly" : "day",
     hours: primaryUnit === "hours" ? primaryValue : 0,
     days: primaryUnit === "days" ? primaryValue : 0,
+    // Per-work charge fields (stored in snapshot for round-trip restore)
+    parking_required: work.parking_required,
+    parking_type: work.parking_type,
+    parking_fixed_amount: work.parking_fixed_amount,
+    parking_rate_per_hour: work.parking_rate_per_hour,
+    parking_hours: work.parking_hours,
+    congestion_required: work.congestion_required,
+    congestion_amount: work.congestion_amount,
+    travel_charge: work.travel_charge,
+    other_charge: work.other_charge,
+    other_charge_reason: work.other_charge_reason || null,
+  };
+}
+
+/** Aggregate per-work charges into a single set of top-level charges for the backend. */
+function aggregateCharges(works: WorkBlockFormValues[]) {
+  const hasParking = works.some((w) => w.parking_required);
+  const parkingTotal = works.reduce((sum, w) => {
+    if (!w.parking_required) return sum;
+    if (w.parking_type === "hourly") {
+      return sum + (w.parking_rate_per_hour ?? 0) * (w.parking_hours ?? 0);
+    }
+    return sum + (w.parking_fixed_amount ?? 0);
+  }, 0);
+
+  const hasCongestion = works.some((w) => w.congestion_required);
+  const congestionTotal = works.reduce((sum, w) => sum + (w.congestion_required ? (w.congestion_amount ?? 0) : 0), 0);
+  const travelTotal = works.reduce((sum, w) => sum + toNumericValueOr(w.travel_charge, 0), 0);
+  const otherTotal = works.reduce((sum, w) => sum + toNumericValueOr(w.other_charge, 0), 0);
+  const otherReasons = works
+    .map((w) => w.other_charge_reason?.trim() ?? "")
+    .filter(Boolean)
+    .join(" / ");
+
+  return {
+    parking_required: hasParking,
+    parking_type: "fixed" as const,
+    parking_fixed_amount: parkingTotal,
+    parking_rate_per_hour: null as null,
+    parking_hours: null as null,
+    congestion_required: hasCongestion,
+    congestion_amount: congestionTotal,
+    travel_charge: travelTotal,
+    other_charge: otherTotal,
+    other_charge_reason: otherReasons || null,
   };
 }
 
 export function questionnaireToStep2(values: QuestionnaireFormValues): Step2Snapshot {
   const works = values.works.map(workBlockToSnapshot);
   const primary = works[0];
+  const charges = aggregateCharges(values.works);
   return {
     works,
     scope: primary.scope,
@@ -396,16 +434,7 @@ export function questionnaireToStep2(values: QuestionnaireFormValues): Step2Snap
     hours: primary.hours,
     days: primary.days,
     markup_value: primary.markup_value,
-    parking_required: values.parking_required,
-    parking_type: values.parking_required ? values.parking_type ?? "fixed" : null,
-    parking_rate_per_hour: values.parking_required ? values.parking_rate_per_hour ?? null : null,
-    parking_hours: values.parking_required ? values.parking_hours ?? null : null,
-    parking_fixed_amount: values.parking_required ? values.parking_fixed_amount ?? null : null,
-    congestion_required: values.congestion_required,
-    congestion_amount: values.congestion_amount,
-    travel_charge: values.travel_charge,
-    other_charge: values.other_charge,
-    other_charge_reason: values.other_charge_reason || null,
+    ...charges,
   };
 }
 
@@ -439,6 +468,17 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
     other_notes: step2.other_notes ?? "",
     attachments: step2.attachments ?? [],
     markup_value: Number(step2.markup_value ?? defaultWorkBlockValues(tradeName).markup_value),
+    // Restore charges from legacy top-level Step2Snapshot for first work block
+    parking_required: step2.parking_required ?? false,
+    parking_type: (step2.parking_type as "fixed" | "hourly") ?? "fixed",
+    parking_fixed_amount: Number(step2.parking_fixed_amount ?? 0),
+    parking_rate_per_hour: Number(step2.parking_rate_per_hour ?? 0),
+    parking_hours: Number(step2.parking_hours ?? 0),
+    congestion_required: step2.congestion_required ?? false,
+    congestion_amount: Number(step2.congestion_amount ?? 0),
+    travel_charge: Number(step2.travel_charge ?? 0),
+    other_charge: Number(step2.other_charge ?? 0),
+    other_charge_reason: step2.other_charge_reason ?? "",
   };
 }
 
@@ -474,6 +514,17 @@ function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlo
       other_notes: block.other_notes ?? "",
       attachments: block.attachments ?? [],
       markup_value: Number(block.markup_value ?? 20),
+      // Per-work charges — restore from snapshot if present
+      parking_required: Boolean((block as WorkBlockSnapshot & Record<string, unknown>).parking_required ?? false),
+      parking_type: ((block as WorkBlockSnapshot & Record<string, unknown>).parking_type as "fixed" | "hourly") ?? "fixed",
+      parking_fixed_amount: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_fixed_amount ?? 0),
+      parking_rate_per_hour: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_rate_per_hour ?? 0),
+      parking_hours: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_hours ?? 0),
+      congestion_required: Boolean((block as WorkBlockSnapshot & Record<string, unknown>).congestion_required ?? false),
+      congestion_amount: Number((block as WorkBlockSnapshot & Record<string, unknown>).congestion_amount ?? 0),
+      travel_charge: Number((block as WorkBlockSnapshot & Record<string, unknown>).travel_charge ?? 0),
+      other_charge: Number((block as WorkBlockSnapshot & Record<string, unknown>).other_charge ?? 0),
+      other_charge_reason: String((block as WorkBlockSnapshot & Record<string, unknown>).other_charge_reason ?? ""),
     };
   }
   return legacyBlockFromStep2(block as Step2Snapshot, tradeName);
@@ -485,7 +536,7 @@ export function step2ToQuestionnaire(
   overrides?: Partial<QuestionnaireFormValues>,
 ): QuestionnaireFormValues {
   if (!step2 && !overrides) {
-    return { ...defaultQuestionnaireValues, works: [defaultWorkBlockValues(tradeName)] };
+    return { works: [defaultWorkBlockValues(tradeName)] };
   }
   const works =
     step2?.works && step2.works.length > 0
@@ -493,18 +544,7 @@ export function step2ToQuestionnaire(
       : [normalizeWorkBlockValues(legacyBlockFromStep2(step2 ?? {}, tradeName))];
 
   return {
-    ...defaultQuestionnaireValues,
     works,
-    parking_required: step2?.parking_required ?? false,
-    parking_type: step2?.parking_type ?? "fixed",
-    parking_rate_per_hour: Number(step2?.parking_rate_per_hour ?? 0),
-    parking_hours: Number(step2?.parking_hours ?? 0),
-    parking_fixed_amount: Number(step2?.parking_fixed_amount ?? 0),
-    congestion_required: step2?.congestion_required ?? false,
-    congestion_amount: Number(step2?.congestion_amount ?? 0),
-    travel_charge: Number(step2?.travel_charge ?? 0),
-    other_charge: Number(step2?.other_charge ?? 0),
-    other_charge_reason: step2?.other_charge_reason ?? "",
     ...overrides,
   };
 }
