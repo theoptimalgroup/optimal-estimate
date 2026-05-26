@@ -214,12 +214,17 @@ class TestXlsxInternalNotesTemplate:
             notes_context=InternalNotesContext(who_quoted="Alex Alves"),
             trade_rates=CARPENTER,
         )
+        assert notes.startswith("Enter this information into internal notes:")
         assert "PRODUCT:" in notes
         assert "IMPORTANT INFO:" in notes
         assert "LINK/S & QUANTITY:" in notes
-        assert "WHO QUOTED:\tAlex Alves" in notes
+        assert "WHO QUOTED: Alex Alves" in notes
+        assert "WHO QUOTED:\tAlex Alves" not in notes
         assert "BEST ENGINEER:" in notes
         assert "EXTERNAL DELIVERY:" in notes
+        assert "BUDGET: Materials:  £190 / Parking: £0 / CC: £18  / OH:  £43" in notes
+        assert "TOTAL COST TO OPTIMAL:  Labour etc:  £44  /  Materials etc:  £208" in notes
+        assert "TOTAL CHARGE TO CLIENT:  Labour:  £145  / Materials etc:  £260" in notes
         assert "Labour Only:  £60 @ £40p/h = Profit: £94 / 23%" in notes
         assert "Labour & Materials:  £250 = Profit: £94 / 23%" in notes
-        assert "PROFIT ON JOB: £153 / 38%" in notes
+        assert "PROFIT ON JOB:  £153 / 38%" in notes

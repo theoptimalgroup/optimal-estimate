@@ -5,6 +5,13 @@ from __future__ import annotations
 import re
 
 
+def normalize_internal_notes_for_comparison(text: str) -> str:
+    """Light normalization for debugging mismatches only."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").replace("¬£", "£")
+    lines = [line.rstrip() for line in normalized.split("\n")]
+    return "\n".join(lines)
+
+
 def normalize_internal_notes_for_test(text: str) -> str:
     lines: list[str] = []
     for line in text.splitlines():

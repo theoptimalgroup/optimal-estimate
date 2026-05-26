@@ -1,19 +1,19 @@
-PRODUCT:		
-IMPORTANT INFO:		
-Lambert Chartered Surveyors Comms @ 0%		
-HOURLY QUOTE HELPER USED		
-LINK/S & QUANTITY:		
-WHO QUOTED:		
-BEST ENGINEER:		 
-1  Carpenter  for  1.5  Hour/s		
-		
-BUDGET: Materials:  £190 / Parking: £0 / CC: £18  / OH:  £43		
-TOTAL COST TO OPTIMAL:  Labour etc:  £44  /  Materials etc:  £208		
-TOTAL CHARGE TO CLIENT:  Labour:  £145  / Materials etc:  £260		
-PROFIT ON JOB:  £153 / 38%		
-		
-EXTERNAL DELIVERY:		
-Parking: £0 / CC: £18		
-Labour Only:  £60 @ £40p/h = Profit: £94 / 23%		
-Labour & Materials:  £250 = Profit: £94 / 23%		
-		
+Enter this information into internal notes:
+PRODUCT:
+IMPORTANT INFO:
+Lambert Chartered Surveyors Comms @ 0%
+HOURLY QUOTE HELPER USED
+LINK/S & QUANTITY:
+WHO QUOTED:
+BEST ENGINEER:
+1  Carpenter  for  1.5  Hour/s
+
+BUDGET: Materials:  £190 / Parking: £0 / CC: £18  / OH:  £43
+TOTAL COST TO OPTIMAL:  Labour etc:  £44  /  Materials etc:  £208
+TOTAL CHARGE TO CLIENT:  Labour:  £145  / Materials etc:  £260
+PROFIT ON JOB:  £153 / 38%
+
+EXTERNAL DELIVERY:
+Parking: £0 / CC: £18
+Labour Only:  £60 @ £40p/h = Profit: £94 / 23%
+Labour & Materials:  £250 = Profit: £94 / 23%

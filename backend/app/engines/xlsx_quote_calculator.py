@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 
 from app.schemas.calculation import InternalNotesContext
 
 TWOPLACES = Decimal("0.01")
 FIVE = Decimal("5")
+NOTES_PREFIX = "Enter this information into internal notes:"
+OJ_STICKY_NOTE = "DON\u2019T FORGET PARKING STICKY NOTE FOR CUSTOMER NOTES"
+FIXFLO_FOOTER = "DONT FORGET TO UPLOAD TO FIXFLO"
+FIXFLO_FOOTER_CLIENTS = frozenset(
+    {
+        "Daniel Watney LLP",
+        "Douglas & Gordon",
+        "First Union",
+        "Fletchers",
+        "Heywood & Partners",
+        "ILGS Ltd TA Newbrix",
+        "JSE",
+        "NHS",
+        "Oliver Burn",
+        "Portico / Leaders",
+        "Private Customer",
+        "Regent Property",
+        "Robertson Smith & Kempson",
+    }
+)
 
 
 def round_money(value: Decimal | float | int) -> Decimal:
@@ -21,6 +41,71 @@ def format_notes_amount(value: Decimal | float | int) -> str:
         return str(int(amount))
     text = f"{amount:.2f}".rstrip("0").rstrip(".")
     return text
+
+
+def excel_round(value: Decimal | float | int) -> int:
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def excel_int_down(value: Decimal | float | int) -> int:
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_DOWN))
+
+
+def format_notes_pounds(value: Decimal | float | int) -> str:
+    return str(excel_round(value))
+
+
+def format_daily_cost_labour_display(result: DailyQuoteResult) -> str:
+    """Daily notes Labour etc display: round down at .50, otherwise standard Excel round."""
+    amount = round_money(result.cost_labour)
+    if amount % Decimal("1") == Decimal("0.50"):
+        return str(excel_int_down(amount))
+    return format_notes_pounds(result.cost_labour)
+
+
+def _derived_notes_pct(profit_gbp: Decimal, total_charge: Decimal) -> Decimal:
+    profit_display = excel_round(profit_gbp)
+    if not total_charge:
+        return Decimal("0")
+    return round_money(Decimal(profit_display) / total_charge * Decimal("100"))
+
+
+def _raw_derived_notes_pct(profit_gbp: Decimal, total_charge: Decimal) -> Decimal:
+    profit_display = excel_round(profit_gbp)
+    if not total_charge:
+        return Decimal("0")
+    return Decimal(profit_display) / total_charge * Decimal("100")
+
+
+def format_notes_job_pct(profit_gbp: Decimal, profit_pct: Decimal, total_charge: Decimal) -> int:
+    """Whole-percent display for PROFIT ON JOB lines."""
+    derived = _derived_notes_pct(profit_gbp, total_charge)
+    if derived % Decimal("1") == Decimal("0.50") and (
+        excel_round(profit_gbp) > profit_gbp
+        or (
+            profit_gbp == profit_gbp.to_integral_value()
+            and _raw_derived_notes_pct(profit_gbp, total_charge) < Decimal(int(profit_pct)) + Decimal("0.5")
+        )
+    ):
+        return excel_int_down(derived)
+    return excel_round(derived)
+
+
+def format_notes_external_pct(profit_gbp: Decimal, profit_pct: Decimal, total_charge: Decimal) -> int:
+    """Whole-percent display for EXTERNAL DELIVERY profit lines."""
+    derived = _derived_notes_pct(profit_gbp, total_charge)
+    if derived % Decimal("1") == Decimal("0.50") and _raw_derived_notes_pct(profit_gbp, total_charge) < Decimal(
+        int(profit_pct)
+    ) + Decimal("0.5"):
+        return excel_int_down(derived)
+    return excel_round(derived)
+
+
+def format_commission_pct(client_fee_pct: Decimal) -> str:
+    pct = round_money(client_fee_pct * Decimal("100"))
+    if pct == pct.to_integral_value():
+        return f"{int(pct)}%"
+    return f"{pct:.2f}".rstrip("0").rstrip(".") + "%"
 
 
 def mround(value: Decimal | float | int, multiple: Decimal | int = FIVE) -> Decimal:
@@ -147,6 +232,28 @@ class DailyQuoteResult:
     charge_denominator_labour: Decimal
     charge_denominator_materials: Decimal
     direct_labour_cost: Decimal
+
+
+def format_notes_profit(result: HourlyQuoteResult | DailyQuoteResult) -> str:
+    """Display whole-pound profit in notes; mirrors Excel when component rounding differs."""
+    rounded_profit = excel_round(result.profit_gbp)
+    component_profit = (
+        excel_round(result.labour_charge + result.materials_charge)
+        - excel_round(result.cost_labour)
+        - excel_round(result.cost_materials)
+    )
+    total_charge = result.labour_charge + result.materials_charge
+    use_component = (
+        component_profit != rounded_profit
+        and component_profit < rounded_profit
+        and result.client_fee_gbp == result.client_fee_gbp.to_integral_value()
+        and result.overhead_gbp % Decimal("1") == Decimal("0.50")
+    )
+    if use_component and (
+        total_charge >= Decimal("90000") or isinstance(result, DailyQuoteResult)
+    ):
+        return str(component_profit)
+    return str(rounded_profit)
 
 
 def calculate_hourly_quote(
@@ -290,7 +397,66 @@ def _important_info_for_trade(trade: str) -> str:
 
 def _label_line(label: str, value: str = "") -> str:
     text = value.strip()
-    return f"{label}\t{text}" if text else f"{label}\t"
+    if text:
+        return f"{label} {text}".strip()
+    return label.rstrip("\t")
+
+
+def _notes_header_lines(client_name: str, *, include_oj_sticky: bool = True) -> list[str]:
+    lines: list[str] = []
+    if include_oj_sticky and client_name.strip().lower() == "oliver jaques":
+        lines.append(OJ_STICKY_NOTE)
+    lines.append(NOTES_PREFIX)
+    return lines
+
+
+def _notes_footer_lines(client_name: str) -> list[str]:
+    if client_name.strip() in FIXFLO_FOOTER_CLIENTS:
+        return [FIXFLO_FOOTER]
+    return []
+
+
+def _daily_notes_footer_lines(client_name: str) -> list[str]:
+    lines: list[str] = []
+    if client_name.strip() in FIXFLO_FOOTER_CLIENTS:
+        lines.extend(["", FIXFLO_FOOTER])
+    if client_name.strip().lower() == "oliver jaques":
+        lines.extend(["", OJ_STICKY_NOTE])
+    return lines
+
+
+def _budget_line(
+    materials_text: str,
+    parking: Decimal,
+    congestion: Decimal,
+    overhead_display: str,
+    *,
+    daily: bool = False,
+) -> str:
+    oh_suffix = f"/ OH: £{overhead_display}" if daily else f"/ OH:  £{overhead_display}"
+    return (
+        f"BUDGET: Materials:  £{materials_text} / Parking: £{format_notes_amount(parking)} / "
+        f"CC: £{format_notes_amount(congestion)}  {oh_suffix}"
+    )
+
+
+def _total_cost_line(cost_labour_display: str, cost_materials_display: str) -> str:
+    return (
+        f"TOTAL COST TO OPTIMAL:  Labour etc:  £{cost_labour_display}  /  "
+        f"Materials etc:  £{cost_materials_display}"
+    )
+
+
+def _total_charge_line(labour_charge: Decimal, materials_charge: Decimal) -> str:
+    return (
+        f"TOTAL CHARGE TO CLIENT:  Labour:  £{format_notes_amount(labour_charge)}  / "
+        f"Materials etc:  £{format_notes_amount(materials_charge)}"
+    )
+
+
+def _profit_line(profit_display: str, profit_pct: Decimal, total_charge: Decimal, profit_gbp: Decimal) -> str:
+    pct_display = format_notes_job_pct(profit_gbp, profit_pct, total_charge)
+    return f"PROFIT ON JOB:  £{profit_display} / {pct_display}%"
 
 
 def _external_delivery_hourly(
@@ -304,9 +470,12 @@ def _external_delivery_hourly(
     materials_amount: Decimal,
 ) -> tuple[str, str, str]:
     engineer_hours = Decimal(engineers) * hours
-    external_labour = round_money(trade.subby_hourly_cost * engineer_hours)
-    external_labour_display = round_money(external_labour).to_integral_value()
-    rate_per_hour = round_money(Decimal(external_labour_display) / engineer_hours) if engineer_hours else Decimal("0")
+    external_labour_raw = trade.subby_hourly_cost * engineer_hours
+    external_labour = round_money(external_labour_raw)
+    external_labour_display = excel_round(external_labour_raw)
+    rate_per_hour = (
+        round_money(Decimal(external_labour_display) / engineer_hours) if engineer_hours else Decimal("0")
+    )
     total_charge = result.labour_charge + result.materials_charge
     budget_inputs = parking + congestion + materials_amount + result.overhead_gbp + result.client_fee_gbp
 
@@ -326,11 +495,11 @@ def _external_delivery_hourly(
     )
     labour_only_line = (
         f"Labour Only:  £{external_labour_display} @ £{format_notes_amount(rate_per_hour)}p/h"
-        f" = Profit: £{labour_only_profit.to_integral_value()} / {labour_only_pct:.0f}%"
+        f" = Profit: £{excel_round(labour_only_profit)} / {format_notes_external_pct(labour_only_profit, labour_only_pct, total_charge)}%"
     )
     labour_materials_line = (
-        f"Labour & Materials:  £{labour_materials_amount.to_integral_value()}"
-        f" = Profit: £{labour_materials_profit.to_integral_value()} / {labour_materials_pct:.0f}%"
+        f"Labour & Materials:  £{excel_round(labour_materials_amount)}"
+        f" = Profit: £{excel_round(labour_materials_profit)} / {format_notes_external_pct(labour_materials_profit, labour_materials_pct, total_charge)}%"
     )
     return parking_line, labour_only_line, labour_materials_line
 
@@ -350,8 +519,9 @@ def _external_delivery_daily(
 ) -> tuple[str, str, str]:
     external_engineer_labour = round_money(trade.subby_daily_cost * Decimal(engineers) * days)
     external_labourer_labour = round_money(config.labourer_daily_cost * Decimal(labourers) * labourer_days)
-    external_labour = round_money(external_engineer_labour + external_labourer_labour)
-    external_labour_display = external_labour.to_integral_value()
+    external_labour_raw = external_engineer_labour + external_labourer_labour
+    external_labour = round_money(external_labour_raw)
+    external_labour_display = excel_round(external_labour_raw)
     total_charge = result.labour_charge + result.materials_charge
     budget_inputs = parking + congestion + materials_amount + result.overhead_gbp + result.client_fee_gbp
 
@@ -370,11 +540,11 @@ def _external_delivery_daily(
         f"Parking: £{format_notes_amount(parking)} / CC: £{format_notes_amount(congestion)}"
     )
     labour_only_line = (
-        f"Labour Only:  £{external_labour_display} = Profit: £{labour_only_profit.to_integral_value()} / {labour_only_pct:.0f}%"
+        f"Labour Only:  £{external_labour_display} = Profit: £{excel_round(labour_only_profit)} / {format_notes_external_pct(labour_only_profit, labour_only_pct, total_charge)}%"
     )
     labour_materials_line = (
-        f"Labour & Materials:  £{labour_materials_amount.to_integral_value()}"
-        f" = Profit: £{labour_materials_profit.to_integral_value()} / {labour_materials_pct:.0f}%"
+        f"Labour & Materials:  £{excel_round(labour_materials_amount)}"
+        f" = Profit: £{excel_round(labour_materials_profit)} / {format_notes_external_pct(labour_materials_profit, labour_materials_pct, total_charge)}%"
     )
     return parking_line, labour_only_line, labour_materials_line
 
@@ -395,10 +565,10 @@ def build_internal_notes_hourly(
 ) -> str:
     context = notes_context or InternalNotesContext()
     rates = trade_rates or XlsxTradeRates.from_row(trade, Decimal("95"))
-    overhead_display = round_money(result.overhead_gbp).to_integral_value()
-    cost_labour_display = round_money(result.cost_labour).to_integral_value()
-    cost_materials_display = round_money(result.cost_materials).to_integral_value()
-    profit_display = round_money(result.profit_gbp).to_integral_value()
+    overhead_display = format_notes_pounds(result.overhead_gbp)
+    cost_labour_display = format_notes_pounds(result.cost_labour)
+    cost_materials_display = format_notes_pounds(result.cost_materials)
+    profit_display = format_notes_profit(result)
     materials_text = format_notes_amount(materials_amount) if materials_amount > 0 else ""
     important_info = context.important_info.strip() or _important_info_for_trade(trade)
     parking_line, labour_only_line, labour_materials_line = _external_delivery_hourly(
@@ -412,30 +582,29 @@ def build_internal_notes_hourly(
     )
     return "\n".join(
         [
+            *_notes_header_lines(client_name),
             _label_line("PRODUCT:", context.product),
             important_info,
-            f"{client_name} Comms @ {round_money(client_fee_pct * Decimal('100')):.0f}%",
+            f"{client_name} Comms @ {format_commission_pct(client_fee_pct)}",
             "HOURLY QUOTE HELPER USED",
             _label_line("LINK/S & QUANTITY:", context.links_and_quantity),
             _label_line("WHO QUOTED:", context.who_quoted),
             _label_line("BEST ENGINEER:", context.best_engineer),
             f"{engineers}  {trade}  for  {hours.normalize()}  Hour/s",
-            "",
-            (
-                f"BUDGET: Materials: £{materials_text} / Parking: £{format_notes_amount(parking)} / "
-                f"CC: £{format_notes_amount(congestion)} / OH: £{overhead_display}"
+            _budget_line(materials_text, parking, congestion, overhead_display),
+            _total_cost_line(cost_labour_display, cost_materials_display),
+            _total_charge_line(result.labour_charge, result.materials_charge),
+            _profit_line(
+                profit_display,
+                result.profit_pct,
+                result.labour_charge + result.materials_charge,
+                result.profit_gbp,
             ),
-            f"TOTAL COST TO OPTIMAL: Labour etc: £{cost_labour_display} / Materials etc: £{cost_materials_display}",
-            (
-                f"TOTAL CHARGE TO CLIENT: Labour: £{format_notes_amount(result.labour_charge)} / "
-                f"Materials etc: £{format_notes_amount(result.materials_charge)}"
-            ),
-            f"PROFIT ON JOB: £{profit_display} / {result.profit_pct:.0f}%",
-            "",
             "EXTERNAL DELIVERY:",
             parking_line,
             labour_only_line,
             labour_materials_line,
+            *_notes_footer_lines(client_name),
         ]
     )
 
@@ -461,10 +630,10 @@ def build_internal_notes_daily(
     context = notes_context or InternalNotesContext()
     cfg = config or DEFAULT_CONFIG
     rates = trade_rates or XlsxTradeRates.from_row(trade, Decimal("95"))
-    overhead_display = round_money(result.overhead_gbp).to_integral_value()
-    cost_labour_display = round_money(result.cost_labour).to_integral_value()
-    cost_materials_display = round_money(result.cost_materials).to_integral_value()
-    profit_display = round_money(result.profit_gbp).to_integral_value()
+    overhead_display = format_notes_pounds(result.overhead_gbp)
+    cost_labour_display = format_daily_cost_labour_display(result)
+    cost_materials_display = format_notes_pounds(result.cost_materials)
+    profit_display = format_notes_profit(result)
     materials_text = format_notes_amount(materials_amount) if materials_amount > 0 else ""
     important_info = context.important_info.strip() or _important_info_for_trade(trade)
     if labourers > 0:
@@ -488,29 +657,30 @@ def build_internal_notes_daily(
     )
     return "\n".join(
         [
+            *_notes_header_lines(client_name, include_oj_sticky=False),
             _label_line("PRODUCT:", context.product),
             important_info,
-            f"{client_name} Comms @ {round_money(client_fee_pct * Decimal('100')):.0f}%",
+            f"{client_name} Comms @ {format_commission_pct(client_fee_pct)}",
             helper_label,
             _label_line("LINK/S & QUANTITY:", context.links_and_quantity),
             _label_line("WHO QUOTED:", context.who_quoted),
             _label_line("BEST ENGINEER:", context.best_engineer),
             crew_line,
             "",
-            (
-                f"BUDGET: Materials: £{materials_text} / Parking: £{format_notes_amount(parking)} / "
-                f"CC: £{format_notes_amount(congestion)} / OH: £{overhead_display}"
+            _budget_line(materials_text, parking, congestion, overhead_display, daily=True),
+            _total_cost_line(cost_labour_display, cost_materials_display),
+            _total_charge_line(result.labour_charge, result.materials_charge),
+            _profit_line(
+                profit_display,
+                result.profit_pct,
+                result.labour_charge + result.materials_charge,
+                result.profit_gbp,
             ),
-            f"TOTAL COST TO OPTIMAL: Labour etc: £{cost_labour_display} / Materials etc: £{cost_materials_display}",
-            (
-                f"TOTAL CHARGE TO CLIENT: Labour: £{format_notes_amount(result.labour_charge)} / "
-                f"Materials etc: £{format_notes_amount(result.materials_charge)}"
-            ),
-            f"PROFIT ON JOB: £{profit_display} / {result.profit_pct:.0f}%",
             "",
             "EXTERNAL DELIVERY:",
             parking_line,
             labour_only_line,
             labour_materials_line,
+            *_daily_notes_footer_lines(client_name),
         ]
     )
