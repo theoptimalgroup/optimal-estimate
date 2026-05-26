@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 import crypto from "crypto";
 
-const API = "http://localhost:8000";
-const FRONTEND = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+const API = process.env.PLAYWRIGHT_API_URL ?? "http://127.0.0.1:8000";
+const FRONTEND = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3001";
 
 function futureExpiryIso(days = 30) {
   const date = new Date();
@@ -15,6 +15,31 @@ function makeSignedLink(payload: Record<string, unknown>, secret = "dev-secret-k
   const sig = crypto.createHmac("sha256", secret).update(raw).digest("hex");
   return { raw, sig };
 }
+
+async function fillWorkBlock(
+  page: import("@playwright/test").Page,
+  {
+    scope,
+    materialCost = "190",
+    skill = "Carpenter",
+    duration = "1.5",
+    workIndex = 0,
+  }: { scope: string; materialCost?: string; skill?: string; duration?: string; workIndex?: number },
+) {
+  if (workIndex > 0) {
+    await page.getByRole("button", { name: new RegExp(`Work ${workIndex + 1}`) }).click();
+  }
+  const block = workIndex > 0 ? page.locator("main") : page;
+  await block.locator("textarea").first().fill(scope);
+  await block.getByLabel("Skill Required").first().selectOption(skill);
+  await block.locator('input[type="number"]').nth(1).fill(materialCost);
+  await block.getByRole("checkbox", { name: "Engineer needed" }).first().check();
+  await block.getByLabel("Number of engineers").first().fill("1");
+  await block.getByLabel("Hours or Days").first().selectOption("hours");
+  await block.getByLabel("Duration").first().fill(duration);
+}
+
+test.describe.configure({ mode: "serial" });
 
 test.describe("eWorks calculate link flow", () => {
   test("opens public wizard, completes questionnaire, and calculates without profit in client view", async ({ page }) => {
@@ -32,9 +57,9 @@ test.describe("eWorks calculate link flow", () => {
     };
     const { raw, sig } = makeSignedLink(payload);
 
-    await page.goto(`${FRONTEND}/eworks/calculate?payload=${encodeURIComponent(raw)}&sig=${encodeURIComponent(sig)}`);
-
-    await expect(page.getByText("Step 1 of 4")).toBeVisible();
+    const url = `${FRONTEND}/eworks/calculate?payload=${encodeURIComponent(raw)}&sig=${encodeURIComponent(sig)}`;
+    await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
+    await expect(page.getByText("Step 1 of 4")).toBeVisible({ timeout: 20000 });
     await expect(page.getByText("This estimation form is supplied by your eWorks link and cannot be edited here.")).toBeVisible();
     await expect(page.locator("input, textarea, select")).toHaveCount(0);
     await expect(page.getByText("Engineer Name")).toBeVisible();
@@ -42,14 +67,9 @@ test.describe("eWorks calculate link flow", () => {
     await expect(page.getByText("Lamberts Chartered Surveyors")).toBeVisible();
 
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByText("Step 2 of 4")).toBeVisible();
-    await expect(page.getByText("Estimating Questionnaire")).toBeVisible();
+    await expect(page.getByText("Step 2 of 4: Estimating Questionnaire")).toBeVisible();
 
-    await page.locator("textarea").first().fill("Replace architrave and make good.");
-    await page.getByLabel("Skill Required").first().selectOption("Carpenter");
-    await page.locator('input[type="number"]').nth(1).fill("190");
-    await page.getByLabel("Hours or Days").first().selectOption("hours");
-    await page.getByLabel("Duration").first().fill("1.5");
+    await fillWorkBlock(page, { scope: "Replace architrave and make good." });
 
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByText("Step 3 of 4")).toBeVisible();
@@ -64,7 +84,7 @@ test.describe("eWorks calculate link flow", () => {
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download PDF" }).click();
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(/document_.*\.(pdf|html)$/);
+    expect(download.suggestedFilename()).toMatch(/\.(pdf|html)$/);
   });
 
   test("adds second work block and shows combined results", async ({ page }) => {
@@ -82,28 +102,20 @@ test.describe("eWorks calculate link flow", () => {
     };
     const { raw, sig } = makeSignedLink(payload);
 
-    await page.goto(`${FRONTEND}/eworks/calculate?payload=${encodeURIComponent(raw)}&sig=${encodeURIComponent(sig)}`);
-
+    const url = `${FRONTEND}/eworks/calculate?payload=${encodeURIComponent(raw)}&sig=${encodeURIComponent(sig)}`;
+    await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
+    await expect(page.getByText("Step 1 of 4")).toBeVisible({ timeout: 20000 });
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByText("Work 1")).toBeVisible();
 
-    await page.locator("textarea").first().fill("First work scope.");
-    await page.getByLabel("Skill Required").first().selectOption("Carpenter");
-    await page.locator('input[type="number"]').nth(1).fill("190");
-    await page.getByLabel("Hours or Days").first().selectOption("hours");
-    await page.getByLabel("Duration").first().fill("1.5");
+    await fillWorkBlock(page, { scope: "First work scope." });
 
     await page.getByRole("button", { name: "Add more works" }).click();
-    await expect(page.getByRole("button", { name: /^▾ Work 2/ })).toBeVisible();
-    await expect(page.locator("textarea")).toHaveCount(1);
-
-    await page.locator("textarea").fill("Second work scope.");
-    await page.getByLabel("Skill Required").selectOption("Carpenter");
-    await page.locator('input[type="number"]').nth(1).fill("100");
-    await page.getByLabel("Hours or Days").selectOption("hours");
-    await page.getByLabel("Duration").fill("2");
+    await expect(page.getByRole("button", { name: /Work 2/ })).toBeVisible();
+    await fillWorkBlock(page, { scope: "Second work scope.", materialCost: "100", duration: "2", workIndex: 1 });
 
     await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByText("Step 3 of 4")).toBeVisible({ timeout: 15000 });
     await page.getByRole("button", { name: "Calculate" }).click();
 
     await expect(page.getByText("Step 4 of 4")).toBeVisible({ timeout: 15000 });

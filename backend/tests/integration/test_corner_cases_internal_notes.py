@@ -18,9 +18,13 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]
-SCRIPTS = ROOT / "scripts"
-BACKEND = ROOT / "backend"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if not (PROJECT_ROOT / "scripts").is_dir():
+    PROJECT_ROOT = Path(__file__).resolve().parents[2].parent
+if not (PROJECT_ROOT / "scripts").is_dir() and Path("/workspace/scripts").is_dir():
+    PROJECT_ROOT = Path("/workspace")
+SCRIPTS = PROJECT_ROOT / "scripts"
+BACKEND = PROJECT_ROOT / "backend" if (PROJECT_ROOT / "backend").is_dir() else Path("/app")
 
 for path in (BACKEND, SCRIPTS, BACKEND / "tests"):
     if str(path) not in sys.path:

@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
 
-from app.core.deps import DbSession
+from app.db.session import DbSession
 from app.core.exceptions import success_response
 from app.models.trade import Trade
 from app.schemas.master_data import TradeRead

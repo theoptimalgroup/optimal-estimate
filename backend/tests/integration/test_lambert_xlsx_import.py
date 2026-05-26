@@ -12,8 +12,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "scripts"))
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if not (PROJECT_ROOT / "scripts").is_dir():
+    PROJECT_ROOT = Path(__file__).resolve().parents[2].parent
+if not (PROJECT_ROOT / "scripts").is_dir() and Path("/workspace/scripts").is_dir():
+    PROJECT_ROOT = Path("/workspace")
+sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from import_quote_calculator_rules import import_rules
 from app.core.security import UserRole, get_password_hash
@@ -31,7 +35,7 @@ from app.services.client_service import (
 )
 from tests.test_db import make_test_session
 
-XLSX_PATH = ROOT / "docs" / "1.7 MASTER HELPER.xlsx"
+XLSX_PATH = PROJECT_ROOT / "docs" / "1.7 MASTER HELPER.xlsx"
 
 
 @pytest.fixture()

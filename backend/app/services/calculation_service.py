@@ -108,7 +108,6 @@ def preview_calculation(db: Session, payload: CalculationPreviewRequest) -> Calc
         internal_notes_context=payload.internal_notes_context,
     )
 
-
 def finalize_calculation(db: Session, payload: CalculationFinalizeRequest, user_id: UUID) -> CalculationBreakdown:
     quote = db.scalar(
         select(Quote)
@@ -224,3 +223,4 @@ def finalize_calculation(db: Session, payload: CalculationFinalizeRequest, user_
     db.add(snapshot)
     db.flush()
     return breakdown
+

@@ -17,6 +17,8 @@ backend/storage/pdfs/*
 !backend/storage/pdfs/.gitkeep
 .DS_Store
 *.log
+backend/test-report*.txt
+frontend/test-results/
 .vscode/
 .idea/
 
