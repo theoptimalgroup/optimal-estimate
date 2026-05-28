@@ -35,7 +35,7 @@ def _blob_name(session_id: uuid.UUID, stored_name: str) -> str:
 
 
 async def _save_to_blob(session_id: uuid.UUID, stored_name: str, data: bytes, content_type: str) -> str:
-    from azure.storage.blob import BlobServiceClient
+    from azure.storage.blob import BlobServiceClient, ContentSettings
 
     conn_str = settings.azure_storage_connection_string
     container = settings.azure_storage_container_name
@@ -50,7 +50,7 @@ async def _save_to_blob(session_id: uuid.UUID, stored_name: str, data: bytes, co
         pass
 
     blob_client = container_client.get_blob_client(blob_name)
-    blob_client.upload_blob(data, overwrite=True, content_settings={"content_type": content_type})
+    blob_client.upload_blob(data, overwrite=True, content_settings=ContentSettings(content_type=content_type))
     return blob_name
 
 
