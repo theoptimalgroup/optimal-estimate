@@ -1,4 +1,4 @@
-"""Store eWorks session photo/video attachments locally."""
+"""Store eWorks session photo/video attachments — local disk or Azure Blob Storage."""
 
 from __future__ import annotations
 
@@ -30,6 +30,30 @@ def _session_dir(session_id: uuid.UUID) -> Path:
     return path
 
 
+def _blob_name(session_id: uuid.UUID, stored_name: str) -> str:
+    return f"eworks-attachments/{session_id}/{stored_name}"
+
+
+async def _save_to_blob(session_id: uuid.UUID, stored_name: str, data: bytes, content_type: str) -> str:
+    from azure.storage.blob import BlobServiceClient
+
+    conn_str = settings.azure_storage_connection_string
+    container = settings.azure_storage_container_name
+    blob_name = _blob_name(session_id, stored_name)
+
+    client = BlobServiceClient.from_connection_string(conn_str)
+    container_client = client.get_container_client(container)
+
+    try:
+        container_client.create_container()
+    except Exception:
+        pass
+
+    blob_client = container_client.get_blob_client(blob_name)
+    blob_client.upload_blob(data, overwrite=True, content_settings={"content_type": content_type})
+    return blob_name
+
+
 async def save_session_attachment(session_id: uuid.UUID, upload: UploadFile) -> SessionAttachmentMeta:
     content_type = upload.content_type or "application/octet-stream"
     if content_type not in ALLOWED_IMAGE_TYPES | ALLOWED_VIDEO_TYPES:
@@ -42,8 +66,12 @@ async def save_session_attachment(session_id: uuid.UUID, upload: UploadFile) -> 
     attachment_id = str(uuid.uuid4())
     safe_name = Path(upload.filename or "upload").name
     stored_name = f"{attachment_id}_{safe_name}"
-    target = _session_dir(session_id) / stored_name
-    target.write_bytes(data)
+
+    if settings.storage_backend == "azure_blob" and settings.azure_storage_connection_string:
+        await _save_to_blob(session_id, stored_name, data, content_type)
+    else:
+        target = _session_dir(session_id) / stored_name
+        target.write_bytes(data)
 
     return SessionAttachmentMeta(
         id=attachment_id,
