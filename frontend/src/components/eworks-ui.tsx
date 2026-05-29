@@ -283,7 +283,7 @@ export function EworksPageShell({
 }) {
   return (
     <div className="min-h-screen bg-optimal-bg pb-28 md:pb-8">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-optimal-bg/95 backdrop-blur-xl">
+      <header className="border-b border-white/10 bg-optimal-bg">
         <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-1">

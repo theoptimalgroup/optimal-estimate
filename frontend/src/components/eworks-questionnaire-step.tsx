@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFieldArray } from "react-hook-form";
 import type { Control, FieldErrors, UseFormRegister, UseFormSetValue, UseFormWatch } from "react-hook-form";
 import { EworksWorkBlockForm } from "@/components/eworks-work-block-form";
@@ -43,6 +43,8 @@ export function EworksQuestionnaireStep({
   const { fields, append, remove } = useFieldArray({ name: "works", control });
   const values = watch();
   const [expandedIndex, setExpandedIndex] = useState(0);
+  const workRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const scrollToNewRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (focusWorkIndex !== null && focusWorkIndex !== undefined && focusWorkIndex >= 0) {
@@ -50,8 +52,21 @@ export function EworksQuestionnaireStep({
     }
   }, [focusWorkIndex]);
 
+  // After a new work block is appended, wait for the 300ms expand animation then scroll
+  // so the Scope of Works field is visible at the top of the viewport.
+  useEffect(() => {
+    if (scrollToNewRef.current === null) return;
+    const targetIndex = scrollToNewRef.current;
+    scrollToNewRef.current = null;
+    const timer = window.setTimeout(() => {
+      workRefs.current[targetIndex]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 320);
+    return () => window.clearTimeout(timer);
+  }, [fields.length]);
+
   const handleAddWork = () => {
     const newIndex = fields.length;
+    scrollToNewRef.current = newIndex;
     append(defaultWorkBlockValues(tradeName));
     setExpandedIndex(newIndex);
   };
@@ -78,6 +93,9 @@ export function EworksQuestionnaireStep({
           return (
             <div
               key={field.id}
+              ref={(el) => {
+                workRefs.current[index] = el;
+              }}
               className={cn(
                 "rounded-lg border transition-all duration-300 ease-out",
                 isExpanded ? "overflow-visible border-optimal-orange/40 bg-optimal-elevated shadow-lg shadow-black/20" : "overflow-hidden border-white/10 bg-optimal-elevated/70",
