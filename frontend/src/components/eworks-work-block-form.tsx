@@ -17,6 +17,7 @@ import {
   eworksInputClass,
 } from "@/components/eworks-ui";
 import type { AttachmentMeta, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
+import { getAttachmentUrl } from "@/lib/eworks-session";
 import { numberFieldOptions } from "@/lib/form-number";
 import { withRegisterChange } from "@/lib/form-register";
 
@@ -33,8 +34,12 @@ type Props = {
   errors: FieldErrors<QuestionnaireFormValues>;
   attachments: AttachmentMeta[];
   skillOptions: string[];
+  sessionId: string;
+  sessionToken: string;
   onUploadFiles: (files: FileList | null, workIndex: number) => Promise<void>;
+  onDeleteAttachment: (workIndex: number, attachmentId: string) => Promise<void>;
   uploading: boolean;
+  deletingAttachmentId: string | null;
 };
 
 function fieldPath<T extends keyof WorkBlockFormValues>(workIndex: number, field: T) {
@@ -141,8 +146,12 @@ export function EworksWorkBlockForm({
   errors,
   attachments,
   skillOptions,
+  sessionId,
+  sessionToken,
   onUploadFiles,
+  onDeleteAttachment,
   uploading,
+  deletingAttachmentId,
 }: Props) {
   const values = watch(`works.${workIndex}`);
   const workErrors = errors.works?.[workIndex];
@@ -621,13 +630,52 @@ export function EworksWorkBlockForm({
         {uploading && <p className="text-xs font-medium text-optimal-orange animate-pulse-soft">Uploading…</p>}
         {attachments.length > 0 && (
           <ul className="space-y-2">
-            {attachments.map((file) => (
-              <li key={file.id} className="flex min-h-[44px] items-center rounded-lg border border-white/10 bg-optimal-field px-3.5 py-2.5 text-sm">
-                <span className="font-medium text-optimal-field-text">
-                  {file.media_type === "photo" ? "Photo" : file.media_type === "video" ? "Video" : "File"}: {file.file_name}
-                </span>
-              </li>
-            ))}
+            {attachments.map((file) => {
+              const viewUrl = getAttachmentUrl(sessionId, sessionToken, file.id);
+              const isPhoto = file.media_type === "photo";
+              const isDeleting = deletingAttachmentId === file.id;
+
+              return (
+                <li
+                  key={file.id}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg border border-white/10 bg-optimal-field px-3 py-2.5"
+                >
+                  <a
+                    href={viewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex min-w-0 flex-1 items-center gap-3 active:opacity-80"
+                  >
+                    {isPhoto ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={viewUrl}
+                        alt={file.file_name}
+                        className="size-12 shrink-0 rounded-md border border-black/10 bg-white object-cover"
+                      />
+                    ) : (
+                      <span className="flex size-12 shrink-0 items-center justify-center rounded-md border border-black/10 bg-white text-lg text-optimal-field-text">
+                        ▶
+                      </span>
+                    )}
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-optimal-field-text">
+                        {isPhoto ? "Photo" : file.media_type === "video" ? "Video" : "File"}
+                      </span>
+                      <span className="block truncate text-xs text-optimal-muted">{file.file_name}</span>
+                    </span>
+                  </a>
+                  <button
+                    type="button"
+                    className="min-h-[44px] shrink-0 px-1 text-xs font-semibold text-red-500 active:opacity-70 disabled:opacity-50"
+                    disabled={isDeleting}
+                    onClick={() => void onDeleteAttachment(workIndex, file.id)}
+                  >
+                    {isDeleting ? "Removing…" : "Remove"}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

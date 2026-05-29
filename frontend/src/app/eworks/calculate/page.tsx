@@ -19,6 +19,7 @@ import {
   calculateSession,
   createDevTestSession,
   createSessionFromLink,
+  deleteSessionAttachment,
   downloadSessionPdf,
   patchSession,
   storeSessionCredentials,
@@ -146,6 +147,7 @@ function EworksCalculateContent() {
   const [copied, setCopied] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null);
   const [skillOptions, setSkillOptions] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [focusWorkIndex, setFocusWorkIndex] = useState<number | null>(null);
@@ -335,6 +337,28 @@ function EworksCalculateContent() {
         setCalcError(error instanceof Error ? error.message : "Upload failed");
       } finally {
         setUploading(false);
+      }
+    },
+    [session, setValue, values.works],
+  );
+
+  const handleDeleteAttachment = useCallback(
+    async (workIndex: number, attachmentId: string) => {
+      if (!session) return;
+      setDeletingAttachmentId(attachmentId);
+      setCalcError(null);
+      try {
+        await deleteSessionAttachment(session.session_id, session.session_token, attachmentId);
+        const current = values.works[workIndex]?.attachments ?? [];
+        setValue(
+          `works.${workIndex}.attachments`,
+          current.filter((item) => item.id !== attachmentId),
+          { shouldValidate: true },
+        );
+      } catch (error) {
+        setCalcError(error instanceof Error ? error.message : "Delete failed");
+      } finally {
+        setDeletingAttachmentId(null);
       }
     },
     [session, setValue, values.works],
@@ -540,8 +564,12 @@ function EworksCalculateContent() {
             errors={errors}
             tradeName={step1.trade_name}
             skillOptions={skillOptions}
+            sessionId={session.session_id}
+            sessionToken={session.session_token}
             onUploadFiles={handleUploadFiles}
+            onDeleteAttachment={handleDeleteAttachment}
             uploading={uploading}
+            deletingAttachmentId={deletingAttachmentId}
             focusWorkIndex={focusWorkIndex}
           />
         )}

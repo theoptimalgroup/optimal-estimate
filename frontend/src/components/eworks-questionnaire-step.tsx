@@ -15,8 +15,12 @@ type Props = {
   errors: FieldErrors<QuestionnaireFormValues>;
   tradeName: string;
   skillOptions: string[];
+  sessionId: string;
+  sessionToken: string;
   onUploadFiles: (files: FileList | null, workIndex: number) => Promise<void>;
+  onDeleteAttachment: (workIndex: number, attachmentId: string) => Promise<void>;
   uploading: boolean;
+  deletingAttachmentId: string | null;
   focusWorkIndex?: number | null;
 };
 
@@ -28,8 +32,12 @@ export function EworksQuestionnaireStep({
   errors,
   tradeName,
   skillOptions,
+  sessionId,
+  sessionToken,
   onUploadFiles,
+  onDeleteAttachment,
   uploading,
+  deletingAttachmentId,
   focusWorkIndex,
 }: Props) {
   const { fields, append, remove } = useFieldArray({ name: "works", control });
@@ -127,8 +135,12 @@ export function EworksQuestionnaireStep({
                       errors={errors}
                       attachments={values.works[index]?.attachments ?? []}
                       skillOptions={skillOptions}
+                      sessionId={sessionId}
+                      sessionToken={sessionToken}
                       onUploadFiles={onUploadFiles}
+                      onDeleteAttachment={onDeleteAttachment}
                       uploading={uploading}
+                      deletingAttachmentId={deletingAttachmentId}
                     />
                   </div>
                 </div>

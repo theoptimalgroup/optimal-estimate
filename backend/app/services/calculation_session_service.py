@@ -150,6 +150,64 @@ async def add_session_attachment(
     return attachment
 
 
+def _find_attachment_in_step2(step2: Step2Snapshot, attachment_id: str):
+    from app.schemas.eworks_link import SessionAttachmentMeta
+
+    for work_index, block in enumerate(step2.works):
+        for attachment in block.attachments:
+            if attachment.id == attachment_id:
+                return work_index, attachment
+    for attachment in step2.attachments:
+        if attachment.id == attachment_id:
+            return None, SessionAttachmentMeta.model_validate(attachment)
+    return None, None
+
+
+def get_session_attachment_meta(db: Session, session_id: UUID, attachment_id: str):
+    from app.schemas.eworks_link import SessionAttachmentMeta, Step2Snapshot
+
+    session = db.get(CalculationSession, session_id)
+    if not session or not session.step2_snapshot:
+        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
+    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
+    _, attachment = _find_attachment_in_step2(step2, attachment_id)
+    if attachment is None:
+        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
+    return SessionAttachmentMeta.model_validate(attachment)
+
+
+async def delete_session_attachment(
+    db: Session,
+    *,
+    session_id: UUID,
+    session_token: str,
+    attachment_id: str,
+) -> None:
+    from app.schemas.eworks_link import Step2Snapshot
+    from app.services.eworks_attachment_service import delete_stored_attachment
+
+    session = get_session_by_token(db, session_id, session_token)
+    if not session.step2_snapshot:
+        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
+
+    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
+    work_index, attachment = _find_attachment_in_step2(step2, attachment_id)
+    if attachment is None:
+        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
+
+    await delete_stored_attachment(session_id, attachment.stored_name)
+
+    if work_index is not None:
+        block = step2.works[work_index]
+        block.attachments = [item for item in block.attachments if item.id != attachment_id]
+        step2.works[work_index] = block
+    else:
+        step2.attachments = [item for item in step2.attachments if item.id != attachment_id]
+
+    session.step2_snapshot = step2.model_dump(mode="json")
+    db.flush()
+
+
 def _merge_skill_group_breakdowns(
     groups: list[SkillGroupBreakdown],
     *,

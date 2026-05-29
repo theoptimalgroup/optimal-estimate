@@ -619,6 +619,53 @@ def test_attachment_upload_targets_work_index(eworks_api_client, tmp_path, monke
     assert works[1]["attachments"][0]["file_name"] == "photo.jpg"
 
 
+def test_attachment_view_and_delete(eworks_api_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "eworks_attachment_path", str(tmp_path))
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload()).json()["data"]
+    session_id = created["session_id"]
+    token = created["session_token"]
+
+    step2 = {"works": [_alex_work_block(scope="Work one")]}
+    test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+
+    upload = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/attachments?work_index=0",
+        headers={"X-Session-Token": token},
+        files={"file": ("photo.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    attachment_id = upload.json()["data"]["id"]
+
+    view = test_client.get(
+        f"/api/v1/calculation-session/{session_id}/attachments/{attachment_id}?token={token}",
+    )
+    assert view.status_code == 200
+    assert view.content == b"fake-image-bytes"
+    assert view.headers.get("content-type") == "image/jpeg"
+
+    delete = test_client.delete(
+        f"/api/v1/calculation-session/{session_id}/attachments/{attachment_id}",
+        headers={"X-Session-Token": token},
+    )
+    assert delete.status_code == 204
+
+    session_data = test_client.get(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+    ).json()["data"]
+    assert session_data["step2"]["works"][0]["attachments"] == []
+
+    missing = test_client.get(
+        f"/api/v1/calculation-session/{session_id}/attachments/{attachment_id}?token={token}",
+    )
+    assert missing.status_code == 404
+
+
 def test_patch_replays_idempotent_response(eworks_api_client):
     test_client, _ = eworks_api_client
     created = _from_link(test_client, _base_payload()).json()["data"]

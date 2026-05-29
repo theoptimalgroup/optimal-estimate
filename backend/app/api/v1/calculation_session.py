@@ -22,7 +22,14 @@ from app.schemas.eworks_link import (
     UpdateCalculationSessionRequest,
 )
 from app.services.calculation_session_pdf_service import render_session_quote_pdf
-from app.services.calculation_session_service import add_session_attachment, calculate_session, update_session_step2
+from app.services.calculation_session_service import (
+    add_session_attachment,
+    calculate_session,
+    delete_session_attachment,
+    get_session_attachment_meta,
+    update_session_step2,
+)
+from app.services.eworks_attachment_service import read_session_attachment
 from app.services.eworks_link_service import create_dev_test_session, create_session_from_link, get_session_by_token
 
 router = APIRouter(prefix="/calculation-session", tags=["calculation-session"])
@@ -134,6 +141,52 @@ async def upload_attachment(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return success_response(result)
+
+
+@router.get("/{session_id}/attachments/{attachment_id}")
+async def get_attachment(
+    session_id: UUID,
+    attachment_id: str,
+    db: DbSession,
+    x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
+    token: str | None = Query(default=None),
+):
+    session_token = x_session_token or token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Missing session token")
+    try:
+        get_session_by_token(db, session_id, session_token)
+        meta = get_session_attachment_meta(db, session_id, attachment_id)
+        data, _ = await read_session_attachment(session_id, meta.stored_name)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Attachment file not found") from exc
+    return Response(
+        content=data,
+        media_type=meta.content_type,
+        headers={"Content-Disposition": f'inline; filename="{meta.file_name}"'},
+    )
+
+
+@router.delete("/{session_id}/attachments/{attachment_id}", status_code=204)
+async def remove_attachment(
+    session_id: UUID,
+    attachment_id: str,
+    db: DbSession,
+    session=Depends(_require_session_token),
+):
+    try:
+        await delete_session_attachment(
+            db,
+            session_id=session_id,
+            session_token=session.session_token,
+            attachment_id=attachment_id,
+        )
+        db.commit()
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return Response(status_code=204)
 
 
 @router.post("/{session_id}/calculate")

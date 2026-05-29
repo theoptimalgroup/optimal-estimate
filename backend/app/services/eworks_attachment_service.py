@@ -54,6 +54,54 @@ async def _save_to_blob(session_id: uuid.UUID, stored_name: str, data: bytes, co
     return blob_name
 
 
+def _stored_path(session_id: uuid.UUID, stored_name: str) -> Path:
+    return _session_dir(session_id) / stored_name
+
+
+def _uses_blob_storage() -> bool:
+    return settings.storage_backend == "azure_blob" and bool(settings.azure_storage_connection_string)
+
+
+async def read_session_attachment(session_id: uuid.UUID, stored_name: str) -> tuple[bytes, str]:
+    if _uses_blob_storage():
+        from azure.storage.blob import BlobServiceClient
+
+        conn_str = settings.azure_storage_connection_string
+        container = settings.azure_storage_container_name
+        blob_name = _blob_name(session_id, stored_name)
+        client = BlobServiceClient.from_connection_string(conn_str)
+        blob_client = client.get_blob_client(container=container, blob=blob_name)
+        if not blob_client.exists():
+            raise FileNotFoundError(stored_name)
+        downloader = blob_client.download_blob()
+        data = downloader.readall()
+        content_type = blob_client.get_blob_properties().content_settings.content_type or "application/octet-stream"
+        return data, content_type
+
+    target = _stored_path(session_id, stored_name)
+    if not target.is_file():
+        raise FileNotFoundError(stored_name)
+    return target.read_bytes(), "application/octet-stream"
+
+
+async def delete_stored_attachment(session_id: uuid.UUID, stored_name: str) -> None:
+    if _uses_blob_storage():
+        from azure.storage.blob import BlobServiceClient
+
+        conn_str = settings.azure_storage_connection_string
+        container = settings.azure_storage_container_name
+        blob_name = _blob_name(session_id, stored_name)
+        client = BlobServiceClient.from_connection_string(conn_str)
+        blob_client = client.get_blob_client(container=container, blob=blob_name)
+        if blob_client.exists():
+            blob_client.delete_blob()
+        return
+
+    target = _stored_path(session_id, stored_name)
+    if target.is_file():
+        target.unlink()
+
+
 async def save_session_attachment(session_id: uuid.UUID, upload: UploadFile) -> SessionAttachmentMeta:
     content_type = upload.content_type or "application/octet-stream"
     if content_type not in ALLOWED_IMAGE_TYPES | ALLOWED_VIDEO_TYPES:
@@ -67,11 +115,10 @@ async def save_session_attachment(session_id: uuid.UUID, upload: UploadFile) -> 
     safe_name = Path(upload.filename or "upload").name
     stored_name = f"{attachment_id}_{safe_name}"
 
-    if settings.storage_backend == "azure_blob" and settings.azure_storage_connection_string:
+    if _uses_blob_storage():
         await _save_to_blob(session_id, stored_name, data, content_type)
     else:
-        target = _session_dir(session_id) / stored_name
-        target.write_bytes(data)
+        _stored_path(session_id, stored_name).write_bytes(data)
 
     return SessionAttachmentMeta(
         id=attachment_id,

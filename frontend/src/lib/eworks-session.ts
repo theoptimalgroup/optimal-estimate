@@ -339,6 +339,31 @@ export async function uploadSessionAttachment(
   );
 }
 
+export function getAttachmentUrl(sessionId: string, sessionToken: string, attachmentId: string) {
+  const params = new URLSearchParams({ token: sessionToken });
+  return `${getApiUrl()}/api/v1/calculation-session/${sessionId}/attachments/${attachmentId}?${params.toString()}`;
+}
+
+export async function deleteSessionAttachment(sessionId: string, sessionToken: string, attachmentId: string) {
+  const response = await fetch(
+    `${getApiUrl()}/api/v1/calculation-session/${sessionId}/attachments/${attachmentId}`,
+    {
+      method: "DELETE",
+      headers: { "X-Session-Token": sessionToken },
+    },
+  );
+  if (!response.ok) {
+    let message = "Failed to delete attachment";
+    try {
+      const payload = await response.json();
+      message = payload?.detail?.error?.message || payload?.detail || message;
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+}
+
 export async function calculateSession(sessionId: string, sessionToken: string, step2?: Step2Snapshot) {
   const body = step2 ? { step2 } : {};
   const idempotencyKey = buildIdempotencyKey(`eworks-${sessionId}-calculate`, body);
