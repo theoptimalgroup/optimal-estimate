@@ -71,8 +71,8 @@ export function EworksQuestionnaireStep({
             <div
               key={field.id}
               className={cn(
-                "overflow-hidden rounded-lg border transition-all duration-300 ease-out",
-                isExpanded ? "border-optimal-orange/40 bg-optimal-elevated shadow-lg shadow-black/20" : "border-white/10 bg-optimal-elevated/70",
+                "rounded-lg border transition-all duration-300 ease-out",
+                isExpanded ? "overflow-visible border-optimal-orange/40 bg-optimal-elevated shadow-lg shadow-black/20" : "overflow-hidden border-white/10 bg-optimal-elevated/70",
                 hasErrors && !isExpanded && "border-red-400/40 ring-1 ring-red-400/20",
               )}
             >
@@ -116,7 +116,7 @@ export function EworksQuestionnaireStep({
                   isExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
                 )}
               >
-                <div className="overflow-hidden">
+                <div className="min-h-0 min-w-0">
                   <div className="border-t border-white/10 px-4 pb-4 pt-2">
                     <EworksWorkBlockForm
                       workIndex={index}
