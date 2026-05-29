@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useForm, type FieldErrors } from "react-hook-form";
 import { questionnaireResolver } from "@/lib/eworks-questionnaire-resolver";
@@ -16,15 +16,14 @@ import {
   EworksStepIndicator,
 } from "@/components/eworks-ui";
 import {
-  calculateSession,
   createDevTestSession,
   createSessionFromLink,
   deleteSessionAttachment,
-  downloadSessionPdf,
+  fetchSession,
   patchSession,
   storeSessionCredentials,
+  submitSession,
   uploadSessionAttachment,
-  type CalculateResponse,
   type FromLinkResponse,
   type SessionUiState,
 } from "@/lib/eworks-session";
@@ -39,11 +38,6 @@ import {
 import { fetchAllTrades } from "@/lib/trades";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
-
-function money(value?: number | string | null) {
-  if (value === undefined || value === null || value === "") return "—";
-  return `£${Number(value).toFixed(2)}`;
-}
 
 function firstInvalidWorkIndex(errors: FieldErrors<QuestionnaireFormValues>): number | null {
   if (!Array.isArray(errors.works)) return null;
@@ -120,21 +114,25 @@ function restoreUiState(
   setters: {
     setStep: (value: number) => void;
     setMaxReachableStep: (value: number) => void;
-    setResults: (value: CalculateResponse | null) => void;
+    setSubmitted: (value: boolean) => void;
   },
 ) {
   if (!uiState) return;
-  setters.setStep(uiState.current_step ?? 0);
-  setters.setMaxReachableStep(uiState.max_reachable_step ?? uiState.current_step ?? 0);
-  if (uiState.last_result) {
-    setters.setResults(uiState.last_result);
-  }
+  const hasSubmitted = !!uiState.last_result;
+  const restoredStep = hasSubmitted ? EWORKS_STEPS.length - 1 : Math.min(uiState.current_step ?? 0, EWORKS_STEPS.length - 1);
+  setters.setStep(restoredStep);
+  setters.setMaxReachableStep(
+    hasSubmitted ? EWORKS_STEPS.length - 1 : Math.min(uiState.max_reachable_step ?? uiState.current_step ?? 0, EWORKS_STEPS.length - 1),
+  );
+  setters.setSubmitted(hasSubmitted);
 }
 
 function EworksCalculateContent() {
   const searchParams = useSearchParams();
   const payload = searchParams.get("payload");
   const sig = searchParams.get("sig");
+  const sessionIdParam = searchParams.get("session_id");
+  const sessionTokenParam = searchParams.get("token");
 
   const [step, setStep] = useState(0);
   const [maxReachableStep, setMaxReachableStep] = useState(0);
@@ -142,16 +140,16 @@ function EworksCalculateContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [results, setResults] = useState<CalculateResponse | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null);
   const [skillOptions, setSkillOptions] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [focusWorkIndex, setFocusWorkIndex] = useState<number | null>(null);
   const autoSaveReady = useRef(false);
+  const autosaveInFlightRef = useRef<Promise<void> | null>(null);
   const lastSavedStep2Ref = useRef<string | null>(null);
   const lastSavedUiRef = useRef<string | null>(null);
   const isDev = process.env.NODE_ENV === "development";
@@ -168,6 +166,7 @@ function EworksCalculateContent() {
     reset,
     trigger,
     setValue,
+    getValues,
     control,
     formState: { errors },
   } = form;
@@ -191,7 +190,7 @@ function EworksCalculateContent() {
         questionnaire.works[0].travel_charge = Number(data.step1.travel ?? 0);
       }
       reset(questionnaire);
-      restoreUiState(data.ui_state, { setStep, setMaxReachableStep, setResults });
+      restoreUiState(data.ui_state, { setStep, setMaxReachableStep, setSubmitted });
       autoSaveReady.current = false;
       lastSavedStep2Ref.current = null;
       lastSavedUiRef.current = null;
@@ -207,20 +206,25 @@ function EworksCalculateContent() {
   useEffect(() => {
     let cancelled = false;
     async function bootstrap() {
-      if (!payload) {
-        setLoadError("Invalid or missing calculation link");
-        setLoading(false);
-        return;
-      }
       setLoading(true);
       setLoadError(null);
       try {
+        if (sessionIdParam && sessionTokenParam) {
+          const data = await fetchSession(sessionIdParam, sessionTokenParam);
+          if (cancelled) return;
+          applySession(data);
+          return;
+        }
+        if (!payload) {
+          setLoadError("Invalid or missing calculation link");
+          return;
+        }
         const res = await createSessionFromLink(payload, sig);
         if (cancelled) return;
         applySession(res.data);
       } catch (error) {
         if (cancelled) return;
-        const message = error instanceof Error ? error.message : "Failed to open calculation link";
+        const message = error instanceof Error ? error.message : "Failed to open calculation session";
         setLoadError(message);
       } finally {
         if (!cancelled) setLoading(false);
@@ -230,7 +234,7 @@ function EworksCalculateContent() {
     return () => {
       cancelled = true;
     };
-  }, [payload, sig, applySession]);
+  }, [sessionIdParam, sessionTokenParam, payload, sig, applySession]);
 
   const startDevTestSession = useCallback(async () => {
     setLoading(true);
@@ -268,32 +272,37 @@ function EworksCalculateContent() {
 
   const autosave = useCallback(
     async (formValues: QuestionnaireFormValues) => {
-      if (!session || !autoSaveReady.current || step === 0 || step === 2) return;
+      if (!session || !autoSaveReady.current || step === 0 || step === 2 || submitting) return;
       const step2 = questionnaireToStep2(formValues);
       const step2Key = JSON.stringify(step2);
       if (step2Key === lastSavedStep2Ref.current) return;
       setSaveStatus("saving");
-      try {
-        await patchSession(session.session_id, session.session_token, {
-          step2,
-          ui_state: {
-            current_step: step,
-            max_reachable_step: maxReachableStep,
-            last_result: results,
-          },
-        });
-        lastSavedStep2Ref.current = step2Key;
-        setSaveStatus("saved");
-      } catch {
-        setSaveStatus("error");
-      }
+      const savePromise = (async () => {
+        try {
+          await patchSession(session.session_id, session.session_token, {
+            step2,
+            ui_state: {
+              current_step: step,
+              max_reachable_step: maxReachableStep,
+            },
+          });
+          lastSavedStep2Ref.current = step2Key;
+          setSaveStatus("saved");
+        } catch {
+          setSaveStatus("error");
+        } finally {
+          autosaveInFlightRef.current = null;
+        }
+      })();
+      autosaveInFlightRef.current = savePromise;
+      await savePromise;
     },
-    [session, step, maxReachableStep, results],
+    [session, step, maxReachableStep, submitting],
   );
 
   const saveProgress = useCallback(async () => {
-    if (!session || !autoSaveReady.current) return;
-    const uiState = { current_step: step, max_reachable_step: maxReachableStep, last_result: results };
+    if (!session || !autoSaveReady.current || submitted || step === 2) return;
+    const uiState = { current_step: step, max_reachable_step: maxReachableStep };
     const uiKey = JSON.stringify(uiState);
     if (uiKey === lastSavedUiRef.current) return;
     try {
@@ -302,15 +311,15 @@ function EworksCalculateContent() {
     } catch {
       // ignore background progress save failures
     }
-  }, [session, step, maxReachableStep, results]);
+  }, [session, step, maxReachableStep, submitted]);
 
   useEffect(() => {
-    if (!session || step === 0 || step === 2) return;
+    if (!session || step === 0 || step === 2 || submitting) return;
     const timer = window.setTimeout(() => {
-      void autosave(values);
+      void autosave(getValues());
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [values, session, step, autosave]);
+  }, [values, session, step, autosave, submitting, getValues]);
 
   useEffect(() => {
     if (!session || !autoSaveReady.current) return;
@@ -318,7 +327,7 @@ function EworksCalculateContent() {
       void saveProgress();
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [session, step, maxReachableStep, results, saveProgress]);
+  }, [session, step, maxReachableStep, saveProgress]);
 
   const step1 = session?.step1;
 
@@ -403,7 +412,7 @@ function EworksCalculateContent() {
 
   const goBack = () => setStep((current) => Math.max(current - 1, 0));
 
-  const runCalculate = async () => {
+  const runSubmit = async () => {
     if (!session) return;
     setValidationError(null);
     setFocusWorkIndex(null);
@@ -414,50 +423,49 @@ function EworksCalculateContent() {
       setStep(1);
       setFocusWorkIndex(workIndex);
       setValidationError(
-        questionnaireValidationMessage(currentErrors) ?? "Please complete all required fields before calculating.",
+        questionnaireValidationMessage(currentErrors) ?? "Please complete all required fields before submitting.",
       );
       return;
     }
+
     setCalcError(null);
+    setSubmitting(true);
+    autoSaveReady.current = false;
     try {
-      const res = await calculateSession(
-        session.session_id,
-        session.session_token,
-        questionnaireToStep2(values),
-      );
-      setResults(res);
+      if (autosaveInFlightRef.current) {
+        await autosaveInFlightRef.current;
+      }
+
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+
+      const latestValues = getValues();
+      const step2 = questionnaireToStep2(latestValues);
+
+      await patchSession(session.session_id, session.session_token, {
+        step2,
+        ui_state: {
+          current_step: step,
+          max_reachable_step: maxReachableStep,
+        },
+      });
+      lastSavedStep2Ref.current = JSON.stringify(step2);
+
+      await submitSession(session.session_id, session.session_token, step2);
+      setSubmitted(true);
       setMaxReachableStep(EWORKS_STEPS.length - 1);
       setStep(2);
     } catch (error) {
-      setCalcError(error instanceof Error ? error.message : "Calculation failed");
+      autoSaveReady.current = true;
+      setCalcError(error instanceof Error ? error.message : "Submit failed");
+    } finally {
+      setSubmitting(false);
     }
   };
-
-  const copyNotes = useCallback(async () => {
-    const notes = results?.internal_notes ?? results?.breakdown.internal_notes;
-    if (!notes) return;
-    await navigator.clipboard.writeText(notes);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
-  }, [results]);
-
-  const handleDownloadPdf = useCallback(async () => {
-    if (!session) return;
-    setDownloadingPdf(true);
-    setCalcError(null);
-    try {
-      await downloadSessionPdf(session.session_id, session.session_token);
-    } catch (error) {
-      setCalcError(error instanceof Error ? error.message : "PDF download failed");
-    } finally {
-      setDownloadingPdf(false);
-    }
-  }, [session]);
-
-  const clientCalc = useMemo(() => {
-    const calc = (results?.client_view?.calculation ?? {}) as Record<string, unknown>;
-    return calc;
-  }, [results]);
 
   if (loading) {
     return (
@@ -544,8 +552,8 @@ function EworksCalculateContent() {
               </EworksButton>
             )}
             {step === 1 && (
-              <EworksButton className="flex-[2] sm:flex-1" onClick={() => void runCalculate()}>
-                Calculate
+              <EworksButton className="flex-[2] sm:flex-1" disabled={submitting} onClick={() => void runSubmit()}>
+                {submitting ? "Submitting…" : "Submit"}
               </EworksButton>
             )}
           </div>
@@ -574,137 +582,20 @@ function EworksCalculateContent() {
           />
         )}
 
-        {step === 2 && results && (
-          <div className="space-y-6">
-            <p className="text-sm text-optimal-muted">Combined estimate breakdown.</p>
-            {results.work_breakdowns && results.work_breakdowns.length > 0 && (
-              <section className="space-y-3">
-                <EworksSectionTitle title="Per-work breakdown" />
-                {results.work_breakdowns.map((work) => {
-                  const labourTotal = work.breakdown.labour.reduce((sum, line) => sum + Number(line.total), 0);
-                  const materialsTotal = work.breakdown.materials.reduce((sum, line) => sum + Number(line.total), 0);
-                  return (
-                    <details
-                      key={work.work_index}
-                      className="group overflow-hidden rounded-lg border border-white/10 bg-optimal-elevated open:shadow-lg open:shadow-black/20 transition-shadow duration-200"
-                      open={work.work_index === 0}
-                    >
-                      <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-white marker:content-none">
-                        <span>
-                          Work {work.work_index + 1}
-                          {work.scope ? `: ${work.scope.slice(0, 80)}${work.scope.length > 80 ? "…" : ""}` : ""}
-                        </span>
-                        <span className="text-optimal-muted transition-transform duration-200 group-open:rotate-180">▾</span>
-                      </summary>
-                      <div className="space-y-2 border-t border-white/10 px-4 py-3 text-sm text-white/90">
-                        <p>Labour subtotal: <span className="font-semibold text-white">{money(labourTotal)}</span></p>
-                        <p>Materials subtotal: <span className="font-semibold text-white">{money(materialsTotal)}</span></p>
-                        {work.internal_notes && (
-                          <pre className="whitespace-pre-wrap rounded-lg bg-optimal-field p-3 text-xs leading-relaxed text-optimal-field-text">
-                            {work.internal_notes}
-                          </pre>
-                        )}
-                      </div>
-                    </details>
-                  );
-                })}
-              </section>
-            )}
-
-            {results.skill_group_breakdowns && results.skill_group_breakdowns.length > 1 ? (
-              <>
-                {results.skill_group_breakdowns.map(({ skill, breakdown: gb }) => (
-                  <section key={skill} className="rounded-lg border border-optimal-orange/30 bg-optimal-elevated p-4 sm:p-5">
-                    <EworksSectionTitle title={`Combined quote — ${skill}`} />
-                    <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                      <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Labour charge: <span className="font-semibold">{money(gb.labour_charge_to_client)}</span></p>
-                      <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Materials / parking / CC: <span className="font-semibold">{money(gb.materials_parking_cc_charge)}</span></p>
-                      <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Profit: <span className="font-semibold">{money(gb.profit_gbp)}</span></p>
-                      <p className="rounded-lg bg-optimal-orange px-3 py-2.5 font-semibold text-optimal-bg sm:col-span-2">
-                        Total: <span className="text-lg font-bold">{money(gb.final_total)}</span>
-                      </p>
-                    </div>
-                    <div className="mt-4 space-y-1.5 text-sm text-optimal-muted">
-                      {gb.charges?.map((line) => (
-                        <p key={line.label}>{line.label}: {money(line.total)}</p>
-                      ))}
-                    </div>
-                  </section>
-                ))}
-                <section className="rounded-lg border border-white/20 bg-optimal-elevated p-4 sm:p-5">
-                  <EworksSectionTitle title="Grand total (all trades)" />
-                  {results.aggregated_summary?.subtitle && (
-                    <p className="mt-2 text-sm text-optimal-muted">{results.aggregated_summary.subtitle}</p>
-                  )}
-                  <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                    <p className="rounded-lg bg-optimal-orange px-3 py-2.5 font-semibold text-optimal-bg sm:col-span-2">
-                      Grand total: <span className="text-lg font-bold">{money(results.breakdown.final_total)}</span>
-                    </p>
-                  </div>
-                </section>
-              </>
-            ) : (
-              <section className="rounded-lg border border-optimal-orange/30 bg-optimal-elevated p-4 sm:p-5">
-                <EworksSectionTitle title="Combined quote" />
-                {results.aggregated_summary?.subtitle && (
-                  <p className="mt-2 text-sm text-optimal-muted">{results.aggregated_summary.subtitle}</p>
-                )}
-                <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                  <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Labour charge: <span className="font-semibold">{money(results.breakdown.labour_charge_to_client)}</span></p>
-                  <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Materials / parking / CC: <span className="font-semibold">{money(results.breakdown.materials_parking_cc_charge)}</span></p>
-                  <p className="rounded-lg bg-optimal-field px-3 py-2 text-optimal-field-text">Profit: <span className="font-semibold">{money(results.breakdown.profit_gbp)}</span></p>
-                  <p className="rounded-lg bg-optimal-orange px-3 py-2.5 font-semibold text-optimal-bg sm:col-span-2">
-                    Final total: <span className="text-lg font-bold">{money(results.breakdown.final_total)}</span>
-                  </p>
-                </div>
-                <div className="mt-4 space-y-1.5 text-sm text-optimal-muted">
-                  {results.breakdown.labour?.map((line) => (
-                    <p key={line.label}>{line.label}: {money(line.total)}</p>
-                  ))}
-                  {results.breakdown.materials?.map((line) => (
-                    <p key={line.label}>{line.label}: {money(line.total)}</p>
-                  ))}
-                  {results.breakdown.charges?.map((line) => (
-                    <p key={line.label}>{line.label}: {money(line.total)}</p>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {(results.internal_notes || results.breakdown.internal_notes) && (
-              <section className="rounded-lg border border-white/10 bg-optimal-elevated p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <EworksSectionTitle title="Internal notes (combined)" />
-                  <EworksButton variant="secondary" className="min-h-[36px] px-3 py-1.5 text-xs" onClick={() => void copyNotes()}>
-                    {copied ? "Copied ✓" : "Copy notes"}
-                  </EworksButton>
-                </div>
-                <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-optimal-field p-3 text-xs leading-relaxed text-optimal-field-text">
-                  {results.internal_notes ?? results.breakdown.internal_notes}
-                </pre>
-              </section>
-            )}
-
-            <section className="rounded-lg border border-white/10 bg-optimal-elevated p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <EworksSectionTitle title="Client-safe summary" />
-                <EworksButton variant="secondary" className="min-h-[40px] text-xs" disabled={downloadingPdf} onClick={() => void handleDownloadPdf()}>
-                  {downloadingPdf ? "Generating PDF…" : "Download PDF"}
-                </EworksButton>
-              </div>
-              <p className="mt-2 text-xs text-optimal-muted">PDF includes calculation results and internal notes.</p>
-              <p className="mt-3 text-sm leading-relaxed text-optimal-muted">
-                Scope: {(results.client_view.scope as string) ?? values.works.map((work) => work.scope).join("\n\n")}
+        {step === 2 && submitted && (
+          <div className="space-y-4 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-6 text-center">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-500/20 text-2xl text-emerald-300">
+              ✓
+            </div>
+            <div className="space-y-2">
+              <EworksSectionTitle title="Quote submitted" />
+              <p className="text-sm leading-relaxed text-emerald-100">
+                Your estimate for quote {step1.quote_number} / job {step1.job_number} has been submitted successfully.
               </p>
-              <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-                <p className="text-white/90">Subtotal: <span className="font-semibold text-white">{money(clientCalc.subtotal as number | string)}</span></p>
-                <p className="text-white/90">VAT: <span className="font-semibold text-white">{money(clientCalc.vat_total as number | string)}</span></p>
-                <p className="font-bold text-optimal-orange sm:col-span-2">Final total: {money(clientCalc.final_total as number | string)}</p>
-              </div>
-              {"profit_gbp" in clientCalc && (
-                <p className="mt-2 text-xs text-red-400">Unexpected profit field exposed in client view</p>
-              )}
-            </section>
+              <p className="text-xs text-emerald-200/80">
+                The office team can review the full calculation and photos in the dashboard.
+              </p>
+            </div>
           </div>
         )}
       </EworksCard>

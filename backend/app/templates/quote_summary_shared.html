@@ -1,0 +1,337 @@
+{# Shared cover styles and fragments for Strettons-format quote PDFs #}
+{% macro cover_styles(footer_label, landscape_all=false) %}
+<style>
+  {% if landscape_all %}
+  @page {
+    size: A4 landscape;
+    margin: 10mm 17pt 14mm;
+    @bottom-left {
+      content: "{{ footer_label }}";
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 8pt;
+      color: #9ca3af;
+    }
+    @bottom-right {
+      content: "Page " counter(page);
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 8pt;
+      color: #9ca3af;
+    }
+  }
+  {% else %}
+  @page cover {
+    size: A4 portrait;
+    margin: 0 14mm 16mm;
+    @bottom-left {
+      content: "{{ footer_label }}";
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 8pt;
+      color: #9ca3af;
+    }
+    @bottom-right {
+      content: "Page " counter(page);
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 8pt;
+      color: #9ca3af;
+    }
+  }
+
+  @page items {
+    size: A4 landscape;
+    margin: 10mm 8mm 14mm;
+    @bottom-left {
+      content: "{{ footer_label }}";
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 8pt;
+      color: #9ca3af;
+    }
+    @bottom-right {
+      content: "Page " counter(page);
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 8pt;
+      color: #9ca3af;
+    }
+  }
+  {% endif %}
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: Helvetica, Arial, sans-serif;
+    color: #1f2937;
+    background: #ffffff;
+  }
+
+  .cover-page {
+    {% if not landscape_all %}page: cover;{% endif %}
+    page-break-after: always;
+  }
+
+  .summary-page {
+    page-break-before: always;
+    page-break-after: always;
+    text-align: center;
+  }
+
+  .summary-page .section-heading {
+    margin: 0 0 8px;
+    text-align: left;
+  }
+
+  .items-page {
+    {% if not landscape_all %}page: items;{% endif %}
+    text-align: center;
+  }
+
+  .items-page table.items {
+    text-align: left;
+  }
+
+  .cover-page,
+  .summary-page {
+    text-align: center;
+  }
+
+  .content-block {
+    width: 100%;
+    margin: 12px auto 0;
+    text-align: left;
+  }
+
+  .cover-page > .content-block {
+    margin-top: 14px;
+  }
+
+  .brand-bar {
+    background: #000000;
+    margin: 0 {% if landscape_all %}-17pt{% else %}-14mm{% endif %} 20px;
+    padding: 18px {% if landscape_all %}17pt{% else %}14mm{% endif %};
+    text-align: center;
+  }
+
+  .brand-logo {
+    height: 72px;
+    width: auto;
+    max-width: 360px;
+    display: inline-block;
+  }
+
+  .summary-title-wrap {
+    text-align: center;
+    margin: 0 0 6px;
+  }
+
+  .summary-title {
+    display: inline-block;
+    margin: 0;
+    padding: 4px 14px;
+    background: #dbeafe;
+    color: #1e3a8a;
+    font-size: 22pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .summary-address {
+    margin: 0 0 18px;
+    text-align: center;
+    color: #6b7280;
+    font-size: 11pt;
+    font-style: italic;
+  }
+
+  .summary-tables-layout {
+    width: 100%;
+    margin: 0 auto 14px;
+    border-collapse: separate;
+    border-spacing: 12px 0;
+  }
+
+  .summary-tables-layout td {
+    width: 50%;
+    vertical-align: top;
+    padding: 0;
+  }
+
+  .optimal-summary-tables {
+    width: 100%;
+    margin: 0;
+    border-collapse: separate;
+    border-spacing: 12px 0;
+  }
+
+  .optimal-summary-tables td {
+    width: 50%;
+    vertical-align: top;
+    padding: 0;
+  }
+
+  table.kv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7pt;
+  }
+
+  table.kv-table td {
+    border: 1px solid #d1d5db;
+    padding: 4px 6px;
+    vertical-align: top;
+  }
+
+  table.kv-table td.label {
+    width: 42%;
+    background: #f3f4f6;
+    color: #374151;
+    font-weight: 600;
+  }
+
+  table.kv-table td.value {
+    background: #ffffff;
+    color: #111827;
+  }
+
+  table.kv-table tr.highlight td {
+    background: #fef3c7;
+    font-weight: 700;
+    color: #111827;
+  }
+
+  .section-heading {
+    margin: 0 0 6px;
+    color: #1e3a8a;
+    font-size: 10pt;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  .report-notes-box {
+    border: 1px solid #bfdbfe;
+    background: #f8fbff;
+    padding: 8px 10px;
+    font-size: 7.5pt;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    min-height: 56px;
+    width: 100%;
+  }
+
+  table.items {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 6pt;
+  }
+
+  table.items th {
+    background: #1e3a8a;
+    color: #ffffff;
+    font-size: 5.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    padding: 4px 3px;
+    border: 1px solid #1e3a8a;
+    vertical-align: bottom;
+  }
+
+  table.items td {
+    border: 1px solid #d1d5db;
+    padding: 3px 2px;
+    vertical-align: top;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    font-size: 5.5pt;
+  }
+
+  table.items tr:nth-child(even) td {
+    background: #f9fafb;
+  }
+
+  .num { text-align: right; font-weight: 600; }
+  .items-heading {
+    margin: 0 0 8px;
+    color: #1e3a8a;
+    font-size: 10pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+  }
+</style>
+{% endmacro %}
+
+{% macro cover_page() %}
+<section class="cover-page">
+  <div class="brand-bar">
+    <img src="{{ logo_src }}" alt="Optimal Group" class="brand-logo">
+  </div>
+
+  <div class="summary-title-wrap">
+    <h1 class="summary-title">{{ document_title }}</h1>
+  </div>
+  <p class="summary-address">{{ property_address or "—" }}</p>
+
+  <table class="summary-tables-layout" align="center">
+    <tr>
+      <td>
+        <table class="kv-table">
+          <tr>
+            <td class="label">Prepared by</td>
+            <td class="value">{{ prepared_by }}</td>
+          </tr>
+          <tr>
+            <td class="label">Engineer</td>
+            <td class="value">{{ engineer_name or "—" }}</td>
+          </tr>
+          <tr>
+            <td class="label">Client</td>
+            <td class="value">{{ client_name }}</td>
+          </tr>
+          <tr>
+            <td class="label">Site address</td>
+            <td class="value">{{ property_address or "—" }}</td>
+          </tr>
+          <tr>
+            <td class="label">Property Manager</td>
+            <td class="value">{{ property_manager }}</td>
+          </tr>
+          <tr>
+            <td class="label">Quote / Job</td>
+            <td class="value">{{ quote_number }} / {{ job_number }}</td>
+          </tr>
+        </table>
+      </td>
+      <td>
+        <table class="kv-table">
+          <tr>
+            <td class="label">Total Items</td>
+            <td class="value">{{ total_items }}</td>
+          </tr>
+          <tr>
+            <td class="label">Quote Sub Total</td>
+            <td class="value">{{ subtotal }}</td>
+          </tr>
+          <tr>
+            <td class="label">{{ vat_label }}</td>
+            <td class="value">{{ vat_total }}</td>
+          </tr>
+          <tr class="highlight">
+            <td class="label">Quote Total</td>
+            <td class="value">{{ grand_total }}</td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <div class="content-block">
+    <h2 class="section-heading">Report Notes</h2>
+    <div class="report-notes-box">{{ report_notes }}</div>
+  </div>
+
+  {{ caller() }}
+</section>
+{% endmacro %}

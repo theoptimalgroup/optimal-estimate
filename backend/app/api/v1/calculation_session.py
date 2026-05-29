@@ -19,6 +19,7 @@ from app.schemas.eworks_link import (
     SessionUiState,
     Step1Snapshot,
     Step2Snapshot,
+    SubmitSessionResponse,
     UpdateCalculationSessionRequest,
 )
 from app.services.calculation_session_pdf_service import render_session_quote_pdf
@@ -27,6 +28,7 @@ from app.services.calculation_session_service import (
     calculate_session,
     delete_session_attachment,
     get_session_attachment_meta,
+    submit_session,
     update_session_step2,
 )
 from app.services.eworks_attachment_service import read_session_attachment
@@ -187,6 +189,28 @@ async def remove_attachment(
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return Response(status_code=204)
+
+
+@router.post("/{session_id}/submit")
+def submit_quote(
+    session_id: UUID,
+    db: DbSession,
+    session=Depends(_require_session_token),
+    body: CalculateSessionRequest | None = None,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    try:
+        submit_session(
+            db,
+            session_id=session_id,
+            session_token=session.session_token,
+            step2=body.step2 if body else None,
+            idempotency_key=idempotency_key,
+        )
+        db.commit()
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return success_response(SubmitSessionResponse())
 
 
 @router.post("/{session_id}/calculate")

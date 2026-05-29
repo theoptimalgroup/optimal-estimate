@@ -666,6 +666,279 @@ def test_attachment_view_and_delete(eworks_api_client, tmp_path, monkeypatch):
     assert missing.status_code == 404
 
 
+def test_submit_marks_session_and_lists_on_dashboard(eworks_api_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "eworks_attachment_path", str(tmp_path))
+    monkeypatch.setattr(settings, "dashboard_password", "test-dashboard-pass")
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(quote_number="Q-SUBMIT", job_number="JOB-SUBMIT")).json()["data"]
+    session_id = created["session_id"]
+    token = created["session_token"]
+    step2 = {"works": [_alex_work_block(scope="Submitted work")], "congestion_required": True, "congestion_amount": 18}
+    test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+
+    unauthorized = test_client.get("/api/v1/dashboard/quotes")
+    assert unauthorized.status_code == 401
+
+    upload = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/attachments?work_index=0",
+        headers={"X-Session-Token": token},
+        files={"file": ("photo.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+
+    submit = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    assert submit.status_code == 200
+    assert submit.json()["data"]["submitted"] is True
+
+    dashboard = test_client.get(
+        "/api/v1/dashboard/quotes",
+        headers={"X-Dashboard-Password": "test-dashboard-pass"},
+    )
+    assert dashboard.status_code == 200
+    quotes = dashboard.json()["data"]["quotes"]
+    quote = next(item for item in quotes if item["quote_number"] == "Q-SUBMIT")
+    assert quote["job_number"] == "JOB-SUBMIT"
+    assert quote["works"][0]["scope"] == "Submitted work"
+    assert quote["works"][0]["details"]["scope"] == "Submitted work"
+    assert quote["works"][0]["attachments"][0]["file_name"] == "photo.jpg"
+    assert quote["final_total"] is not None
+
+
+def test_dashboard_reopen_quote_for_refill(eworks_api_client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "dashboard_password", "test-dashboard-pass")
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(quote_number="Q-REOPEN", job_number="JOB-REOPEN")).json()["data"]
+    session_id = created["session_id"]
+    token = created["session_token"]
+    step2 = {"works": [_alex_work_block(scope="Before reopen")], "congestion_required": True, "congestion_amount": 18}
+
+    test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    submit = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    assert submit.status_code == 200
+
+    reopen = test_client.post(
+        f"/api/v1/dashboard/quotes/{session_id}/reopen",
+        headers={"X-Dashboard-Password": "test-dashboard-pass"},
+    )
+    assert reopen.status_code == 200
+    reopened = reopen.json()["data"]
+    assert reopened["session_id"] == session_id
+    assert reopened["session_token"] == token
+
+    get_session = test_client.get(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+    )
+    assert get_session.status_code == 200
+    ui_state = get_session.json()["data"]["ui_state"]
+    assert ui_state["current_step"] == 1
+    assert ui_state["last_result"] is None
+
+    patch = test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": {"works": [_alex_work_block(scope="After reopen")]}},
+    )
+    assert patch.status_code == 200
+
+
+def test_dashboard_recalculates_when_last_result_missing(eworks_api_client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "dashboard_password", "test-dashboard-pass")
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(quote_number="Q-RECALC", job_number="JOB-RECALC")).json()["data"]
+    session_id = created["session_id"]
+    token = created["session_token"]
+    step2 = {"works": [_alex_work_block(scope="Recalc scope")], "congestion_required": True, "congestion_amount": 18}
+
+    test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    submit = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    assert submit.status_code == 200
+
+    test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"ui_state": {"current_step": 1, "max_reachable_step": 1}},
+    )
+
+    dashboard = test_client.get(
+        "/api/v1/dashboard/quotes",
+        headers={"X-Dashboard-Password": "test-dashboard-pass"},
+    )
+    assert dashboard.status_code == 200
+    quote = next(item for item in dashboard.json()["data"]["quotes"] if item["quote_number"] == "Q-RECALC")
+    assert quote["final_total"] is not None
+    assert quote["works"][0]["labour_subtotal"] is not None
+    assert quote["works"][0]["internal_notes"]
+
+
+def test_dashboard_combine_notes_merges_same_trade_works(eworks_api_client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "dashboard_password", "test-dashboard-pass")
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(quote_number="Q-COMBINE", job_number="JOB-COMBINE")).json()["data"]
+    session_id = created["session_id"]
+    token = created["session_token"]
+    step2 = {
+        "works": [
+            _alex_work_block(scope="Work one", materials_to_order=[{"link": "Item", "quantity": 1, "cost": 100}]),
+            _alex_work_block(scope="Work two", materials_to_order=[{"link": "Wsb", "quantity": 1, "cost": 10}]),
+        ],
+        "congestion_required": True,
+        "congestion_amount": 18,
+    }
+
+    test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    submit = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    assert submit.status_code == 200
+
+    combine = test_client.post(
+        f"/api/v1/dashboard/quotes/{session_id}/combine-notes",
+        headers={"X-Dashboard-Password": "test-dashboard-pass"},
+        json={"work_indexes": [0, 1]},
+    )
+    assert combine.status_code == 200
+    notes = combine.json()["data"]["internal_notes"]
+    assert notes.count("Enter this information into internal notes:") == 1
+    assert "Item x 1" in notes
+    assert "Wsb x 1" in notes
+    assert "Work 1:" not in notes
+    assert "Work 2:" not in notes
+
+
+def test_dashboard_combined_pdf_download(eworks_api_client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "dashboard_password", "test-dashboard-pass")
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(quote_number="Q-PDF", job_number="JOB-PDF")).json()["data"]
+    session_id = created["session_id"]
+    token = created["session_token"]
+    step2 = {
+        "works": [
+            _alex_work_block(scope="PDF work one"),
+            _alex_work_block(scope="PDF work two"),
+        ],
+        "congestion_required": True,
+        "congestion_amount": 18,
+    }
+
+    test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    submit = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    assert submit.status_code == 200
+
+    for view_type in ("client", "optimal"):
+        response = test_client.post(
+            f"/api/v1/dashboard/quotes/{session_id}/combined-pdf",
+            headers={"X-Dashboard-Password": "test-dashboard-pass"},
+            json={"work_indexes": [0, 1], "view_type": view_type},
+        )
+        assert response.status_code == 200
+        expected_stem = "Q-PDF_Client_view" if view_type == "client" else "Q-PDF_optimal_view"
+        disposition = response.headers["content-disposition"]
+        assert f'filename="{expected_stem}.pdf"' in disposition or f'filename="{expected_stem}.html"' in disposition
+        assert response.headers["content-type"] in {"application/pdf", "text/html; charset=utf-8"}
+        body = response.content
+        assert len(body) > 100
+        if response.headers["content-type"].startswith("text/html"):
+            assert b"PDF work one" in body
+            if view_type == "optimal":
+                assert b"OPTIMAL QUOTE SUMMARY" in body
+            else:
+                assert b"QUOTE SUMMARY" in body
+
+
+def test_patch_ui_state_preserves_last_result_after_submit(eworks_api_client):
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(quote_number="Q-PATCH", job_number="JOB-PATCH")).json()["data"]
+    session_id = created["session_id"]
+    token = created["session_token"]
+    step2 = {"works": [_alex_work_block(scope="Preserve result")], "congestion_required": True, "congestion_amount": 18}
+
+    submit = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    assert submit.status_code == 200
+
+    patch = test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"ui_state": {"current_step": 2, "max_reachable_step": 2}},
+    )
+    assert patch.status_code == 200
+    ui_state = patch.json()["data"]["ui_state"]
+    assert ui_state["last_result"] is not None
+    assert ui_state["last_result"]["breakdown"]["final_total"] is not None
+
+
+def test_patch_step2_rejected_after_submit(eworks_api_client):
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(quote_number="Q-LOCK", job_number="JOB-LOCK")).json()["data"]
+    session_id = created["session_id"]
+    token = created["session_token"]
+    step2 = {"works": [_alex_work_block(scope="Locked after submit")], "congestion_required": True, "congestion_amount": 18}
+
+    submit = test_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={"step2": step2},
+    )
+    assert submit.status_code == 200
+
+    patch = test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": {"works": [_alex_work_block(scope="Should not apply")]}},
+    )
+    assert patch.status_code == 409
+
+
 def test_patch_replays_idempotent_response(eworks_api_client):
     test_client, _ = eworks_api_client
     created = _from_link(test_client, _base_payload()).json()["data"]

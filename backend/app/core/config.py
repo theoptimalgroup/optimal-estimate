@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     eworks_link_sig_required: bool = False
     eworks_session_expire_minutes: int = 480
     eworks_attachment_path: str = "./storage/eworks-attachments"
+    dashboard_password: str = "optimal-dev"
 
     # Storage
     storage_backend: str = "local"  # local | azure_blob

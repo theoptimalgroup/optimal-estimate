@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -315,6 +316,58 @@ class CalculateSessionResponse(BaseModel):
     internal_view: dict
     internal_notes: str | None = None
     client_view: dict
+
+
+class SubmitSessionResponse(BaseModel):
+    submitted: bool = True
+
+
+class DashboardWorkItem(BaseModel):
+    work_index: int
+    scope: str | None = None
+    labour_subtotal: Decimal | None = None
+    materials_subtotal: Decimal | None = None
+    internal_notes: str | None = None
+    attachments: list[SessionAttachmentMeta] = Field(default_factory=list)
+    details: WorkBlockSnapshot | None = None
+
+
+class DashboardQuoteItem(BaseModel):
+    session_id: UUID
+    session_token: str
+    quote_number: str
+    job_number: str
+    client_name: str
+    trade_name: str
+    submitted_at: datetime
+    final_total: Decimal | None = None
+    internal_notes: str | None = None
+    works: list[DashboardWorkItem] = Field(default_factory=list)
+
+
+class DashboardQuotesResponse(BaseModel):
+    quotes: list[DashboardQuoteItem] = Field(default_factory=list)
+
+
+class ReopenQuoteResponse(BaseModel):
+    session_id: UUID
+    session_token: str
+
+
+class CombineWorkNotesRequest(BaseModel):
+    work_indexes: list[int] = Field(min_length=1)
+
+
+class CombineWorkNotesResponse(BaseModel):
+    quote_number: str
+    job_number: str
+    client_name: str
+    internal_notes: str
+
+
+class CombinedPdfRequest(BaseModel):
+    work_indexes: list[int] = Field(min_length=1)
+    view_type: Literal["client", "optimal"] = "client"
 
 
 def step2_to_calculation_inputs(

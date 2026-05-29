@@ -1,0 +1,116 @@
+{% from "quote_summary_shared.html" import cover_styles, cover_page with context %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Quote {{ quote_number }} — Optimal View</title>
+  {{ cover_styles("Optimal Group - Optimal View", landscape_all=true) }}
+</head>
+<body>
+  {% call cover_page() %}{% endcall %}
+
+  <section class="summary-page">
+    <div class="content-block">
+      <h2 class="section-heading">Cost &amp; profit summary</h2>
+      <table class="optimal-summary-tables" align="center">
+        <tr>
+          <td>
+            <table class="kv-table">
+              <tr>
+                <td class="label" colspan="2" style="background:#1e3a8a;color:#ffffff;font-weight:700;text-align:center;">Cost summary</td>
+              </tr>
+              <tr>
+                <td class="label">Material cost</td>
+                <td class="value">{{ cost_summary.material_cost }}</td>
+              </tr>
+              <tr>
+                <td class="label">Labour charge</td>
+                <td class="value">{{ cost_summary.labour_charge }}</td>
+              </tr>
+              <tr>
+                <td class="label">Material charge</td>
+                <td class="value">{{ cost_summary.materials_charge }}</td>
+              </tr>
+              <tr>
+                <td class="label">Client price (ex VAT)</td>
+                <td class="value">{{ cost_summary.client_price }}</td>
+              </tr>
+              <tr>
+                <td class="label">{{ vat_label }}</td>
+                <td class="value">{{ vat_total }}</td>
+              </tr>
+              <tr class="highlight">
+                <td class="label">Quote Total</td>
+                <td class="value">{{ grand_total }}</td>
+              </tr>
+            </table>
+          </td>
+          <td>
+            <table class="kv-table">
+              <tr>
+                <td class="label" colspan="2" style="background:#1e3a8a;color:#ffffff;font-weight:700;text-align:center;">Profit summary</td>
+              </tr>
+              <tr>
+                <td class="label">Optimal cost</td>
+                <td class="value">{{ cost_summary.optimal_cost }}</td>
+              </tr>
+              <tr>
+                <td class="label">Calc profit</td>
+                <td class="value">{{ cost_summary.profit_gbp }}</td>
+              </tr>
+              <tr class="highlight">
+                <td class="label">Margin %</td>
+                <td class="value">{{ cost_summary.margin_pct }}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="items-page">
+    <div class="content-block">
+      <h2 class="items-heading">Item breakdown</h2>
+      <table class="items">
+        <thead>
+          <tr>
+            <th style="width:2%;">#</th>
+            <th style="width:7%;">Description</th>
+            <th style="width:8%;">Findings</th>
+            <th style="width:10%;">Scope</th>
+            <th style="width:7%;">Notes</th>
+            <th style="width:6%;">Mat. cost</th>
+            <th style="width:6%;">Labour chg</th>
+            <th style="width:6%;">Mat. chg</th>
+            <th style="width:6%;">Client price</th>
+            <th style="width:6%;">Optimal cost</th>
+            <th style="width:5%;">Profit</th>
+            <th style="width:5%;">Margin</th>
+            <th style="width:20%;">Internal notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr>
+            <td class="num">{{ item.index }}</td>
+            <td>{{ item.description }}</td>
+            <td>{{ item.findings }}</td>
+            <td>{{ item.scope }}</td>
+            <td>{{ item.notes_exclusions }}</td>
+            <td class="num">{{ item.material_cost }}</td>
+            <td class="num">{{ item.labour_charge }}</td>
+            <td class="num">{{ item.materials_charge }}</td>
+            <td class="num">{{ item.client_price }}</td>
+            <td class="num">{{ item.optimal_cost }}</td>
+            <td class="num">{{ item.profit_gbp }}</td>
+            <td class="num">{{ item.margin_pct }}</td>
+            <td>{{ item.internal_notes }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</body>
+</html>

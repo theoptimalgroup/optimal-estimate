@@ -246,7 +246,7 @@ export function coerceQuestionnaireValues(values: QuestionnaireFormValues): Ques
   };
 }
 
-export const EWORKS_STEPS = ["Estimation Form", "Estimating Questionnaire", "Results"] as const;
+export const EWORKS_STEPS = ["Estimation Form", "Estimating Questionnaire", "Submitted"] as const;
 
 export function formatTimeFrame(unit: TimeUnit, value: number): string {
   if (unit === "hours") {

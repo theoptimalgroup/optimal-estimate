@@ -138,6 +138,15 @@ export type FromLinkResponse = {
   resumed?: boolean;
 };
 
+type CalculationSessionRead = {
+  session_id: string;
+  step1: Step1Snapshot;
+  step2?: Step2Snapshot | null;
+  resolved: ResolvedRuleInfo;
+  expires_at: string;
+  ui_state?: SessionUiState | null;
+};
+
 export type CalculationBreakdown = {
   labour: { label: string; formula: string; total: number | string }[];
   materials: { label: string; formula: string; total: number | string }[];
@@ -248,6 +257,23 @@ export async function createSessionFromLink(payload: string, sig?: string | null
     throw new Error(typeof message === "string" ? message : JSON.stringify(message));
   }
   return body as { success: boolean; data: FromLinkResponse };
+}
+
+export async function fetchSession(sessionId: string, sessionToken: string): Promise<FromLinkResponse> {
+  const data = await sessionFetch<CalculationSessionRead>(
+    `/api/v1/calculation-session/${sessionId}`,
+    sessionToken,
+  );
+  return {
+    session_id: sessionId,
+    session_token: sessionToken,
+    step1: data.step1,
+    step2: data.step2,
+    resolved: data.resolved,
+    expires_at: data.expires_at,
+    ui_state: data.ui_state,
+    resumed: true,
+  };
 }
 
 export async function createDevTestSession() {
@@ -362,6 +388,16 @@ export async function deleteSessionAttachment(sessionId: string, sessionToken: s
     }
     throw new Error(typeof message === "string" ? message : JSON.stringify(message));
   }
+}
+
+export async function submitSession(sessionId: string, sessionToken: string, step2?: Step2Snapshot) {
+  const body = step2 ? { step2 } : {};
+  const idempotencyKey = buildIdempotencyKey(`eworks-${sessionId}-submit`, body);
+  return sessionFetch<{ submitted: boolean }>(`/api/v1/calculation-session/${sessionId}/submit`, sessionToken, {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 }
 
 export async function calculateSession(sessionId: string, sessionToken: string, step2?: Step2Snapshot) {

@@ -1,0 +1,42 @@
+{% from "quote_summary_shared.html" import cover_styles, cover_page with context %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Quote {{ quote_number }} — Client View</title>
+  {{ cover_styles("Optimal Group - Client Quote", landscape_all=true) }}
+</head>
+<body>
+  {% call cover_page() %}{% endcall %}
+
+  <section class="items-page">
+    <div class="content-block">
+      <h2 class="items-heading">Scope of works</h2>
+      <table class="items">
+      <thead>
+        <tr>
+          <th style="width:3%;">#</th>
+          <th style="width:11%;">Description</th>
+          <th style="width:16%;">Findings / Requested work</th>
+          <th style="width:28%;">Scope of works</th>
+          <th style="width:18%;">Notes / Exclusions</th>
+          <th style="width:10%;">Quoted price</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td class="num">{{ item.index }}</td>
+          <td>{{ item.description }}</td>
+          <td>{{ item.findings }}</td>
+          <td>{{ item.scope }}</td>
+          <td>{{ item.notes_exclusions }}</td>
+          <td class="num">{{ item.quoted_price }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+</body>
+</html>
