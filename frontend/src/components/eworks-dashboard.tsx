@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { EworksButton, EworksSectionTitle, cn } from "@/components/eworks-ui";
 import type { DashboardQuoteItem, DashboardWorkItem } from "@/lib/dashboard";
-import type { AttachmentMeta, MaterialOrderRow, WorkBlockSnapshot } from "@/lib/eworks-session";
+import type { AttachmentMeta } from "@/lib/eworks-calculate-schema";
+import type { MaterialOrderRow, WorkBlockSnapshot } from "@/lib/eworks-session";
 import { getAttachmentUrl } from "@/lib/eworks-session";
 
 export function money(value?: number | string | null) {

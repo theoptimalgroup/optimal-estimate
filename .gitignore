@@ -24,3 +24,6 @@ frontend/test-results/
 
 .venv/
 backend/.venv/
+
+# Local deployment script (contains URLs, run manually)
+deploy.sh

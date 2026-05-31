@@ -80,8 +80,18 @@ export function eworksInputClass(hasError?: boolean) {
 }
 
 export const EworksInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { hasError?: boolean }>(
-  function EworksInput({ className, hasError, ...props }, ref) {
-    return <input ref={ref} className={cn(eworksInputClass(hasError), className)} {...props} />;
+  function EworksInput({ className, hasError, onFocus, ...props }, ref) {
+    return (
+      <input
+        ref={ref}
+        className={cn(eworksInputClass(hasError), className)}
+        onFocus={(e) => {
+          e.target.select();
+          onFocus?.(e);
+        }}
+        {...props}
+      />
+    );
   },
 );
 

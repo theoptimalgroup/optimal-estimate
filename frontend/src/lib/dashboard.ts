@@ -1,5 +1,6 @@
 import { getApiUrl } from "@/lib/api";
-import type { AttachmentMeta, WorkBlockSnapshot } from "@/lib/eworks-session";
+import type { AttachmentMeta } from "@/lib/eworks-calculate-schema";
+import type { WorkBlockSnapshot } from "@/lib/eworks-session";
 
 const DASHBOARD_PASSWORD_KEY = "eworks-dashboard-password";
 
@@ -28,11 +29,6 @@ export type DashboardQuoteItem = {
 
 export type DashboardQuotesResponse = {
   quotes: DashboardQuoteItem[];
-};
-
-export type ReopenQuoteResponse = {
-  session_id: string;
-  session_token: string;
 };
 
 export type ReopenQuoteResponse = {

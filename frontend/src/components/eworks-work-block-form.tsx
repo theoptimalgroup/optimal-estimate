@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import type { ControllerRenderProps } from "react-hook-form";
 import { Controller } from "react-hook-form";
 import type { Control, FieldErrors, FieldPath, UseFormRegister, UseFormSetValue, UseFormWatch } from "react-hook-form";
 import {
@@ -18,11 +19,58 @@ import {
 } from "@/components/eworks-ui";
 import type { AttachmentMeta, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
 import { getAttachmentUrl } from "@/lib/eworks-session";
-import { numberFieldOptions } from "@/lib/form-number";
 import { withRegisterChange } from "@/lib/form-register";
 
-function numberInputValue(value: unknown): string | number {
-  return typeof value === "number" && !Number.isNaN(value) ? value : "";
+// Uses type="text" to avoid browser number-input quirks (can't clear, intermediate
+// decimals eaten, spinners fighting React). The `editing` state owns the display while
+// the field is focused; field.value only drives the display when the field is blurred,
+// which eliminates the stale-value race that would restore a just-deleted number.
+function NumericInput({
+  field,
+  hasError,
+  placeholder,
+  className,
+}: {
+  field: ControllerRenderProps<QuestionnaireFormValues, FieldPath<QuestionnaireFormValues>>;
+  hasError?: boolean;
+  placeholder?: string;
+  className?: string;
+}) {
+  // null  → field is not focused; displayValue is derived from field.value
+  // string → user is actively editing; displayValue is this string
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const numericValue = field.value as number | undefined;
+  const displayValue =
+    editing !== null
+      ? editing
+      : typeof numericValue === "number" && !Number.isNaN(numericValue)
+        ? String(numericValue)
+        : "";
+
+  return (
+    <EworksInput
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder}
+      hasError={hasError}
+      className={className}
+      name={field.name}
+      ref={field.ref}
+      value={displayValue}
+      onChange={(e) => {
+        const raw = e.target.value;
+        if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
+        setEditing(raw);
+        const parsed = raw === "" ? undefined : Number(raw);
+        field.onChange(Number.isNaN(parsed as number) ? undefined : parsed);
+      }}
+      onBlur={() => {
+        setEditing(null); // hand display control back to field.value
+        field.onBlur();
+      }}
+    />
+  );
 }
 
 type Props = {
@@ -54,6 +102,7 @@ type MaterialRowsSectionProps = {
   table: MaterialTable;
   rows: WorkBlockFormValues["materials_to_order"];
   register: UseFormRegister<QuestionnaireFormValues>;
+  control: Control<QuestionnaireFormValues>;
   onLinkChange: (index: number, value: string) => void;
   onRemove: (index: number) => void;
 };
@@ -67,6 +116,7 @@ function MaterialRowsSection({
   table,
   rows,
   register,
+  control,
   onLinkChange,
   onRemove,
 }: MaterialRowsSectionProps) {
@@ -98,26 +148,32 @@ function MaterialRowsSection({
                 <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-black lg:hidden">
                   Quantity
                 </span>
-                <EworksInput
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="0"
-                  className="min-h-[44px] w-full min-w-0 bg-white text-base lg:min-h-[40px] lg:text-sm"
-                  {...register(`works.${workIndex}.${table}.${index}.quantity`, numberFieldOptions(0))}
+                <Controller
+                  name={`works.${workIndex}.${table}.${index}.quantity` as FieldPath<QuestionnaireFormValues>}
+                  control={control}
+                  render={({ field }) => (
+                    <NumericInput
+                      field={field}
+                      placeholder="0"
+                      className="min-h-[44px] w-full min-w-0 bg-white text-base lg:min-h-[40px] lg:text-sm"
+                    />
+                  )}
                 />
               </div>
               <div className="min-w-0">
                 <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-black lg:hidden">
                   Cost
                 </span>
-                <EworksInput
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="0.00"
-                  className="min-h-[44px] w-full min-w-0 bg-white text-base lg:min-h-[40px] lg:text-sm"
-                  {...register(`works.${workIndex}.${table}.${index}.cost`, numberFieldOptions(0))}
+                <Controller
+                  name={`works.${workIndex}.${table}.${index}.cost` as FieldPath<QuestionnaireFormValues>}
+                  control={control}
+                  render={({ field }) => (
+                    <NumericInput
+                      field={field}
+                      placeholder="0.00"
+                      className="min-h-[44px] w-full min-w-0 bg-white text-base lg:min-h-[40px] lg:text-sm"
+                    />
+                  )}
                 />
               </div>
             </div>
@@ -257,6 +313,7 @@ export function EworksWorkBlockForm({
           table="materials_to_order"
           rows={rows}
           register={register}
+          control={control}
           onLinkChange={(index, value) => clearMaterialQuantity("materials_to_order", index, value)}
           onRemove={removeRow}
         />
@@ -274,6 +331,7 @@ export function EworksWorkBlockForm({
           table="shelf_materials_rows"
           rows={shelfRows}
           register={register}
+          control={control}
           onLinkChange={(index, value) => clearMaterialQuantity("shelf_materials_rows", index, value)}
           onRemove={removeShelfRow}
         />
@@ -339,17 +397,10 @@ export function EworksWorkBlockForm({
                 control={control}
                 render={({ field, fieldState }) => (
                   <>
-                    <EworksInput
-                      type="number"
-                      min="1"
-                      step="1"
-                      placeholder="Required"
+                    <NumericInput
+                      field={field}
                       hasError={!!fieldState.error}
-                      name={field.name}
-                      ref={field.ref}
-                      value={numberInputValue(field.value)}
-                      onBlur={field.onBlur}
-                      onChange={(event) => field.onChange(numberFieldOptions().setValueAs(event.target.value))}
+                      placeholder="Required"
                     />
                     <EworksFieldError message={fieldState.error?.message} />
                   </>
@@ -379,17 +430,10 @@ export function EworksWorkBlockForm({
                 render={({ field, fieldState }) => (
                   <>
                     <div className="flex items-center gap-2">
-                      <EworksInput
-                        type="number"
-                        step="0.5"
-                        min="0.5"
-                        placeholder="Required"
+                      <NumericInput
+                        field={field}
                         hasError={!!fieldState.error}
-                        name={field.name}
-                        ref={field.ref}
-                        value={numberInputValue(field.value)}
-                        onBlur={field.onBlur}
-                        onChange={(event) => field.onChange(numberFieldOptions().setValueAs(event.target.value))}
+                        placeholder="Required"
                       />
                       <span className="shrink-0 text-sm text-optimal-muted">
                         {values.engineer_time_unit === "hours"
@@ -441,44 +485,31 @@ export function EworksWorkBlockForm({
                   control={control}
                   render={({ field, fieldState }) => (
                     <>
-                      <EworksInput
-                        type="number"
-                        min="1"
-                        placeholder="Required"
+                      <NumericInput
+                        field={field}
                         hasError={!!fieldState.error}
-                        name={field.name}
-                        ref={field.ref}
-                        value={numberInputValue(field.value)}
-                        onBlur={field.onBlur}
-                        onChange={(event) => field.onChange(numberFieldOptions().setValueAs(event.target.value))}
+                        placeholder="Required"
                       />
-                      <EworksFieldError message={fieldState.error?.message} />
-                    </>
-                  )}
-                />
-              </EworksLabel>
-              <EworksLabel>
-                Duration
-                <Controller
-                  name={fieldPath(workIndex, "labour_time_value")}
+                    <EworksFieldError message={fieldState.error?.message} />
+                  </>
+                )}
+              />
+            </EworksLabel>
+            <EworksLabel>
+              Duration
+              <Controller
+                name={fieldPath(workIndex, "labour_time_value")}
                   control={control}
                   render={({ field, fieldState }) => (
                     <>
                       <div className="flex items-center gap-2">
-                        <EworksInput
-                          type="number"
-                          step="0.5"
-                          min="0.5"
-                          placeholder="Required"
+                        <NumericInput
+                          field={field}
                           hasError={!!fieldState.error}
-                          name={field.name}
-                          ref={field.ref}
-                          value={numberInputValue(field.value)}
-                          onBlur={field.onBlur}
-                          onChange={(event) => field.onChange(numberFieldOptions().setValueAs(event.target.value))}
+                          placeholder="Required"
                         />
-                        <span className="shrink-0 text-sm text-optimal-muted">
-                          {values.labour_time_value === 1 ? "day" : "days"}
+                      <span className="shrink-0 text-sm text-optimal-muted">
+                        {values.labour_time_value === 1 ? "day" : "days"}
                         </span>
                       </div>
                       <EworksFieldError message={fieldState.error?.message} />
@@ -522,17 +553,35 @@ export function EworksWorkBlockForm({
                 <>
                   <EworksLabel>
                     Rate per hour
-                    <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "parking_rate_per_hour"), numberFieldOptions(0))} />
+                    <Controller
+                      name={fieldPath(workIndex, "parking_rate_per_hour")}
+                      control={control}
+                      render={({ field }) => (
+                        <NumericInput field={field} />
+                      )}
+                    />
                   </EworksLabel>
                   <EworksLabel>
                     Hours
-                    <EworksInput type="number" min="0" step="0.5" {...register(fieldPath(workIndex, "parking_hours"), numberFieldOptions(0))} />
+                    <Controller
+                      name={fieldPath(workIndex, "parking_hours")}
+                      control={control}
+                      render={({ field }) => (
+                        <NumericInput field={field} />
+                      )}
+                    />
                   </EworksLabel>
                 </>
               ) : (
                 <EworksLabel>
                   Fixed amount (£)
-                  <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "parking_fixed_amount"), numberFieldOptions(0))} />
+                  <Controller
+                    name={fieldPath(workIndex, "parking_fixed_amount")}
+                    control={control}
+                    render={({ field }) => (
+                      <NumericInput field={field} />
+                    )}
+                  />
                 </EworksLabel>
               )}
             </>
@@ -555,16 +604,34 @@ export function EworksWorkBlockForm({
           {values.congestion_required && (
             <EworksLabel>
               Congestion amount (£)
-              <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "congestion_amount"), numberFieldOptions(0))} />
+              <Controller
+                name={fieldPath(workIndex, "congestion_amount")}
+                control={control}
+                render={({ field }) => (
+                  <NumericInput field={field} />
+                )}
+              />
             </EworksLabel>
           )}
           <EworksLabel>
             Travel charge (£)
-            <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "travel_charge"), numberFieldOptions(0))} />
+            <Controller
+              name={fieldPath(workIndex, "travel_charge")}
+              control={control}
+              render={({ field }) => (
+                <NumericInput field={field} />
+              )}
+            />
           </EworksLabel>
           <EworksLabel>
             Other charge (£)
-            <EworksInput type="number" min="0" step="0.01" {...register(fieldPath(workIndex, "other_charge"), numberFieldOptions(0))} />
+            <Controller
+              name={fieldPath(workIndex, "other_charge")}
+              control={control}
+              render={({ field }) => (
+                <NumericInput field={field} />
+              )}
+            />
           </EworksLabel>
           {values.other_charge > 0 && (
             <EworksLabel className="sm:col-span-2">
