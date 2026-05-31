@@ -15,6 +15,8 @@ from app.schemas.eworks_link import (
     CalculationSessionRead,
     FromLinkRequest,
     ResolvedRuleInfo,
+    RewordScopeRequest,
+    RewordScopeResponse,
     SessionPdfRequest,
     SessionUiState,
     Step1Snapshot,
@@ -31,6 +33,7 @@ from app.services.calculation_session_service import (
     submit_session,
     update_session_step2,
 )
+from app.services.scope_reword_service import reword_scope_text
 from app.services.eworks_attachment_service import read_session_attachment
 from app.services.eworks_link_service import create_dev_test_session, create_session_from_link, get_session_by_token
 
@@ -189,6 +192,21 @@ async def remove_attachment(
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return Response(status_code=204)
+
+
+@router.post("/{session_id}/reword-scope")
+def reword_scope(
+    session_id: UUID,
+    payload: RewordScopeRequest,
+    db: DbSession,
+    session=Depends(_require_session_token),
+):
+    _ = session  # session token validated; no session mutation required
+    try:
+        reworded_text = reword_scope_text(payload.text)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return success_response(RewordScopeResponse(reworded_text=reworded_text))
 
 
 @router.post("/{session_id}/submit")

@@ -410,6 +410,17 @@ export async function calculateSession(sessionId: string, sessionToken: string, 
   });
 }
 
+export async function rewordScope(sessionId: string, sessionToken: string, text: string) {
+  return sessionFetch<{ reworded_text: string }>(
+    `/api/v1/calculation-session/${sessionId}/reword-scope`,
+    sessionToken,
+    {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    },
+  );
+}
+
 export async function downloadSessionPdf(
   sessionId: string,
   sessionToken: string,

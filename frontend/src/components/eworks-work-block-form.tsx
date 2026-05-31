@@ -18,7 +18,7 @@ import {
   eworksInputClass,
 } from "@/components/eworks-ui";
 import type { AttachmentMeta, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
-import { getAttachmentUrl } from "@/lib/eworks-session";
+import { getAttachmentUrl, rewordScope } from "@/lib/eworks-session";
 import { withRegisterChange } from "@/lib/form-register";
 
 // Uses type="text" to avoid browser number-input quirks (can't clear, intermediate
@@ -216,6 +216,10 @@ export function EworksWorkBlockForm({
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [rewordingScope, setRewordingScope] = useState(false);
+  const [rewordError, setRewordError] = useState<string | null>(null);
+
+  const scopeText = values.scope?.trim() ?? "";
 
   useEffect(() => {
     if (values.markup_value === undefined || Number.isNaN(Number(values.markup_value))) {
@@ -281,10 +285,37 @@ export function EworksWorkBlockForm({
     setValue(`works.${workIndex}.labour_needed`, 0, { shouldValidate: true });
   };
 
+  const handleRewordScope = async () => {
+    if (!scopeText) {
+      setRewordError("Enter scope text first");
+      return;
+    }
+    setRewordError(null);
+    setRewordingScope(true);
+    try {
+      const result = await rewordScope(sessionId, sessionToken, scopeText);
+      setValue(`works.${workIndex}.scope`, result.reworded_text, { shouldValidate: true });
+    } catch (error) {
+      setRewordError(error instanceof Error ? error.message : "Failed to reword scope");
+    } finally {
+      setRewordingScope(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <EworksSectionTitle title="Scope of Works" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <EworksSectionTitle title="Scope of Works" />
+          <EworksButton
+            variant="secondary"
+            className="min-h-[36px] px-3 text-xs"
+            disabled={rewordingScope || !scopeText}
+            onClick={() => void handleRewordScope()}
+          >
+            {rewordingScope ? "Rewording…" : "Reword with AI"}
+          </EworksButton>
+        </div>
         <Controller
           name={fieldPath(workIndex, "scope")}
           control={control}
@@ -297,9 +328,12 @@ export function EworksWorkBlockForm({
                 ref={field.ref}
                 value={typeof field.value === "string" ? field.value : ""}
                 onBlur={field.onBlur}
-                onChange={field.onChange}
+                onChange={(event) => {
+                  setRewordError(null);
+                  field.onChange(event);
+                }}
               />
-              <EworksFieldError message={fieldState.error?.message} />
+              <EworksFieldError message={rewordError ?? fieldState.error?.message} />
             </>
           )}
         />

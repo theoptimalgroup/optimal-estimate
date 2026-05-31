@@ -55,6 +55,28 @@ class Settings(BaseSettings):
     frontend_url: str | None = None
     azure_storage_managed_identity_client_id: str | None = None
 
+    # Azure OpenAI — scope rewording
+    azure_openai_endpoint: str | None = None
+    azure_openai_deployment: str | None = None
+    azure_openai_api_key: str | None = None
+    azure_openai_api_version: str = "2024-10-21"
+    azure_openai_use_managed_identity: bool = False
+    scope_reword_enabled: bool = False
+
+    @property
+    def scope_reword_configured(self) -> bool:
+        if not self.azure_openai_endpoint or not self.azure_openai_deployment:
+            return False
+        if self.azure_openai_use_managed_identity:
+            return True
+        return bool(self.azure_openai_api_key)
+
+    @property
+    def effective_scope_reword_enabled(self) -> bool:
+        if not self.scope_reword_enabled:
+            return False
+        return self.scope_reword_configured
+
     @field_validator("environment", mode="before")
     @classmethod
     def normalize_environment(cls, value: str) -> str:
@@ -137,6 +159,12 @@ class Settings(BaseSettings):
                 raise ValueError("Azure Blob Storage requires AZURE_STORAGE_ACCOUNT_NAME or AZURE_STORAGE_CONNECTION_STRING")
             if not self.azure_storage_connection_string and not self.azure_storage_use_managed_identity:
                 raise ValueError("Azure Blob Storage in staging/production requires managed identity or a connection string")
+
+        if self.scope_reword_enabled and not self.scope_reword_configured:
+            raise ValueError(
+                "SCOPE_REWORD_ENABLED requires AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, "
+                "and either AZURE_OPENAI_API_KEY or AZURE_OPENAI_USE_MANAGED_IDENTITY=true"
+            )
 
         return self
 

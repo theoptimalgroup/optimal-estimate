@@ -322,6 +322,14 @@ class SubmitSessionResponse(BaseModel):
     submitted: bool = True
 
 
+class RewordScopeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class RewordScopeResponse(BaseModel):
+    reworded_text: str
+
+
 class DashboardWorkItem(BaseModel):
     work_index: int
     scope: str | None = None
