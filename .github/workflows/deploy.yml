@@ -1,0 +1,112 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  ACR: ${{ vars.AZURE_CONTAINER_REGISTRY }}
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+
+jobs:
+  # ── 1. Run DB migrations before touching containers ───────────────────────
+  migrate:
+    name: DB migrations
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: ./scripts/deploy-migrate.sh
+
+  # ── 2. Build & deploy backend ──────────────────────────────────────────────
+  deploy-backend:
+    name: Deploy backend
+    needs: migrate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR }}
+
+      - name: Build & push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ACR }}.azurecr.io/backend:${{ github.sha }},${{ env.ACR }}.azurecr.io/backend:latest
+          cache-from: type=registry,ref=${{ env.ACR }}.azurecr.io/backend:buildcache
+          cache-to: type=registry,ref=${{ env.ACR }}.azurecr.io/backend:buildcache,mode=max
+
+      - name: Update backend Container App
+        run: |
+          az containerapp update \
+            --name optimal-estimate-api \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR }}.azurecr.io/backend:${{ github.sha }}
+
+  # ── 3. Build & deploy frontend ─────────────────────────────────────────────
+  deploy-frontend:
+    name: Deploy frontend
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR }}
+
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ACR }}.azurecr.io/frontend:${{ github.sha }},${{ env.ACR }}.azurecr.io/frontend:latest
+          build-args: NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+          cache-from: type=registry,ref=${{ env.ACR }}.azurecr.io/frontend:buildcache
+          cache-to: type=registry,ref=${{ env.ACR }}.azurecr.io/frontend:buildcache,mode=max
+
+      - name: Update frontend Container App
+        run: |
+          az containerapp update \
+            --name optimal-estimate-web \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR }}.azurecr.io/frontend:${{ github.sha }}
