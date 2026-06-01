@@ -8,9 +8,9 @@ import {
   EworksInput,
   EworksLabel,
   EworksLoadingScreen,
-  EworksPageShell,
+  DashboardPageShell,
 } from "@/components/eworks-ui";
-import { QuoteSummaryCard } from "@/components/eworks-dashboard";
+import { QuotesTable } from "@/components/eworks-dashboard";
 import {
   clearDashboardPassword,
   fetchSubmittedQuotes,
@@ -79,13 +79,13 @@ function EworksDashboardContent() {
 
   if (!authenticatedPassword) {
     return (
-      <div className="min-h-screen bg-optimal-bg px-4 py-8 sm:px-6">
-        <div className="mx-auto max-w-md space-y-6">
+      <div className="min-h-screen bg-gray-50 px-6 py-10 lg:px-8">
+        <div className="mx-auto w-full max-w-lg space-y-6">
           <div className="space-y-2 text-center">
-            <h1 className="text-2xl font-bold uppercase tracking-wide text-white">Submitted Quotes</h1>
+            <h1 className="text-2xl font-bold uppercase tracking-wide text-gray-900">Submitted Quotes</h1>
             <p className="text-sm text-optimal-muted">Enter the dashboard password to view submitted estimates.</p>
           </div>
-          <form className="space-y-4 rounded-lg border border-white/10 bg-optimal-elevated p-5" onSubmit={(event) => void handleUnlock(event)}>
+          <form className="space-y-4 rounded-lg border border-gray-200 bg-optimal-elevated p-5" onSubmit={(event) => void handleUnlock(event)}>
             <EworksLabel>
               Dashboard password
               <EworksInput
@@ -95,7 +95,7 @@ function EworksDashboardContent() {
                 autoComplete="current-password"
               />
             </EworksLabel>
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error && <p className="text-sm text-red-600">{error}</p>}
             <EworksButton className="w-full" type="submit" disabled={loading || !password.trim()}>
               {loading ? "Checking…" : "Unlock dashboard"}
             </EworksButton>
@@ -106,7 +106,7 @@ function EworksDashboardContent() {
   }
 
   return (
-    <EworksPageShell
+    <DashboardPageShell
       title="Submitted Quotes"
       subtitle="Select a quote to view works, photos, and internal notes"
       footer={
@@ -119,7 +119,7 @@ function EworksDashboardContent() {
     >
       {unlockedQuote && (
         <div className="mb-4 rounded-lg border border-optimal-orange/40 bg-optimal-orange/10 p-4">
-          <p className="text-sm font-medium text-white">
+          <p className="text-sm font-medium text-gray-900">
             Quote {unlockedQuote} is unlocked.
           </p>
           {unlockedSessionId && unlockedSessionToken ? (
@@ -132,7 +132,7 @@ function EworksDashboardContent() {
               <button
                 type="button"
                 onClick={() => router.replace("/eworks/dashboard")}
-                className="text-sm text-optimal-muted underline-offset-2 hover:text-white hover:underline"
+                className="text-sm text-optimal-muted underline-offset-2 hover:text-gray-900 hover:underline"
               >
                 Dismiss
               </button>
@@ -143,22 +143,12 @@ function EworksDashboardContent() {
       {loading ? (
         <EworksLoadingScreen message="Loading submitted quotes…" />
       ) : quotes.length === 0 ? (
-        <div className="rounded-lg border border-white/10 bg-optimal-elevated p-6 text-center">
+        <div className="rounded-lg border border-gray-200 bg-optimal-elevated p-6 text-center">
           <p className="text-sm text-optimal-muted">No submitted quotes yet.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {quotes.map((quote) => (
-            <Link
-              key={quote.session_id}
-              href={`/eworks/dashboard/${quote.session_id}`}
-              className="block rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-optimal-orange"
-            >
-              <QuoteSummaryCard quote={quote} />
-            </Link>
-          ))}
-        </div>
+        <QuotesTable quotes={quotes} />
       )}
-    </EworksPageShell>
+    </DashboardPageShell>
   );
 }

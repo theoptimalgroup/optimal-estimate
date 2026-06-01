@@ -66,7 +66,7 @@ type Props = {
 export function EworksEstimationFormStep({ step1, resolved }: Props) {
   return (
     <section className="space-y-6">
-      <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3.5 text-sm leading-relaxed text-optimal-muted">
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3.5 text-sm leading-relaxed text-optimal-muted">
         This estimation form is supplied by your eWorks link and cannot be edited here.
       </div>
 
@@ -90,7 +90,7 @@ export function EworksEstimationFormStep({ step1, resolved }: Props) {
         />
       </dl>
 
-      <div className="rounded-lg border border-white/10 bg-optimal-elevated px-4 py-3.5">
+      <div className="rounded-lg border border-gray-200 bg-optimal-elevated px-4 py-3.5">
         <EworksSectionTitle title="Rate rule" />
         <p className="mt-2 text-xs leading-relaxed text-optimal-muted">
           Trade: {step1.trade_name} · Rule: {resolved.formula_source.toUpperCase()}

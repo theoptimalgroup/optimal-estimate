@@ -305,15 +305,19 @@ export async function patchSession(
   sessionId: string,
   sessionToken: string,
   payload: { step2?: Step2Snapshot; ui_state?: SessionUiState },
+  options?: { idempotency?: boolean },
 ) {
-  const idempotencyKey = buildIdempotencyKey(`eworks-${sessionId}-patch`, payload);
+  const headers: Record<string, string> = {};
+  if (options?.idempotency !== false) {
+    headers["Idempotency-Key"] = buildIdempotencyKey(`eworks-${sessionId}-patch`, payload);
+  }
   return sessionFetch<{ step2?: Step2Snapshot; ui_state?: SessionUiState }>(
     `/api/v1/calculation-session/${sessionId}`,
     sessionToken,
     {
       method: "PATCH",
       body: JSON.stringify(payload),
-      headers: { "Idempotency-Key": idempotencyKey },
+      headers,
     },
   );
 }

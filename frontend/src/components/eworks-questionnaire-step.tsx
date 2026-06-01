@@ -98,27 +98,27 @@ export function EworksQuestionnaireStep({
               }}
               className={cn(
                 "rounded-lg border transition-all duration-300 ease-out",
-                isExpanded ? "overflow-visible border-optimal-orange/40 bg-optimal-elevated shadow-lg shadow-black/20" : "overflow-hidden border-white/10 bg-optimal-elevated/70",
+                isExpanded ? "overflow-visible border-optimal-orange/40 bg-white shadow-lg" : "overflow-hidden border-gray-200 bg-white",
                 hasErrors && !isExpanded && "border-red-400/40 ring-1 ring-red-400/20",
               )}
             >
               <div className="flex items-center gap-2 p-2 pl-3">
                 <button
                   type="button"
-                  className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors duration-200 hover:bg-white/5 active:bg-white/10"
+                  className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors duration-200 hover:bg-gray-50 active:bg-gray-100"
                   onClick={() => setExpandedIndex(isExpanded ? -1 : index)}
                   aria-expanded={isExpanded}
                 >
                   <span
                     className={cn(
                       "flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all duration-200",
-                      isExpanded ? "bg-optimal-orange text-optimal-bg" : "bg-white/10 text-white",
+                      isExpanded ? "bg-optimal-orange text-gray-900" : "bg-gray-100 text-gray-900",
                     )}
                   >
                     {index + 1}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-white">Work {index + 1}</span>
+                    <span className="block text-sm font-semibold text-gray-900">Work {index + 1}</span>
                     {!isExpanded && scopePreview && (
                       <span className="block truncate text-xs text-optimal-muted">
                         {scopePreview.slice(0, 72)}
@@ -143,7 +143,7 @@ export function EworksQuestionnaireStep({
                 )}
               >
                 <div className="min-h-0 min-w-0">
-                  <div className="border-t border-white/10 px-4 pb-4 pt-2">
+                  <div className="border-t border-gray-200 px-4 pb-4 pt-2">
                     <EworksWorkBlockForm
                       workIndex={index}
                       control={control}

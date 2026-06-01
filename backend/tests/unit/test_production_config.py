@@ -61,6 +61,20 @@ def test_staging_azure_blob_requires_managed_identity_or_connection_string():
         )
 
 
+def test_production_scope_reword_enabled_without_full_config_does_not_crash():
+    settings = Settings(
+        _env_file=None,
+        environment="production",
+        frontend_url="https://estimate.optimal.example",
+        storage_backend="local",
+        scope_reword_enabled=True,
+        azure_openai_endpoint="https://example.openai.azure.com",
+    )
+    assert settings.scope_reword_enabled is True
+    assert settings.scope_reword_configured is False
+    assert settings.effective_scope_reword_enabled is False
+
+
 def test_staging_azure_blob_accepts_managed_identity():
     settings = Settings(
         _env_file=None,

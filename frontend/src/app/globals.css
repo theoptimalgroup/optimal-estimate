@@ -3,24 +3,27 @@
 @tailwind utilities;
 
 :root {
-  --optimal-bg: #000000;
-  --optimal-bg-elevated: #141414;
+  --optimal-bg: #ffffff;
+  --optimal-bg-elevated: #ffffff;
+  --optimal-panel: #f3f4f6;
+  --optimal-surface: #f9fafb;
   --optimal-orange: #f9a825;
   --optimal-orange-dark: #e09400;
-  --optimal-field: #cfd2d6;
+  --optimal-field: #ffffff;
   --optimal-field-text: #1f2937;
-  --optimal-muted: #9ca3af;
+  --optimal-muted: #6b7280;
+  --optimal-text: #111827;
   --background: #ffffff;
   --foreground: #111827;
 }
 
 html {
-  background: #ffffff;
+  background: var(--optimal-bg);
 }
 
 body {
   color: var(--foreground);
-  background: #ffffff;
+  background: var(--optimal-bg);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

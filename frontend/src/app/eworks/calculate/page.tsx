@@ -28,6 +28,7 @@ import {
   type SessionUiState,
 } from "@/lib/eworks-session";
 import {
+  coerceQuestionnaireValues,
   defaultQuestionnaireValues,
   EWORKS_STEPS,
   questionnaireToStep2,
@@ -150,6 +151,7 @@ function EworksCalculateContent() {
   const [focusWorkIndex, setFocusWorkIndex] = useState<number | null>(null);
   const autoSaveReady = useRef(false);
   const autosaveInFlightRef = useRef<Promise<void> | null>(null);
+  const autosaveInFlightKeyRef = useRef<string | null>(null);
   const lastSavedStep2Ref = useRef<string | null>(null);
   const lastSavedUiRef = useRef<string | null>(null);
   const isDev = process.env.NODE_ENV === "development";
@@ -273,25 +275,35 @@ function EworksCalculateContent() {
   const autosave = useCallback(
     async (formValues: QuestionnaireFormValues) => {
       if (!session || !autoSaveReady.current || step === 0 || step === 2 || submitting) return;
-      const step2 = questionnaireToStep2(formValues);
+      const step2 = questionnaireToStep2(coerceQuestionnaireValues(formValues));
       const step2Key = JSON.stringify(step2);
       if (step2Key === lastSavedStep2Ref.current) return;
+      if (autosaveInFlightKeyRef.current === step2Key && autosaveInFlightRef.current) {
+        return autosaveInFlightRef.current;
+      }
       setSaveStatus("saving");
+      autosaveInFlightKeyRef.current = step2Key;
       const savePromise = (async () => {
         try {
-          await patchSession(session.session_id, session.session_token, {
-            step2,
-            ui_state: {
-              current_step: step,
-              max_reachable_step: maxReachableStep,
+          await patchSession(
+            session.session_id,
+            session.session_token,
+            {
+              step2,
+              ui_state: {
+                current_step: step,
+                max_reachable_step: maxReachableStep,
+              },
             },
-          });
+            { idempotency: false },
+          );
           lastSavedStep2Ref.current = step2Key;
           setSaveStatus("saved");
         } catch {
           setSaveStatus("error");
         } finally {
           autosaveInFlightRef.current = null;
+          autosaveInFlightKeyRef.current = null;
         }
       })();
       autosaveInFlightRef.current = savePromise;
@@ -306,7 +318,7 @@ function EworksCalculateContent() {
     const uiKey = JSON.stringify(uiState);
     if (uiKey === lastSavedUiRef.current) return;
     try {
-      await patchSession(session.session_id, session.session_token, { ui_state: uiState });
+      await patchSession(session.session_id, session.session_token, { ui_state: uiState }, { idempotency: false });
       lastSavedUiRef.current = uiKey;
     } catch {
       // ignore background progress save failures
@@ -469,7 +481,7 @@ function EworksCalculateContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-optimal-bg">
+      <div className="min-h-screen bg-gray-50">
         <EworksLoadingScreen />
       </div>
     );
@@ -477,25 +489,25 @@ function EworksCalculateContent() {
 
   if (loadError || !session || !step1) {
     return (
-      <div className="min-h-screen bg-optimal-bg px-4 py-8 sm:px-6">
+      <div className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6">
         <div className="mx-auto max-w-lg animate-fade-in">
-          <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-6">
+          <div className="rounded-lg border border-red-300 bg-red-50 p-6">
             <EworksSectionTitle title="Invalid calculation link" />
-            <p className="mt-3 text-sm leading-relaxed text-red-200">{loadError ?? "This link could not be opened."}</p>
+            <p className="mt-3 text-sm leading-relaxed text-red-800">{loadError ?? "This link could not be opened."}</p>
             {loadError?.includes("truncated") && (
-              <p className="mt-2 text-sm leading-relaxed text-red-200">
+              <p className="mt-2 text-sm leading-relaxed text-red-800">
                 Copy the <strong>entire</strong> URL from the script output — do not use shortened links with{" "}
-                <code className="rounded bg-red-500/20 px-1.5 py-0.5 text-xs">...</code>.
+                <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">...</code>.
               </p>
             )}
-            <div className="mt-4 space-y-2 text-sm leading-relaxed text-red-200/90">
+            <div className="mt-4 space-y-2 text-sm leading-relaxed text-red-700">
               <p>
-                The <code className="rounded bg-red-500/20 px-1.5 py-0.5 text-xs">payload</code> query parameter must be{" "}
+                The <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">payload</code> query parameter must be{" "}
                 <strong>base64-encoded JSON</strong> with required fields.
               </p>
               <p>
                 Generate a test link:{" "}
-                <code className="rounded bg-red-500/20 px-1.5 py-0.5 text-xs">python3 scripts/generate_eworks_link.py</code>
+                <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">python3 scripts/generate_eworks_link.py</code>
               </p>
             </div>
             {isDev && (
@@ -538,7 +550,7 @@ function EworksCalculateContent() {
       footer={
         <div className="space-y-3">
           {(validationError || calcError) && (
-            <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-200 animate-fade-in">
+            <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-800 animate-fade-in">
               {validationError ?? calcError}
             </div>
           )}
@@ -583,16 +595,16 @@ function EworksCalculateContent() {
         )}
 
         {step === 2 && submitted && (
-          <div className="space-y-4 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-6 text-center">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-500/20 text-2xl text-emerald-300">
+          <div className="space-y-4 rounded-lg border border-emerald-300 bg-emerald-50 p-6 text-center">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-700">
               ✓
             </div>
             <div className="space-y-2">
               <EworksSectionTitle title="Quote submitted" />
-              <p className="text-sm leading-relaxed text-emerald-100">
+              <p className="text-sm leading-relaxed text-emerald-800">
                 Your estimate for quote {step1.quote_number} / job {step1.job_number} has been submitted successfully.
               </p>
-              <p className="text-xs text-emerald-200/80">
+              <p className="text-xs text-emerald-700">
                 The office team can review the full calculation and photos in the dashboard.
               </p>
             </div>
@@ -607,7 +619,7 @@ export default function EworksCalculatePage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-optimal-bg">
+        <div className="min-h-screen bg-gray-50">
           <EworksLoadingScreen />
         </div>
       }

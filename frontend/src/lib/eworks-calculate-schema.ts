@@ -239,6 +239,13 @@ function toNumericValueOr(value: unknown, fallback: number): number {
   return toNumericValue(value) ?? fallback;
 }
 
+/** Stable numeric defaults for autosave while the user is mid-edit. */
+function persistenceNumeric(value: unknown, fallback: number): number {
+  const parsed = toNumericValue(value);
+  if (parsed === undefined) return fallback;
+  return parsed;
+}
+
 /** React Hook Form can store numeric inputs as strings; normalize before Zod validation. */
 export function coerceQuestionnaireValues(values: QuestionnaireFormValues): QuestionnaireFormValues {
   return {
@@ -332,11 +339,16 @@ export function shelfMaterialsCostTotal(rows: MaterialOrderRow[]): number {
 export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapshot {
   const labourActive = work.labour_required && work.engineers_required && work.engineer_time_unit === "days";
   const primaryUnit = work.engineers_required ? work.engineer_time_unit : "days";
-  const primaryValue = work.engineers_required ? work.engineer_time_value : work.labour_time_value;
+  const primaryValue = work.engineers_required
+    ? persistenceNumeric(work.engineer_time_value, 1.5)
+    : persistenceNumeric(work.labour_time_value, 1);
+  const engineersNeeded = work.engineers_required ? persistenceNumeric(work.engineers_needed, 1) : 0;
+  const labourNeeded = labourActive ? persistenceNumeric(work.labour_needed, 1) : 0;
+  const labourTimeValue = labourActive ? persistenceNumeric(work.labour_time_value, 1) : 0;
   return {
     scope: work.scope,
-    materials_to_order: work.materials_to_order,
-    shelf_materials_rows: work.shelf_materials_rows,
+    materials_to_order: work.materials_to_order.map(normalizeMaterialRow),
+    shelf_materials_rows: work.shelf_materials_rows.map(normalizeMaterialRow),
     shelf_materials: work.shelf_materials_rows
       .map((row) => row.link?.trim())
       .filter(Boolean)
@@ -346,32 +358,32 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
     best_engineer: work.best_engineer || null,
     subcontractors: work.subcontractors || null,
     engineers_required: work.engineers_required,
-    engineers_needed: work.engineers_required ? work.engineers_needed : 0,
+    engineers_needed: engineersNeeded,
     engineer_time_unit: work.engineer_time_unit,
-    engineer_time_value: work.engineer_time_value,
+    engineer_time_value: persistenceNumeric(work.engineer_time_value, 1.5),
     labour_required: labourActive ? work.labour_required : false,
-    labour_needed: labourActive ? work.labour_needed : 0,
-    labour_time_value: work.labour_time_value,
+    labour_needed: labourNeeded,
+    labour_time_value: labourTimeValue,
     time_frame: formatTimeFrame(primaryUnit, primaryValue),
     other_notes: work.other_notes || null,
     attachments: work.attachments,
-    markup_value: work.markup_value,
-    engineers: work.engineers_required ? work.engineers_needed : 0,
-    labourers: labourActive ? work.labour_needed : 0,
-    labourer_days: labourActive ? work.labour_time_value : 0,
+    markup_value: persistenceNumeric(work.markup_value, 20),
+    engineers: engineersNeeded,
+    labourers: labourNeeded,
+    labourer_days: labourTimeValue,
     labour_type: primaryUnit === "hours" ? "hourly" : "day",
     hours: primaryUnit === "hours" ? primaryValue : 0,
     days: primaryUnit === "days" ? primaryValue : 0,
     // Per-work charge fields (stored in snapshot for round-trip restore)
     parking_required: work.parking_required,
     parking_type: work.parking_type,
-    parking_fixed_amount: work.parking_fixed_amount,
-    parking_rate_per_hour: work.parking_rate_per_hour,
-    parking_hours: work.parking_hours,
+    parking_fixed_amount: persistenceNumeric(work.parking_fixed_amount, 0),
+    parking_rate_per_hour: persistenceNumeric(work.parking_rate_per_hour, 0),
+    parking_hours: persistenceNumeric(work.parking_hours, 0),
     congestion_required: work.congestion_required,
-    congestion_amount: work.congestion_amount,
-    travel_charge: work.travel_charge,
-    other_charge: work.other_charge,
+    congestion_amount: persistenceNumeric(work.congestion_amount, 0),
+    travel_charge: persistenceNumeric(work.travel_charge, 0),
+    other_charge: persistenceNumeric(work.other_charge, 0),
     other_charge_reason: work.other_charge_reason || null,
   };
 }

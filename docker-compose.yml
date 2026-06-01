@@ -23,7 +23,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+psycopg2://estimate:estimate_dev@postgres:5432/estimate_tool
-      CORS_ORIGINS: http://localhost:3000,http://192.168.1.199:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
       - "8000:8000"
     volumes:
@@ -41,8 +41,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
-      NEXT_PUBLIC_API_URL: http://192.168.1.199:8000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
     volumes:

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { EworksButton, EworksSectionTitle, cn } from "@/components/eworks-ui";
 import type { DashboardQuoteItem, DashboardWorkItem } from "@/lib/dashboard";
@@ -48,11 +49,11 @@ function WorkAttachmentsGallery({
 }) {
   return (
     <div className="space-y-3">
-      <EworksSectionTitle title="Photos / Videos" subtitle="Tap to open full size" />
+      <EworksSectionTitle title="Photos / Videos" subtitle="Click to open full size" />
       {attachments.length === 0 ? (
         <p className="text-sm text-optimal-muted">No photos or videos uploaded for this work.</p>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {attachments.map((attachment) => {
             const viewUrl = getAttachmentUrl(quote.session_id, quote.session_token, attachment.id);
             const isPhoto = attachment.media_type === "photo";
@@ -63,7 +64,7 @@ function WorkAttachmentsGallery({
                 href={viewUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="overflow-hidden rounded-lg border border-white/10 bg-optimal-field active:opacity-80"
+                className="overflow-hidden rounded-lg border border-gray-200 bg-optimal-field transition-colors hover:border-gray-300"
               >
                 {isPhoto ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -105,7 +106,7 @@ function DetailRow({ label, value }: { label: string; value?: string | null }) {
   return (
     <div>
       <p className="text-xs uppercase tracking-wide text-optimal-muted">{label}</p>
-      <p className="whitespace-pre-wrap text-sm text-white">{value}</p>
+      <p className="whitespace-pre-wrap text-sm text-gray-900">{value}</p>
     </div>
   );
 }
@@ -127,21 +128,21 @@ function ReadOnlyMaterialTable({
   return (
     <div className="space-y-2">
       <EworksSectionTitle title={title} />
-      <div className="overflow-x-auto rounded-lg border border-white/10">
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
         <table className="min-w-full text-left text-sm">
-          <thead className="bg-white/5 text-xs uppercase tracking-wide text-optimal-muted">
+          <thead className="bg-gray-50 text-xs uppercase tracking-wide text-optimal-muted">
             <tr>
               <th className="px-3 py-2 font-medium">{linkLabel}</th>
               <th className="px-3 py-2 font-medium">Quantity</th>
               <th className="px-3 py-2 font-medium">Cost</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/10">
+          <tbody className="divide-y divide-gray-200">
             {visibleRows.map((row, index) => (
               <tr key={index}>
-                <td className="px-3 py-2 text-white">{row.link || "—"}</td>
-                <td className="px-3 py-2 text-white">{row.quantity ?? "—"}</td>
-                <td className="px-3 py-2 text-white">{money(row.cost)}</td>
+                <td className="px-3 py-2 text-gray-900">{row.link || "—"}</td>
+                <td className="px-3 py-2 text-gray-900">{row.quantity ?? "—"}</td>
+                <td className="px-3 py-2 text-gray-900">{money(row.cost)}</td>
               </tr>
             ))}
           </tbody>
@@ -188,42 +189,42 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
       {hasText(details.scope) && (
         <div className="space-y-2">
           <EworksSectionTitle title="Scope of Works" />
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-white/90">{details.scope}</p>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{details.scope}</p>
         </div>
       )}
 
       <ReadOnlyMaterialTable title="Materials to Order and Cost" linkLabel="Link" rows={details.materials_to_order} />
       <ReadOnlyMaterialTable title="Materials bought off the Shelf and Cost" linkLabel="Item" rows={details.shelf_materials_rows} />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         <DetailRow label="Skill required" value={details.skill_required} />
         <DetailRow label="Best engineer" value={details.best_engineer} />
         <DetailRow label="Subcontractors" value={details.subcontractors} />
       </div>
 
       {engineerDuration && (
-        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
           <p className="text-xs uppercase tracking-wide text-optimal-muted">Engineer</p>
-          <p className="mt-1 text-sm text-white">{engineerDuration}</p>
+          <p className="mt-1 text-sm text-gray-900">{engineerDuration}</p>
         </div>
       )}
 
       {labourDuration && (
-        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
           <p className="text-xs uppercase tracking-wide text-optimal-muted">Labour</p>
-          <p className="mt-1 text-sm text-white">{labourDuration}</p>
+          <p className="mt-1 text-sm text-gray-900">{labourDuration}</p>
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
         <DetailRow label="Time frame" value={details.time_frame} />
         <DetailRow label="Markup" value={details.markup_value != null ? `${details.markup_value}%` : null} />
       </div>
 
       {chargeLines.length > 0 && (
-        <div className="space-y-2 rounded-lg border border-white/10 bg-white/5 p-3">
+        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
           <EworksSectionTitle title="Charges" />
-          <ul className="space-y-1 text-sm text-white">
+          <ul className="space-y-1 text-sm text-gray-900">
             {chargeLines.map((line) => (
               <li key={line}>{line}</li>
             ))}
@@ -264,8 +265,8 @@ export function WorkSection({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-lg border bg-white/5 transition-colors",
-        selected ? "border-optimal-orange/60 ring-1 ring-optimal-orange/30" : "border-white/10",
+        "overflow-hidden rounded-lg border bg-gray-50 transition-colors",
+        selected ? "border-optimal-orange/60 ring-1 ring-optimal-orange/30" : "border-gray-200",
       )}
     >
       <div className="flex items-stretch">
@@ -275,7 +276,7 @@ export function WorkSection({
               type="checkbox"
               checked={selected ?? false}
               onChange={(event) => onSelect(event.target.checked)}
-              className="size-5 rounded border-white/20 bg-optimal-field text-optimal-orange focus:ring-optimal-orange/40"
+              className="size-5 rounded border-gray-300 bg-optimal-field text-optimal-orange focus:ring-optimal-orange/40"
               aria-label={`Select work ${work.work_index + 1}`}
             />
           </label>
@@ -283,7 +284,7 @@ export function WorkSection({
         <button
           type="button"
           onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left transition-colors hover:bg-white/5"
+          className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left transition-colors hover:bg-gray-50"
           aria-expanded={open}
         >
           <span
@@ -296,7 +297,7 @@ export function WorkSection({
             ▶
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-white">Work {work.work_index + 1}</p>
+            <p className="font-semibold text-gray-900">Work {work.work_index + 1}</p>
             {!open && work.scope && (
               <p className="mt-1 truncate text-sm text-optimal-muted">{work.scope}</p>
             )}
@@ -306,27 +307,27 @@ export function WorkSection({
           </div>
           <div className="shrink-0 text-right text-sm">
             <p className="text-xs uppercase tracking-wide text-optimal-muted">Subtotal</p>
-            <p className="font-semibold text-white">{money(workTotal)}</p>
+            <p className="font-semibold text-gray-900">{money(workTotal)}</p>
           </div>
         </button>
       </div>
 
       {open && (
-        <div className="space-y-4 border-t border-white/10 px-4 pb-4 pt-3">
+        <div className="space-y-4 border-t border-gray-200 px-4 pb-4 pt-3">
           {work.details ? (
             <WorkDetailsReadonly details={work.details} />
           ) : (
-            work.scope && <p className="text-sm leading-relaxed text-white/90">{work.scope}</p>
+            work.scope && <p className="text-sm leading-relaxed text-gray-800">{work.scope}</p>
           )}
 
           <WorkAttachmentsGallery quote={quote} attachments={attachments} />
 
-          <div className="grid gap-2 text-sm sm:grid-cols-2">
+          <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-4">
             <p className="text-optimal-muted">
-              Labour subtotal: <span className="font-semibold text-white">{money(work.labour_subtotal)}</span>
+              Labour subtotal: <span className="font-semibold text-gray-900">{money(work.labour_subtotal)}</span>
             </p>
             <p className="text-optimal-muted">
-              Materials subtotal: <span className="font-semibold text-white">{money(work.materials_subtotal)}</span>
+              Materials subtotal: <span className="font-semibold text-gray-900">{money(work.materials_subtotal)}</span>
             </p>
           </div>
 
@@ -378,32 +379,32 @@ export function CombinedNotesModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
       <div className="absolute inset-0" role="presentation" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="combined-notes-title"
-        className="relative z-10 flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg border border-white/10 bg-optimal-elevated shadow-xl"
+        className="relative z-10 flex max-h-[90vh] w-full max-w-6xl flex-col rounded-lg border border-gray-200 bg-optimal-elevated shadow-xl"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
-          <h2 id="combined-notes-title" className="text-lg font-semibold text-white">
+        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
+          <h2 id="combined-notes-title" className="text-lg font-semibold text-gray-900">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-2 py-1 text-sm text-optimal-muted transition-colors hover:bg-white/5 hover:text-white"
+            className="rounded-lg px-2 py-1 text-sm text-optimal-muted transition-colors hover:bg-gray-50 hover:text-gray-900"
             aria-label="Close"
           >
             ✕
           </button>
         </div>
-        <pre className="mx-4 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg bg-optimal-field p-3 text-xs leading-relaxed text-optimal-field-text sm:mx-5">
+        <pre className="mx-5 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg bg-optimal-field p-4 text-xs leading-relaxed text-optimal-field-text">
           {notesText}
         </pre>
-        {pdfError && <p className="px-4 text-sm text-red-400 sm:px-5">{pdfError}</p>}
-        <div className="flex flex-wrap items-center gap-3 border-t border-white/10 px-4 py-3 sm:px-5">
+        {pdfError && <p className="px-5 text-sm text-red-600">{pdfError}</p>}
+        <div className="flex flex-wrap items-center gap-3 border-t border-gray-200 px-5 py-4">
           <EworksButton variant="secondary" onClick={() => void handleCopy()}>
             {copied ? "Copied!" : "Copy to clipboard"}
           </EworksButton>
@@ -444,19 +445,19 @@ export function WorkSelectionBar({
   calculating?: boolean;
 }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-optimal-bg/95 px-4 py-3 backdrop-blur sm:px-6">
-      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-3">
-        <p className="text-sm font-medium text-white">
+    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-6 py-4 backdrop-blur lg:px-8">
+      <div className="flex w-full items-center gap-4">
+        <p className="text-sm font-medium text-gray-900">
           {selectedCount} work{selectedCount === 1 ? "" : "s"} selected
         </p>
-        <div className="flex flex-1 flex-wrap items-center gap-2 sm:justify-end">
+        <div className="ml-auto flex items-center gap-3">
           <EworksButton disabled={calculating} onClick={onCalculate}>
             {calculating ? "Calculating…" : "Calculate combined Internal Notes"}
           </EworksButton>
           <button
             type="button"
             onClick={onClear}
-            className="min-h-[44px] px-3 text-sm text-optimal-muted underline-offset-2 hover:text-white hover:underline"
+            className="px-3 py-2 text-sm text-optimal-muted underline-offset-2 hover:text-gray-900 hover:underline"
           >
             Clear selection
           </button>
@@ -468,17 +469,17 @@ export function WorkSelectionBar({
 
 export function QuoteSummaryCard({ quote }: { quote: DashboardQuoteItem }) {
   return (
-    <article className="rounded-lg border border-white/10 bg-optimal-elevated p-4 transition-colors hover:border-white/20 hover:bg-white/5 sm:p-5">
+    <article className="rounded-lg border border-gray-200 bg-optimal-elevated p-5 transition-colors hover:border-gray-300 hover:bg-gray-50 lg:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-lg font-semibold text-white">
+          <h2 className="text-lg font-semibold text-gray-900">
             Quote {quote.quote_number} · Job {quote.job_number}
           </h2>
           <p className="text-sm text-optimal-muted">
             {quote.client_name} · {quote.trade_name}
           </p>
           <p className="text-xs text-optimal-muted">Submitted {formatSubmittedAt(quote.submitted_at)}</p>
-          <span className="mt-2 inline-block rounded-full bg-white/10 px-2.5 py-0.5 text-xs font-medium text-optimal-muted">
+          <span className="mt-2 inline-block rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-optimal-muted">
             {quote.works.length} work{quote.works.length === 1 ? "" : "s"}
           </span>
         </div>
@@ -488,5 +489,48 @@ export function QuoteSummaryCard({ quote }: { quote: DashboardQuoteItem }) {
         </div>
       </div>
     </article>
+  );
+}
+
+export function QuotesTable({ quotes }: { quotes: DashboardQuoteItem[] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <table className="min-w-full text-left text-sm">
+        <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-optimal-muted">
+          <tr>
+            <th className="px-4 py-3 font-medium lg:px-5">Quote</th>
+            <th className="px-4 py-3 font-medium lg:px-5">Job</th>
+            <th className="px-4 py-3 font-medium lg:px-5">Client</th>
+            <th className="px-4 py-3 font-medium lg:px-5">Trade</th>
+            <th className="px-4 py-3 font-medium lg:px-5">Submitted</th>
+            <th className="px-4 py-3 font-medium lg:px-5">Works</th>
+            <th className="px-4 py-3 text-right font-medium lg:px-5">Final total</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200">
+          {quotes.map((quote) => (
+            <tr
+              key={quote.session_id}
+              className="transition-colors hover:bg-gray-50"
+            >
+              <td className="px-4 py-3 lg:px-5">
+                <Link
+                  href={`/eworks/dashboard/${quote.session_id}`}
+                  className="font-semibold text-optimal-orange hover:underline"
+                >
+                  {quote.quote_number}
+                </Link>
+              </td>
+              <td className="px-4 py-3 text-gray-900 lg:px-5">{quote.job_number}</td>
+              <td className="px-4 py-3 text-gray-900 lg:px-5">{quote.client_name}</td>
+              <td className="px-4 py-3 text-optimal-muted lg:px-5">{quote.trade_name}</td>
+              <td className="px-4 py-3 text-optimal-muted lg:px-5">{formatSubmittedAt(quote.submitted_at)}</td>
+              <td className="px-4 py-3 text-optimal-muted lg:px-5">{quote.works.length}</td>
+              <td className="px-4 py-3 text-right font-semibold text-gray-900 lg:px-5">{money(quote.final_total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

@@ -160,12 +160,6 @@ class Settings(BaseSettings):
             if not self.azure_storage_connection_string and not self.azure_storage_use_managed_identity:
                 raise ValueError("Azure Blob Storage in staging/production requires managed identity or a connection string")
 
-        if self.scope_reword_enabled and not self.scope_reword_configured:
-            raise ValueError(
-                "SCOPE_REWORD_ENABLED requires AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, "
-                "and either AZURE_OPENAI_API_KEY or AZURE_OPENAI_USE_MANAGED_IDENTITY=true"
-            )
-
         return self
 
 

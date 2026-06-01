@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   EworksButton,
+  DashboardPageShell,
   EworksLoadingScreen,
-  EworksPageShell,
   EworksSectionTitle,
   cn,
 } from "@/components/eworks-ui";
@@ -199,49 +199,49 @@ export default function EworksDashboardQuotePage({
 
   if (unlockMessage) {
     return (
-      <EworksPageShell title="Unlocking questionnaire" subtitle={unlockMessage}>
+      <DashboardPageShell title="Unlocking questionnaire" subtitle={unlockMessage}>
         <EworksLoadingScreen message={unlockMessage} />
-      </EworksPageShell>
+      </DashboardPageShell>
     );
   }
 
   if (loading) {
     return (
-      <EworksPageShell title="Quote details" subtitle="Loading quote…">
+      <DashboardPageShell title="Quote details" subtitle="Loading quote…">
         <EworksLoadingScreen message="Loading quote details…" />
-      </EworksPageShell>
+      </DashboardPageShell>
     );
   }
 
   if (notFound) {
     return (
-      <EworksPageShell title="Quote not found" subtitle="This quote could not be found">
-        <div className="space-y-4 rounded-lg border border-white/10 bg-optimal-elevated p-6 text-center">
+      <DashboardPageShell title="Quote not found" subtitle="This quote could not be found">
+        <div className="space-y-4 rounded-lg border border-gray-200 bg-optimal-elevated p-6 text-center">
           <p className="text-sm text-optimal-muted">The requested quote is not available or has been removed.</p>
           <Link href="/eworks/dashboard">
             <EworksButton variant="secondary">Back to quotes</EworksButton>
           </Link>
         </div>
-      </EworksPageShell>
+      </DashboardPageShell>
     );
   }
 
   if (error || !quote) {
     return (
-      <EworksPageShell title="Quote details" subtitle="Unable to load quote">
-        <div className="space-y-4 rounded-lg border border-white/10 bg-optimal-elevated p-6 text-center">
-          <p className="text-sm text-red-400">{error ?? "Failed to load quote"}</p>
+      <DashboardPageShell title="Quote details" subtitle="Unable to load quote">
+        <div className="space-y-4 rounded-lg border border-gray-200 bg-optimal-elevated p-6 text-center">
+          <p className="text-sm text-red-600">{error ?? "Failed to load quote"}</p>
           <Link href="/eworks/dashboard">
             <EworksButton variant="secondary">Back to quotes</EworksButton>
           </Link>
         </div>
-      </EworksPageShell>
+      </DashboardPageShell>
     );
   }
 
   return (
     <>
-      <EworksPageShell
+      <DashboardPageShell
         title={`Quote ${quote.quote_number}`}
         subtitle={`Job ${quote.job_number} · ${quote.client_name}`}
         footer={
@@ -260,8 +260,8 @@ export default function EworksDashboardQuotePage({
           </div>
         }
       >
-        <div className={cn("space-y-5", selectedWorks.size > 0 && "pb-24")}>
-          <section className="rounded-lg border border-white/10 bg-optimal-elevated p-4 sm:p-5">
+        <div className={cn("space-y-6", selectedWorks.size > 0 && "pb-20")}>
+          <section className="rounded-lg border border-gray-200 bg-optimal-elevated p-5 lg:p-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <p className="text-sm text-optimal-muted">{quote.trade_name}</p>
@@ -272,14 +272,14 @@ export default function EworksDashboardQuotePage({
                 <p className="text-2xl font-bold text-optimal-orange">{money(quote.final_total)}</p>
               </div>
             </div>
-            {pdfError && <p className="mt-3 text-sm text-red-400">{pdfError}</p>}
-            {refillError && <p className="mt-3 text-sm text-red-400">{refillError}</p>}
+            {pdfError && <p className="mt-3 text-sm text-red-600">{pdfError}</p>}
+            {refillError && <p className="mt-3 text-sm text-red-600">{refillError}</p>}
           </section>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <EworksSectionTitle title="Works" />
             <p className="text-sm text-optimal-muted">Select works to combine internal notes.</p>
-            {notesError && <p className="text-sm text-red-400">{notesError}</p>}
+            {notesError && <p className="text-sm text-red-600">{notesError}</p>}
             {quote.works.map((work) => (
               <WorkSection
                 key={work.work_index}
@@ -295,7 +295,7 @@ export default function EworksDashboardQuotePage({
           </div>
 
           {quote.internal_notes && (
-            <section className="rounded-lg border border-white/10 bg-white/5 p-4">
+            <section className="rounded-lg border border-gray-200 bg-gray-50 p-4">
               <EworksSectionTitle title="Internal notes (combined)" />
               <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-optimal-field p-3 text-xs leading-relaxed text-optimal-field-text">
                 {quote.internal_notes}
@@ -303,7 +303,7 @@ export default function EworksDashboardQuotePage({
             </section>
           )}
         </div>
-      </EworksPageShell>
+      </DashboardPageShell>
 
       {selectedWorks.size > 0 && (
         <WorkSelectionBar

@@ -122,7 +122,7 @@ function MaterialRowsSection({
 }: MaterialRowsSectionProps) {
   return (
     <EworksTableShell>
-      <div className="hidden bg-optimal-field px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-black lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_4.5rem] lg:gap-3">
+      <div className="hidden bg-gray-100 px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-gray-700 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_4.5rem] lg:gap-3">
         <span>{labelColumn}</span>
         <span>Quantity</span>
         <span>Cost</span>
@@ -398,7 +398,7 @@ export function EworksWorkBlockForm({
         </EworksLabel>
       </div>
 
-      <div className="space-y-3 rounded-lg border border-white/10 bg-white/5 p-3">
+      <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
         <Controller
           name={fieldPath(workIndex, "engineers_required")}
           control={control}
@@ -489,7 +489,7 @@ export function EworksWorkBlockForm({
       </div>
 
       {showLabour && (
-        <div className="space-y-3 rounded-lg border border-white/10 bg-white/5 p-3">
+        <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
           <Controller
             name={fieldPath(workIndex, "labour_required")}
             control={control}
@@ -556,7 +556,7 @@ export function EworksWorkBlockForm({
         </div>
       )}
 
-      <div className="space-y-4 rounded-lg border border-white/10 bg-white/5 p-4">
+      <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
         <EworksSectionTitle title="Charges" />
         <div className="grid gap-4 sm:grid-cols-2">
           <Controller
@@ -739,7 +739,7 @@ export function EworksWorkBlockForm({
               return (
                 <li
                   key={file.id}
-                  className="flex min-h-[44px] items-center gap-3 rounded-lg border border-white/10 bg-optimal-field px-3 py-2.5"
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg border border-gray-200 bg-optimal-field px-3 py-2.5"
                 >
                   <a
                     href={viewUrl}
