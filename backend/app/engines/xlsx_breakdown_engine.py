@@ -16,9 +16,15 @@ from app.models.rate_rule import RateRule
 from app.schemas.calculation import CalculationBreakdown, ChargeInput, InternalNotesContext, LabourInput, LineBreakdown, MaterialInput
 
 
-def config_from_rule(rule: RateRule) -> XlsxCalculationConfig:
+def config_from_rule(
+    rule: RateRule,
+    *,
+    client_fee_pct_override: Decimal | None = None,
+    client_name_override: str | None = None,
+) -> XlsxCalculationConfig:
+    fee_pct = client_fee_pct_override if client_fee_pct_override is not None else rule.client_fee_pct
     return XlsxCalculationConfig(
-        client_fee_pct=rule.client_fee_pct,
+        client_fee_pct=fee_pct,
         hourly_overhead_pct=rule.hourly_overhead_pct,
         daily_overhead_pct=rule.daily_overhead_pct,
         daily_overhead_long_job_pct=rule.daily_overhead_long_job_pct,
@@ -29,7 +35,7 @@ def config_from_rule(rule: RateRule) -> XlsxCalculationConfig:
         oj_uplift_pct=rule.oj_uplift_pct,
         nhs_overhead_uplift_pct=rule.nhs_overhead_uplift_pct,
         eaf_flat_fee=rule.eaf_flat_fee,
-        client_name=rule.xlsx_client_name or "",
+        client_name=client_name_override or rule.xlsx_client_name or "",
     )
 
 
@@ -84,9 +90,18 @@ def build_xlsx_calculation_breakdown(
     matched_rule: MatchedRule,
     formula_version: str,
     internal_notes_context: InternalNotesContext | None = None,
+    *,
+    client_fee_pct_override: Decimal | None = None,
+    calculation_client_name: str | None = None,
 ) -> CalculationBreakdown:
     rule = matched_rule.rule
-    cfg = config_from_rule(rule)
+    fee_pct = client_fee_pct_override if client_fee_pct_override is not None else rule.client_fee_pct
+    notes_client_name = calculation_client_name or rule.xlsx_client_name or "Client"
+    cfg = config_from_rule(
+        rule,
+        client_fee_pct_override=client_fee_pct_override,
+        client_name_override=calculation_client_name,
+    )
     trade = trade_from_rule(rule)
     warnings: list[str] = []
 
@@ -105,15 +120,15 @@ def build_xlsx_calculation_breakdown(
             trade=trade,
             engineers=labour_item.number_of_engineers,
             hours=hours,
-            client_fee_pct=rule.client_fee_pct,
+            client_fee_pct=fee_pct,
             parking=parking_input,
             congestion=congestion_input,
             materials=materials_input,
             config=cfg,
         )
         internal_notes = rule.internal_notes_template or build_internal_notes_hourly(
-            client_name=rule.xlsx_client_name or "Client",
-            client_fee_pct=rule.client_fee_pct,
+            client_name=notes_client_name,
+            client_fee_pct=fee_pct,
             trade=trade.trade,
             engineers=labour_item.number_of_engineers,
             hours=hours,
@@ -124,7 +139,7 @@ def build_xlsx_calculation_breakdown(
             notes_context=internal_notes_context,
             trade_rates=trade,
         )
-        labour_formula = f"XLSX hourly MROUND({trade.hourly_client_rate}×{labour_item.number_of_engineers}×{hours}/(1-{rule.client_fee_pct}), {rule.mround_increment})"
+        labour_formula = f"XLSX hourly MROUND({trade.hourly_client_rate}×{labour_item.number_of_engineers}×{hours}/(1-{fee_pct}), {rule.mround_increment})"
         denominator_used = result.materials_denominator
     else:
         days = labour_item.days_on_site or Decimal("1")
@@ -135,7 +150,7 @@ def build_xlsx_calculation_breakdown(
             days=days,
             labourers=labour_item.number_of_labourers,
             labourer_days=labourer_days,
-            client_fee_pct=rule.client_fee_pct,
+            client_fee_pct=fee_pct,
             parking=parking_input,
             congestion=congestion_input,
             materials=materials_input,
@@ -148,8 +163,8 @@ def build_xlsx_calculation_breakdown(
             else "DAILY (Up to 2 Days) QUOTE HELPER USED"
         )
         internal_notes = rule.internal_notes_template or build_internal_notes_daily(
-            client_name=rule.xlsx_client_name or "Client",
-            client_fee_pct=rule.client_fee_pct,
+            client_name=notes_client_name,
+            client_fee_pct=fee_pct,
             trade=trade.trade,
             engineers=labour_item.number_of_engineers,
             days=days,
@@ -164,7 +179,7 @@ def build_xlsx_calculation_breakdown(
             config=cfg,
             trade_rates=trade,
         )
-        labour_formula = f"XLSX daily MROUND(direct+OH)/(1-{rule.client_fee_pct}-{rule.material_charge_denominator}), {rule.mround_increment})"
+        labour_formula = f"XLSX daily MROUND(direct+OH)/(1-{fee_pct}-{rule.material_charge_denominator}), {rule.mround_increment})"
         denominator_used = result.charge_denominator_materials
 
     if manual_override_used and labour_item.manual_rate is not None:
@@ -182,7 +197,7 @@ def build_xlsx_calculation_breakdown(
         material_breakdown.append(
             LineBreakdown(
                 label="Materials, parking & congestion",
-                formula=f"XLSX MROUND(inputs/(1-{rule.client_fee_pct}-{rule.material_charge_denominator}), {rule.mround_increment})",
+                formula=f"XLSX MROUND(inputs/(1-{fee_pct}-{rule.material_charge_denominator}), {rule.mround_increment})",
                 total=result.materials_charge,
             )
         )
@@ -225,7 +240,7 @@ def build_xlsx_calculation_breakdown(
         overhead_cost=result.overhead_gbp,
         labour_charge_to_client=result.labour_charge,
         materials_parking_cc_charge=result.materials_charge,
-        client_fee_pct=rule.client_fee_pct,
+        client_fee_pct=fee_pct,
         denominator_used=denominator_used,
         profit_gbp=result.profit_gbp,
         profit_pct=result.profit_pct,

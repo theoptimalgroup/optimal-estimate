@@ -114,11 +114,12 @@ export type Step2Snapshot = {
 export type ResolvedRuleInfo = {
   client_id: string;
   trade_id: string;
-  rule_id: string;
+  rule_id?: string | null;
   rule_version: string;
   formula_source: string;
   xlsx_client_name?: string | null;
   xlsx_trade_name?: string | null;
+  client_fee_pct?: number | string;
 };
 
 export type SessionUiState = {
@@ -198,6 +199,37 @@ export type CalculateResponse = {
   client_view: Record<string, unknown>;
 };
 
+export class EworksSessionError extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "EworksSessionError";
+    this.code = code;
+  }
+}
+
+function parseApiErrorPayload(body: { detail?: unknown; error?: { code?: string; message?: string } }): {
+  message: string;
+  code?: string;
+} {
+  if (body?.error?.message) {
+    return { message: body.error.message, code: body.error.code };
+  }
+  const detail = body?.detail;
+  if (detail && typeof detail === "object" && "message" in detail) {
+    const structured = detail as { code?: string; message?: string };
+    return {
+      message: structured.message || "Request failed",
+      code: structured.code,
+    };
+  }
+  if (typeof detail === "string") {
+    return { message: detail };
+  }
+  return { message: "Request failed" };
+}
+
 function hashPayload(value: unknown): string {
   const raw = JSON.stringify(value);
   let hash = 0;
@@ -253,8 +285,8 @@ export async function createSessionFromLink(payload: string, sig?: string | null
     );
   }
   if (!response.ok) {
-    const message = (body?.detail as { error?: { message?: string } })?.error?.message || body?.detail || "Request failed";
-    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+    const { message, code } = parseApiErrorPayload(body);
+    throw new EworksSessionError(typeof message === "string" ? message : JSON.stringify(message), code);
   }
   return body as { success: boolean; data: FromLinkResponse };
 }
@@ -304,7 +336,7 @@ export async function createDevTestSession() {
 export async function patchSession(
   sessionId: string,
   sessionToken: string,
-  payload: { step2?: Step2Snapshot; ui_state?: SessionUiState },
+  payload: { step2?: Step2Snapshot; ui_state?: SessionUiState; findings_report?: string },
   options?: { idempotency?: boolean },
 ) {
   const headers: Record<string, string> = {};
@@ -324,6 +356,10 @@ export async function patchSession(
 
 export async function patchSessionStep2(sessionId: string, sessionToken: string, step2: Step2Snapshot) {
   return patchSession(sessionId, sessionToken, { step2 });
+}
+
+export async function patchFindingsReport(sessionId: string, sessionToken: string, findingsReport: string) {
+  return patchSession(sessionId, sessionToken, { findings_report: findingsReport }, { idempotency: false });
 }
 
 function sessionStorageKey(quoteNumber: string, jobNumber: string) {

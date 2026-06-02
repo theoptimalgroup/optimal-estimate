@@ -95,6 +95,39 @@ def _make_lambert_carpenter_rule(client_id, trade_id) -> RateRule:
     )
 
 
+def _make_trade_default_carpenter_rule(trade_id) -> RateRule:
+    return RateRule(
+        client_id=None,
+        trade_id=trade_id,
+        formula_source="xlsx",
+        version="trade-default-carpenter",
+        hourly_rate=Decimal("95"),
+        day_rate=Decimal("239.40"),
+        direct_hourly_cost=Decimal("30"),
+        direct_daily_cost=Decimal("239.40"),
+        client_fee_pct=Decimal("0.15"),
+        hourly_overhead_pct=Decimal("0.30"),
+        daily_overhead_pct=Decimal("0.20"),
+        daily_overhead_long_job_pct=Decimal("0.15"),
+        labourer_hourly_cost=Decimal("18.75"),
+        labourer_daily_cost=Decimal("150"),
+        material_charge_denominator=Decimal("0.20"),
+        parking_charge_denominator=Decimal("0.20"),
+        congestion_charge_denominator=Decimal("0.20"),
+        mround_increment=Decimal("5"),
+        oj_uplift_pct=Decimal("10"),
+        nhs_overhead_uplift_pct=Decimal("15"),
+        eaf_flat_fee=Decimal("1"),
+        xlsx_client_name="Trade default",
+        xlsx_trade_name="Carpenter",
+        material_markup_type="percentage",
+        material_markup_value=Decimal("20"),
+        vat_rate=Decimal("20"),
+        active_from=date(2024, 1, 1),
+        is_active=True,
+    )
+
+
 def _make_lambert_plumber_rule(client_id, trade_id) -> RateRule:
     return RateRule(
         client_id=client_id,
@@ -128,10 +161,28 @@ def _make_lambert_plumber_rule(client_id, trade_id) -> RateRule:
     )
 
 
+def _error_message(response) -> str:
+    body = response.json()
+    if isinstance(body.get("error"), dict) and body["error"].get("message"):
+        return body["error"]["message"]
+    detail = body.get("detail")
+    if isinstance(detail, str):
+        return detail
+    return str(detail or "")
+
+
+def _error_code(response) -> str | None:
+    body = response.json()
+    if isinstance(body.get("error"), dict):
+        return body["error"].get("code")
+    return None
+
+
 @pytest.fixture()
 def eworks_api_client(monkeypatch):
     monkeypatch.setattr(settings, "eworks_link_secret", TEST_SECRET)
     monkeypatch.setattr(settings, "eworks_link_sig_required", True)
+    monkeypatch.setattr(settings, "eworks_api_enabled", False)
 
     session, _ = make_test_session()
     client = Client(id=uuid.uuid4(), name="Lamberts Chartered Surveyors", default_vat_rate=Decimal("20"))
@@ -140,7 +191,8 @@ def eworks_api_client(monkeypatch):
     plumber_trade = Trade(id=uuid.uuid4(), name="Plumber")
     rule = _make_lambert_carpenter_rule(client.id, trade.id)
     plumber_rule = _make_lambert_plumber_rule(client.id, plumber_trade.id)
-    session.add_all([client, alias, trade, plumber_trade, rule, plumber_rule])
+    trade_default_rule = _make_trade_default_carpenter_rule(trade.id)
+    session.add_all([client, alias, trade, plumber_trade, rule, plumber_rule, trade_default_rule])
     session.commit()
 
     def override_get_db():
@@ -164,6 +216,126 @@ def _from_link(test_client: TestClient, payload: dict, sig: str | None = None):
     )
 
 
+def test_from_link_unknown_client_opens_with_zero_commission(eworks_api_client):
+    test_client, _ = eworks_api_client
+    unknown_client = "Totally Unknown Surveyors Ltd"
+    response = _from_link(
+        test_client,
+        _base_payload(
+            client=unknown_client,
+            quote_number="Q-UNKNOWN-001",
+            job_number="JOB-UNKNOWN-001",
+        ),
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["step1"]["client_name"] == unknown_client
+    assert data["resolved"]["rule_id"] is None
+    assert data["resolved"]["formula_source"] == "none"
+    assert Decimal(str(data["resolved"]["client_fee_pct"])) == Decimal("0")
+
+    created = data
+    calc = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers={"X-Session-Token": created["session_token"]},
+        json={"step2": _alex_row_11_step2()},
+    )
+    assert calc.status_code == 200
+    notes = calc.json()["data"]["internal_notes"] or ""
+    assert "Comms @ 0%" in notes
+    assert unknown_client in notes
+
+
+def test_from_link_eworks_api_commission_when_enabled(eworks_api_client, monkeypatch):
+    test_client, _ = eworks_api_client
+    monkeypatch.setattr(settings, "eworks_api_enabled", True)
+
+    from app.core.exceptions import AppError
+    from app.schemas.eworks_api import EworksCustomerRecord, build_customer_snapshot
+
+    def mock_fetch(customer_name: str):
+        return build_customer_snapshot(
+            EworksCustomerRecord(id=6, customer_name=customer_name, cf_data={"list_16": "18%"}),
+        )
+
+    monkeypatch.setattr("app.services.eworks_link_service.fetch_customer_by_name", mock_fetch)
+
+    aspire_client = "Aspire"
+    response = _from_link(
+        test_client,
+        _base_payload(
+            client=aspire_client,
+            quote_number="Q-ASPIRE",
+            job_number="JOB-ASPIRE",
+        ),
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["step1"]["client_name"] == aspire_client
+    assert data["resolved"]["rule_id"] is None
+    assert data["resolved"]["formula_source"] == "none"
+    assert Decimal(str(data["resolved"]["client_fee_pct"])) == Decimal("0.18")
+
+    created = data
+    calc = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers={"X-Session-Token": created["session_token"]},
+        json={"step2": _alex_row_11_step2()},
+    )
+    assert calc.status_code == 200
+    notes = calc.json()["data"]["internal_notes"] or ""
+    assert "Comms @ 18%" in notes
+    assert aspire_client in notes
+
+
+def test_from_link_eworks_customer_not_found_blocks_link(eworks_api_client, monkeypatch):
+    test_client, _ = eworks_api_client
+    monkeypatch.setattr(settings, "eworks_api_enabled", True)
+
+    from app.core.exceptions import AppError
+
+    def mock_fetch(customer_name: str):
+        raise AppError("EWORKS_CUSTOMER_NOT_FOUND", f"Customer not found in eWorks: {customer_name}", 404)
+
+    monkeypatch.setattr("app.services.eworks_link_service.fetch_customer_by_name", mock_fetch)
+
+    response = _from_link(
+        test_client,
+        _base_payload(
+            client="Unknown Customer Ltd",
+            quote_number="Q-NF",
+            job_number="JOB-NF",
+        ),
+    )
+    assert response.status_code == 404
+    assert _error_code(response) == "EWORKS_CUSTOMER_NOT_FOUND"
+    assert "Customer not found in eWorks" in _error_message(response)
+
+
+def test_from_link_eworks_api_unavailable_blocks_link(eworks_api_client, monkeypatch):
+    test_client, _ = eworks_api_client
+    monkeypatch.setattr(settings, "eworks_api_enabled", True)
+
+    from app.core.exceptions import AppError
+
+    def mock_fetch(_customer_name: str):
+        raise AppError("EWORKS_API_UNAVAILABLE", "eWorks Customer API timed out", 502)
+
+    monkeypatch.setattr("app.services.eworks_link_service.fetch_customer_by_name", mock_fetch)
+
+    response = _from_link(
+        test_client,
+        _base_payload(
+            client="Aspire",
+            quote_number="Q-API-DOWN",
+            job_number="JOB-API-DOWN",
+        ),
+    )
+    assert response.status_code == 502
+    assert _error_code(response) == "EWORKS_API_UNAVAILABLE"
+    assert "timed out" in _error_message(response).lower()
+
+
 def test_from_link_populates_step1(eworks_api_client):
     test_client, _ = eworks_api_client
     response = _from_link(test_client, _base_payload())
@@ -172,7 +344,7 @@ def test_from_link_populates_step1(eworks_api_client):
     assert data["session_id"]
     assert data["session_token"]
     assert data["step1"]["job_number"] == "JOB-456"
-    assert data["step1"]["client_name"] == "Lamberts Chartered Surveyors"
+    assert data["step1"]["client_name"] == "Lambert Chartered Surveyors"
     assert data["step1"]["trade_name"] == "Carpenter"
     assert data["resolved"]["formula_source"] == "xlsx"
     assert data["resolved"]["xlsx_client_name"] == "Lambert Chartered Surveyors"
@@ -233,14 +405,14 @@ def test_missing_payload_returns_400(eworks_api_client):
     test_client, _ = eworks_api_client
     response = test_client.post("/api/v1/calculation-session/from-link", json={"payload": "", "sig": "abc"})
     assert response.status_code == 400
-    assert "Missing calculation link payload" in response.json()["detail"]
+    assert "Missing calculation link payload" in _error_message(response)
 
 
 def test_invalid_payload_returns_400(eworks_api_client):
     test_client, _ = eworks_api_client
     response = test_client.post("/api/v1/calculation-session/from-link", json={"payload": "not-valid!!!", "sig": "abc"})
     assert response.status_code == 400
-    assert "Invalid calculation link payload" in response.json()["detail"]
+    assert "Invalid calculation link payload" in _error_message(response)
 
 
 def test_raw_json_payload_accepted_when_sig_not_required(monkeypatch):
@@ -277,7 +449,7 @@ def test_missing_required_fields_returns_clear_error(eworks_api_client):
     raw = base64.urlsafe_b64encode(json.dumps({"client": "Lambert Chartered Surveyors"}).encode()).decode()
     response = test_client.post("/api/v1/calculation-session/from-link", json={"payload": raw, "sig": "abc"})
     assert response.status_code == 400
-    assert "missing required fields" in response.json()["detail"].lower()
+    assert "missing required fields" in _error_message(response).lower()
 
 
 def test_invalid_signature_returns_401(eworks_api_client):
@@ -285,14 +457,14 @@ def test_invalid_signature_returns_401(eworks_api_client):
     raw, _ = make_signed_payload(_base_payload())
     response = test_client.post("/api/v1/calculation-session/from-link", json={"payload": raw, "sig": "bad-signature"})
     assert response.status_code == 401
-    assert "Invalid link signature" in response.json()["detail"]
+    assert "Invalid link signature" in _error_message(response)
 
 
 def test_expired_payload_returns_410(eworks_api_client):
     test_client, _ = eworks_api_client
     response = _from_link(test_client, _base_payload(expires_at=_past_expiry()))
     assert response.status_code == 410
-    assert "expired" in response.json()["detail"].lower()
+    assert "expired" in _error_message(response).lower()
 
 
 def test_patch_stores_findings(eworks_api_client):

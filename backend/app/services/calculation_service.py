@@ -9,7 +9,8 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.engines.approval_engine import build_calculation_breakdown
 from app.engines.calculation_engine import round_money
-from app.engines.rules_engine import find_active_rule, rule_to_dict
+from app.engines.rules_engine import MatchedRule, find_active_rule, rule_to_dict
+from app.services.eworks_link_service import client_has_trade_rate_rule
 from app.models.job import Job
 from app.models.quote import Quote, QuoteCharge, QuoteLabour, QuoteMaterial, QuoteScopeItem
 from app.models.support import CalculationSnapshot
@@ -98,7 +99,14 @@ def preview_calculation(db: Session, payload: CalculationPreviewRequest) -> Calc
         if labour and labour[0].trade_id:
             trade_id = trade_id or labour[0].trade_id
 
-    matched = find_active_rule(db, client_id, trade_id, quote_date)
+    client_fee_override = payload.client_fee_pct_override
+    if client_has_trade_rate_rule(db, client_id, trade_id):
+        matched = find_active_rule(db, client_id, trade_id, quote_date)
+    else:
+        matched = find_active_rule(db, None, trade_id, quote_date)
+        if client_fee_override is None:
+            client_fee_override = Decimal("0")
+
     return build_calculation_breakdown(
         labour_items=labour,
         material_items=materials,
@@ -106,6 +114,8 @@ def preview_calculation(db: Session, payload: CalculationPreviewRequest) -> Calc
         matched_rule=matched,
         formula_version=settings.formula_version,
         internal_notes_context=payload.internal_notes_context,
+        client_fee_pct_override=client_fee_override,
+        calculation_client_name=payload.calculation_client_name,
     )
 
 def finalize_calculation(db: Session, payload: CalculationFinalizeRequest, user_id: UUID) -> CalculationBreakdown:

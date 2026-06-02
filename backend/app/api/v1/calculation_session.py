@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import DbSession
 from app.core.exceptions import AppError, success_response
-from app.models.rate_rule import RateRule
 from app.schemas.eworks_link import (
     CalculateSessionRequest,
     CalculateSessionResponse,
@@ -41,22 +40,15 @@ router = APIRouter(prefix="/calculation-session", tags=["calculation-session"])
 
 
 def _session_read(db: Session, session) -> CalculationSessionRead:
-    rule = db.get(RateRule, session.rate_rule_id)
+    from app.services.calculation_session_service import _resolved_from_session
+
     step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else None
     ui_state = SessionUiState.model_validate(session.ui_state) if session.ui_state else None
     return CalculationSessionRead(
         session_id=session.id,
         step1=Step1Snapshot.model_validate(session.step1_snapshot),
         step2=step2,
-        resolved=ResolvedRuleInfo(
-            client_id=session.client_id,
-            trade_id=session.trade_id,
-            rule_id=session.rate_rule_id,
-            rule_version=rule.version if rule else "",
-            formula_source=rule.formula_source if rule else "",
-            xlsx_client_name=rule.xlsx_client_name if rule else None,
-            xlsx_trade_name=rule.xlsx_trade_name if rule else None,
-        ),
+        resolved=_resolved_from_session(db, session),
         expires_at=session.expires_at,
         ui_state=ui_state,
     )
@@ -77,11 +69,8 @@ def _require_session_token(
 
 @router.post("/from-link")
 def from_link(payload: FromLinkRequest, db: DbSession):
-    try:
-        result = create_session_from_link(db, payload_b64=payload.payload, sig=payload.sig)
-        db.commit()
-    except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    result = create_session_from_link(db, payload_b64=payload.payload, sig=payload.sig)
+    db.commit()
     return success_response(CalculationSessionFromLinkResponse.model_validate(result))
 
 

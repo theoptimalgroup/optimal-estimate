@@ -7,6 +7,7 @@ import hmac
 import json
 import secrets
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -34,8 +35,11 @@ from app.services.idempotency_service import (
     session_idempotency_key,
     store_idempotency,
 )
-from app.services.client_service import find_client_by_name_or_alias
+from app.models.rate_rule import RateRule
+from app.services.client_service import find_client_by_name_or_alias, get_or_create_client_for_import
+from app.services.eworks_api_service import fetch_customer_by_name
 from app.services.eworks_questionnaire_service import step2_from_link_questionnaire
+from app.schemas.eworks_api import client_fee_pct_from_snapshot
 from app.services.trade_service import normalize_trade_name
 
 
@@ -129,6 +133,70 @@ def resolve_client(db: Session, client_name: str) -> Client:
     return client
 
 
+def resolve_client_for_link(db: Session, client_name: str) -> Client:
+    """Ensure the client exists so the link can open; rules may be configured later."""
+    client, _created, _alias = get_or_create_client_for_import(db, client_name)
+    return client
+
+
+def try_resolve_rate_rule(db: Session, client_id: UUID, trade_id: UUID) -> RateRule | None:
+    matched = find_active_rule(db, client_id, trade_id, date.today())
+    if matched is None or matched.rule.client_id != client_id:
+        return None
+    return matched.rule
+
+
+def build_resolved_rule_info(
+    client: Client,
+    trade: Trade,
+    rule: RateRule | None,
+    *,
+    link_client_name: str,
+    eworks_client_fee_pct: Decimal | None = None,
+) -> ResolvedRuleInfo:
+    display_client = link_client_name.strip() or client.name
+    if rule is not None:
+        return ResolvedRuleInfo(
+            client_id=client.id,
+            trade_id=trade.id,
+            rule_id=rule.id,
+            rule_version=rule.version,
+            formula_source=rule.formula_source,
+            xlsx_client_name=rule.xlsx_client_name or display_client,
+            xlsx_trade_name=rule.xlsx_trade_name or trade.name,
+            client_fee_pct=rule.client_fee_pct,
+        )
+    fee_pct = eworks_client_fee_pct if eworks_client_fee_pct is not None else Decimal("0")
+    return ResolvedRuleInfo(
+        client_id=client.id,
+        trade_id=trade.id,
+        rule_id=None,
+        rule_version="",
+        formula_source="none",
+        xlsx_client_name=display_client,
+        xlsx_trade_name=trade.name,
+        client_fee_pct=fee_pct,
+    )
+
+
+def session_eworks_client_fee_pct(session: CalculationSession) -> Decimal | None:
+    return client_fee_pct_from_snapshot(session.eworks_customer_snapshot)
+
+
+def _fetch_eworks_customer_snapshot(customer_name: str) -> dict | None:
+    if not settings.eworks_api_enabled:
+        return None
+    snapshot = fetch_customer_by_name(customer_name)
+    return snapshot.model_dump_for_session()
+
+
+def client_has_trade_rate_rule(db: Session, client_id: UUID | None, trade_id: UUID | None) -> bool:
+    if client_id is None or trade_id is None:
+        return False
+    matched = find_active_rule(db, client_id, trade_id, date.today())
+    return matched is not None and matched.rule.client_id == client_id
+
+
 def resolve_trade(db: Session, trade_name: str) -> Trade:
     normalized = normalize_trade_name(trade_name)
     trade = db.scalar(select(Trade).where(Trade.name == normalized))
@@ -182,13 +250,19 @@ def build_quote_description(payload: EworksLinkPayload) -> str | None:
     return "\n\n".join(parts) if parts else None
 
 
-def payload_to_step1(payload: EworksLinkPayload, client: Client, trade: Trade) -> Step1Snapshot:
+def payload_to_step1(
+    payload: EworksLinkPayload,
+    client: Client,
+    trade: Trade,
+    *,
+    client_display_name: str | None = None,
+) -> Step1Snapshot:
     return Step1Snapshot(
         quote_number=payload.quote_number,
         job_number=payload.job_number,
         external_job_id=payload.external_job_id or payload.source,
         engineer_name=payload.engineer_name,
-        client_name=client.name,
+        client_name=client_display_name or client.name,
         trade_name=trade.name,
         property_address=payload.property_address,
         property_manager_name=payload.property_manager,
@@ -260,26 +334,39 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
     verify_signature(payload_raw, sig)
     assert_not_expired(payload.expires_at)
 
-    client = resolve_client(db, payload.client)
+    eworks_snapshot_dict = _fetch_eworks_customer_snapshot(payload.client)
+    eworks_fee_pct = client_fee_pct_from_snapshot(eworks_snapshot_dict)
+
+    client = resolve_client_for_link(db, payload.client)
     trade = resolve_trade(db, payload.trade)
-    rule = resolve_rate_rule(db, client.id, trade.id)
-    step1 = payload_to_step1(payload, client, trade)
+    rule = try_resolve_rate_rule(db, client.id, trade.id)
+    link_client_name = payload.client.strip()
+    step1 = payload_to_step1(payload, client, trade, client_display_name=link_client_name)
+    resolved = build_resolved_rule_info(
+        client,
+        trade,
+        rule,
+        link_client_name=link_client_name,
+        eworks_client_fee_pct=eworks_fee_pct if rule is None else None,
+    )
     idempotency_key = session_idempotency_key(payload.source, payload.quote_number, payload.job_number)
 
     existing = find_session_by_idempotency_key(db, idempotency_key)
     if existing is not None:
         existing.step1_snapshot = step1.model_dump(mode="json")
         existing.payload_snapshot = payload.model_dump(mode="json")
+        existing.client_id = client.id
+        existing.trade_id = trade.id
+        existing.rate_rule_id = rule.id if rule else None
+        existing.eworks_customer_snapshot = eworks_snapshot_dict
         db.flush()
         step2 = Step2Snapshot.model_validate(existing.step2_snapshot) if existing.step2_snapshot else None
-        resolved = ResolvedRuleInfo(
-            client_id=existing.client_id,
-            trade_id=existing.trade_id,
-            rule_id=existing.rate_rule_id,
-            rule_version=rule.version,
-            formula_source=rule.formula_source,
-            xlsx_client_name=rule.xlsx_client_name,
-            xlsx_trade_name=rule.xlsx_trade_name,
+        resolved = build_resolved_rule_info(
+            client,
+            trade,
+            rule,
+            link_client_name=link_client_name,
+            eworks_client_fee_pct=eworks_fee_pct if rule is None else None,
         )
         response = _build_session_response(existing, step1=step1, step2=step2, resolved=resolved, resumed=True)
         store_idempotency(
@@ -293,16 +380,6 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
 
     initial_step2 = step2_from_link_questionnaire(payload, trade.name)
 
-    resolved = ResolvedRuleInfo(
-        client_id=client.id,
-        trade_id=trade.id,
-        rule_id=rule.id,
-        rule_version=rule.version,
-        formula_source=rule.formula_source,
-        xlsx_client_name=rule.xlsx_client_name,
-        xlsx_trade_name=rule.xlsx_trade_name,
-    )
-
     session = CalculationSession(
         session_token=secrets.token_hex(32),
         idempotency_key=idempotency_key,
@@ -313,7 +390,8 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
         ui_state=SessionUiState().model_dump(mode="json"),
         client_id=client.id,
         trade_id=trade.id,
-        rate_rule_id=rule.id,
+        rate_rule_id=rule.id if rule else None,
+        eworks_customer_snapshot=eworks_snapshot_dict,
         expires_at=payload.expires_at if payload.expires_at.tzinfo else payload.expires_at.replace(tzinfo=timezone.utc),
     )
     db.add(session)

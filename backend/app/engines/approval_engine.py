@@ -154,6 +154,9 @@ def build_calculation_breakdown(
     matched_rule: MatchedRule | None,
     formula_version: str,
     internal_notes_context: InternalNotesContext | None = None,
+    *,
+    client_fee_pct_override: Decimal | None = None,
+    calculation_client_name: str | None = None,
 ) -> CalculationBreakdown:
     rule = matched_rule.rule if matched_rule else None
     if (
@@ -171,6 +174,8 @@ def build_calculation_breakdown(
             matched_rule=matched_rule,
             formula_version=formula_version,
             internal_notes_context=internal_notes_context,
+            client_fee_pct_override=client_fee_pct_override,
+            calculation_client_name=calculation_client_name,
         )
     return _build_simplified_calculation_breakdown(
         labour_items=labour_items,

@@ -65,6 +65,8 @@ class CalculationPreviewRequest(BaseModel):
     material_items: list[MaterialInput] = Field(default_factory=list)
     charges: ChargeInput | None = None
     internal_notes_context: InternalNotesContext | None = None
+    client_fee_pct_override: Decimal | None = None
+    calculation_client_name: str | None = None
 
 
 class CalculationFinalizeRequest(BaseModel):

@@ -44,9 +44,13 @@ from app.services.calculation_view_service import (
     build_internal_view_from_session,
 )
 from app.services.eworks_link_service import (
+    build_resolved_rule_info,
+    client_has_trade_rate_rule,
     collect_work_skills,
     get_session_by_token,
     resolve_skill_trade,
+    session_eworks_client_fee_pct,
+    try_resolve_rate_rule,
     skills_are_uniform,
     work_skill_name,
 )
@@ -59,15 +63,51 @@ from app.services.idempotency_service import check_idempotency, hash_payload, st
 from app.engines.rules_engine import find_active_rule
 
 
-def _resolved_from_session(session: CalculationSession, rule) -> ResolvedRuleInfo:
-    return ResolvedRuleInfo(
-        client_id=session.client_id,
-        trade_id=session.trade_id,
-        rule_id=session.rate_rule_id,
-        rule_version=rule.version if rule else "",
-        formula_source=rule.formula_source if rule else "",
-        xlsx_client_name=rule.xlsx_client_name if rule else None,
-        xlsx_trade_name=rule.xlsx_trade_name if rule else None,
+def _eworks_preview_request(
+    db: Session,
+    *,
+    session: CalculationSession,
+    step1: Step1Snapshot,
+    trade_id: UUID,
+    labour_items: list,
+    material_items: list,
+    charges,
+    internal_notes_context,
+) -> CalculationPreviewRequest:
+    kwargs: dict = {
+        "client_id": session.client_id,
+        "trade_id": trade_id,
+        "labour_items": labour_items,
+        "material_items": material_items,
+        "charges": charges,
+        "internal_notes_context": internal_notes_context,
+    }
+    if not client_has_trade_rate_rule(db, session.client_id, trade_id):
+        kwargs["calculation_client_name"] = step1.client_name
+        eworks_fee = session_eworks_client_fee_pct(session)
+        kwargs["client_fee_pct_override"] = eworks_fee if eworks_fee is not None else Decimal("0")
+    return CalculationPreviewRequest(**kwargs)
+
+
+def _resolved_from_session(db: Session, session: CalculationSession) -> ResolvedRuleInfo:
+    from app.models.client import Client
+    from app.models.rate_rule import RateRule
+    from app.models.trade import Trade
+
+    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+    rule = db.get(RateRule, session.rate_rule_id) if session.rate_rule_id else None
+    if rule is None and session.client_id and session.trade_id:
+        rule = try_resolve_rate_rule(db, session.client_id, session.trade_id)
+    client = db.get(Client, session.client_id)
+    trade = db.get(Trade, session.trade_id)
+    if client is None or trade is None:
+        raise AppError("SESSION_INVALID", "Calculation session is missing client or trade", 500)
+    return build_resolved_rule_info(
+        client,
+        trade,
+        rule,
+        link_client_name=step1.client_name,
+        eworks_client_fee_pct=session_eworks_client_fee_pct(session) if rule is None else None,
     )
 
 
@@ -138,25 +178,26 @@ def update_session_step2(
         if session.status == "submitted":
             raise AppError("SESSION_SUBMITTED", "Cannot update questionnaire after submission", 409)
         session.step2_snapshot = payload.step2.model_dump(mode="json")
+    if payload.findings_report is not None:
+        current_step1 = dict(session.step1_snapshot or {})
+        current_step1["findings_report"] = payload.findings_report
+        session.step1_snapshot = current_step1
     if payload.ui_state is not None:
         existing_ui_state = _session_ui_state(session)
         merged_ui_state = payload.ui_state.model_dump(mode="json")
         if existing_ui_state and existing_ui_state.last_result is not None and merged_ui_state.get("last_result") is None:
             merged_ui_state["last_result"] = existing_ui_state.last_result
         session.ui_state = merged_ui_state
-    if payload.step2 is None and payload.ui_state is None:
+    if payload.step2 is None and payload.ui_state is None and payload.findings_report is None:
         raise AppError("EMPTY_UPDATE", "Nothing to update", 400)
     db.flush()
-    from app.models.rate_rule import RateRule
-
-    rule = db.get(RateRule, session.rate_rule_id)
     step1 = Step1Snapshot.model_validate(session.step1_snapshot)
     step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else None
     result = CalculationSessionRead(
         session_id=session.id,
         step1=step1,
         step2=step2,
-        resolved=_resolved_from_session(session, rule),
+        resolved=_resolved_from_session(db, session),
         expires_at=session.expires_at,
         ui_state=_session_ui_state(session),
     )
@@ -379,8 +420,10 @@ def calculate_session(
         work_charges = aggregate_work_charges(step1, [block])
         breakdown = preview_calculation(
             db,
-            CalculationPreviewRequest(
-                client_id=session.client_id,
+            _eworks_preview_request(
+                db,
+                session=session,
+                step1=step1,
                 trade_id=work_trade.id,
                 labour_items=labour,
                 material_items=materials,
@@ -411,8 +454,10 @@ def calculate_session(
         )
         breakdown = preview_calculation(
             db,
-            CalculationPreviewRequest(
-                client_id=session.client_id,
+            _eworks_preview_request(
+                db,
+                session=session,
+                step1=step1,
                 trade_id=combined_trade_id,
                 labour_items=labour,
                 material_items=materials,
@@ -433,8 +478,10 @@ def calculate_session(
             group_materials = build_combined_material_inputs(step1, Step2Snapshot(works=group_works))
             group_breakdown = preview_calculation(
                 db,
-                CalculationPreviewRequest(
-                    client_id=session.client_id,
+                _eworks_preview_request(
+                    db,
+                    session=session,
+                    step1=step1,
                     trade_id=trade.id,
                     labour_items=group_labour,
                     material_items=group_materials,
@@ -636,8 +683,10 @@ def _preview_internal_notes_for_works(
         work_charges = aggregate_work_charges(step1, [block])
         breakdown = preview_calculation(
             db,
-            CalculationPreviewRequest(
-                client_id=session.client_id,
+            _eworks_preview_request(
+                db,
+                session=session,
+                step1=step1,
                 trade_id=trade.id,
                 labour_items=labour,
                 material_items=materials,
@@ -654,8 +703,10 @@ def _preview_internal_notes_for_works(
     )
     breakdown = preview_calculation(
         db,
-        CalculationPreviewRequest(
-            client_id=session.client_id,
+        _eworks_preview_request(
+            db,
+            session=session,
+            step1=step1,
             trade_id=trade.id,
             labour_items=labour,
             material_items=materials,
@@ -781,8 +832,10 @@ def _breakdown_for_work_block(
     work_charges = aggregate_work_charges(step1, [block])
     return preview_calculation(
         db,
-        CalculationPreviewRequest(
-            client_id=session.client_id,
+        _eworks_preview_request(
+            db,
+            session=session,
+            step1=step1,
             trade_id=trade.id,
             labour_items=labour,
             material_items=materials,

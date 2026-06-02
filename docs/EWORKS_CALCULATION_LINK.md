@@ -106,7 +106,7 @@ url = f"https://app.example/eworks/calculate?payload={raw}&sig={sig}"
 
 ## API flow
 
-1. `POST /api/v1/calculation-session/from-link` — decode payload, verify signature/expiry, resolve client/trade/rule, create session. Returns `session_id`, `session_token`, Step 1 fields, resolved rule metadata.
+1. `POST /api/v1/calculation-session/from-link` — decode payload, verify signature/expiry, optionally fetch customer from eWorks (when enabled), resolve client/trade/rule, create session. Returns `session_id`, `session_token`, Step 1 fields, resolved rule metadata (including eWorks commission when no local rule).
 2. `PATCH /api/v1/calculation-session/{id}` — autosave Step 2+ inputs (header `X-Session-Token`).
 3. `POST /api/v1/calculation-session/{id}/calculate` — run XLSX calculation; returns breakdown, internal view, internal notes, client-safe view.
 4. `GET /api/v1/calculation-session/{id}` — reload session (optional).
@@ -120,8 +120,23 @@ No JWT is required on these endpoints. Session token + link expiry protect follo
 | `EWORKS_LINK_SECRET` | HMAC secret (falls back to `SECRET_KEY` in dev if unset) |
 | `EWORKS_LINK_SIG_REQUIRED` | Require signature (`false` in development for local testing) |
 | `EWORKS_SESSION_EXPIRE_MINUTES` | Reserved for future session TTL tuning |
+| `EWORKS_API_ENABLED` | When `true`, call eWorks Customer API on link open (`false` in local dev/pytest) |
+| `EWORKS_BASE_URL` | eWorks API host, e.g. `https://your-eworks-host` (no trailing slash) |
+| `EWORKS_API_KEY` | Sent as `api_key` header on Customer API requests |
 
-Set `EWORKS_LINK_SIG_REQUIRED=true` in staging and production.
+Set `EWORKS_LINK_SIG_REQUIRED=true` in staging and production. Set `EWORKS_API_ENABLED=true` with valid `EWORKS_BASE_URL` and `EWORKS_API_KEY` in production.
+
+When `EWORKS_API_ENABLED=true`, opening a link calls:
+
+```http
+GET {EWORKS_BASE_URL}/Customer?customer_name={payload.client}
+api_key: {EWORKS_API_KEY}
+Accept: application/json
+```
+
+On success, commission from `cf_data.list_16` (e.g. `"18%"`) is cached on the calculation session and used when no client-specific XLSX rate rule exists. Local XLSX `rate_rules` still win when present.
+
+When `EWORKS_API_ENABLED=false` (default for local Docker and tests), the API call is skipped and unknown clients open with 0% commission until rules are imported.
 
 ## Client alias example
 
@@ -135,8 +150,10 @@ Payload client `Lambert Chartered Surveyors` resolves to canonical **Lamberts Ch
 | `INVALID_PAYLOAD` | 400 | Base64/JSON validation failed |
 | `INVALID_SIGNATURE` | 401 | Missing or wrong HMAC |
 | `EXPIRED_LINK` | 410 | `expires_at` in the past |
-| `CLIENT_NOT_FOUND` | 404 | Client/alias not found |
+| `CLIENT_NOT_FOUND` | 404 | Client/alias not found (legacy; links now auto-create clients when eWorks API is disabled) |
 | `TRADE_NOT_FOUND` | 404 | Trade not found |
 | `RULE_NOT_FOUND` | 404 | No active rate rule |
+| `EWORKS_CUSTOMER_NOT_FOUND` | 404 | Customer not found in eWorks (when `EWORKS_API_ENABLED=true`) |
+| `EWORKS_API_UNAVAILABLE` | 502 | eWorks Customer API error or timeout (when `EWORKS_API_ENABLED=true`) |
 
 This flow does not read or write `jobs` or `quotes`.

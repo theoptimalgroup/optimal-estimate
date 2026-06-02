@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     eworks_attachment_path: str = "./storage/eworks-attachments"
     dashboard_password: str = "optimal-dev"
 
+    # eWorks REST API (Customer lookup on link open)
+    eworks_base_url: str | None = None
+    eworks_api_key: str | None = None
+    eworks_api_enabled: bool = False
+    eworks_api_timeout_seconds: float = 10.0
+
     # Storage
     storage_backend: str = "local"  # local | azure_blob
     pdf_storage_path: str = "./storage/pdfs"
@@ -159,6 +165,10 @@ class Settings(BaseSettings):
                 raise ValueError("Azure Blob Storage requires AZURE_STORAGE_ACCOUNT_NAME or AZURE_STORAGE_CONNECTION_STRING")
             if not self.azure_storage_connection_string and not self.azure_storage_use_managed_identity:
                 raise ValueError("Azure Blob Storage in staging/production requires managed identity or a connection string")
+
+        if self.eworks_api_enabled:
+            if not self.eworks_base_url or not self.eworks_api_key:
+                raise ValueError("EWORKS_API_ENABLED requires EWORKS_BASE_URL and EWORKS_API_KEY")
 
         return self
 

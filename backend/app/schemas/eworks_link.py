@@ -103,11 +103,12 @@ class Step1Snapshot(BaseModel):
 class ResolvedRuleInfo(BaseModel):
     client_id: UUID
     trade_id: UUID
-    rule_id: UUID
-    rule_version: str
-    formula_source: str
+    rule_id: UUID | None = None
+    rule_version: str = ""
+    formula_source: str = "none"
     xlsx_client_name: str | None = None
     xlsx_trade_name: str | None = None
+    client_fee_pct: Decimal = Decimal("0")
 
 
 class WorkBlockSnapshot(BaseModel):
@@ -276,6 +277,7 @@ class CalculationSessionFromLinkResponse(BaseModel):
 class UpdateCalculationSessionRequest(BaseModel):
     step2: Step2Snapshot | None = None
     ui_state: SessionUiState | None = None
+    findings_report: str | None = None
 
 
 class CalculateSessionRequest(BaseModel):

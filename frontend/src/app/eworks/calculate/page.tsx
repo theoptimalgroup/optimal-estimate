@@ -19,7 +19,9 @@ import {
   createDevTestSession,
   createSessionFromLink,
   deleteSessionAttachment,
+  EworksSessionError,
   fetchSession,
+  patchFindingsReport,
   patchSession,
   storeSessionCredentials,
   submitSession,
@@ -128,6 +130,28 @@ function restoreUiState(
   setters.setSubmitted(hasSubmitted);
 }
 
+function loadErrorTitle(code: string | null | undefined) {
+  switch (code) {
+    case "EWORKS_CUSTOMER_NOT_FOUND":
+      return "Customer not found in eWorks";
+    case "EWORKS_API_UNAVAILABLE":
+      return "eWorks is temporarily unavailable";
+    default:
+      return "Invalid calculation link";
+  }
+}
+
+function loadErrorHint(code: string | null | undefined) {
+  switch (code) {
+    case "EWORKS_CUSTOMER_NOT_FOUND":
+      return "The client on this link is not registered in eWorks. Check the customer name in the link payload matches eWorks exactly, or ask an administrator to add the customer.";
+    case "EWORKS_API_UNAVAILABLE":
+      return "We could not reach eWorks to verify the customer. Try again in a few minutes. If the problem continues, contact support.";
+    default:
+      return null;
+  }
+}
+
 function EworksCalculateContent() {
   const searchParams = useSearchParams();
   const payload = searchParams.get("payload");
@@ -139,6 +163,7 @@ function EworksCalculateContent() {
   const [maxReachableStep, setMaxReachableStep] = useState(0);
   const [session, setSession] = useState<FromLinkResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadErrorCode, setLoadErrorCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [submitted, setSubmitted] = useState(false);
@@ -149,6 +174,7 @@ function EworksCalculateContent() {
   const [skillOptions, setSkillOptions] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [focusWorkIndex, setFocusWorkIndex] = useState<number | null>(null);
+  const [findingsReportSaving, setFindingsReportSaving] = useState(false);
   const autoSaveReady = useRef(false);
   const autosaveInFlightRef = useRef<Promise<void> | null>(null);
   const autosaveInFlightKeyRef = useRef<string | null>(null);
@@ -210,6 +236,7 @@ function EworksCalculateContent() {
     async function bootstrap() {
       setLoading(true);
       setLoadError(null);
+      setLoadErrorCode(null);
       try {
         if (sessionIdParam && sessionTokenParam) {
           const data = await fetchSession(sessionIdParam, sessionTokenParam);
@@ -226,8 +253,14 @@ function EworksCalculateContent() {
         applySession(res.data);
       } catch (error) {
         if (cancelled) return;
-        const message = error instanceof Error ? error.message : "Failed to open calculation session";
-        setLoadError(message);
+        if (error instanceof EworksSessionError) {
+          setLoadError(error.message);
+          setLoadErrorCode(error.code ?? null);
+        } else {
+          const message = error instanceof Error ? error.message : "Failed to open calculation session";
+          setLoadError(message);
+          setLoadErrorCode(null);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -241,12 +274,14 @@ function EworksCalculateContent() {
   const startDevTestSession = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
+    setLoadErrorCode(null);
     try {
       const res = await createDevTestSession();
       applySession(res.data);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to start local test session";
       setLoadError(message);
+      setLoadErrorCode(error instanceof EworksSessionError ? error.code ?? null : null);
     } finally {
       setLoading(false);
     }
@@ -385,6 +420,26 @@ function EworksCalculateContent() {
     [session, setValue, values.works],
   );
 
+  const handleFindingsReportChange = useCallback(
+    async (value: string) => {
+      if (!session) return;
+      setFindingsReportSaving(true);
+      try {
+        await patchFindingsReport(session.session_id, session.session_token, value);
+        setSession((prev) =>
+          prev
+            ? { ...prev, step1: { ...prev.step1, findings_report: value } }
+            : prev,
+        );
+      } catch {
+        // non-critical — user can still continue
+      } finally {
+        setFindingsReportSaving(false);
+      }
+    },
+    [session],
+  );
+
   const validateCurrentStep = useCallback(async () => {
     if (step === 0 || step === 2) return true;
     if (step === 1) {
@@ -492,24 +547,29 @@ function EworksCalculateContent() {
       <div className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6">
         <div className="mx-auto max-w-lg animate-fade-in">
           <div className="rounded-lg border border-red-300 bg-red-50 p-6">
-            <EworksSectionTitle title="Invalid calculation link" />
+            <EworksSectionTitle title={loadErrorTitle(loadErrorCode)} />
             <p className="mt-3 text-sm leading-relaxed text-red-800">{loadError ?? "This link could not be opened."}</p>
+            {loadErrorHint(loadErrorCode) && (
+              <p className="mt-2 text-sm leading-relaxed text-red-800">{loadErrorHint(loadErrorCode)}</p>
+            )}
             {loadError?.includes("truncated") && (
               <p className="mt-2 text-sm leading-relaxed text-red-800">
                 Copy the <strong>entire</strong> URL from the script output — do not use shortened links with{" "}
                 <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">...</code>.
               </p>
             )}
-            <div className="mt-4 space-y-2 text-sm leading-relaxed text-red-700">
-              <p>
-                The <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">payload</code> query parameter must be{" "}
-                <strong>base64-encoded JSON</strong> with required fields.
-              </p>
-              <p>
-                Generate a test link:{" "}
-                <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">python3 scripts/generate_eworks_link.py</code>
-              </p>
-            </div>
+            {!loadErrorCode && (
+              <div className="mt-4 space-y-2 text-sm leading-relaxed text-red-700">
+                <p>
+                  The <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">payload</code> query parameter must be{" "}
+                  <strong>base64-encoded JSON</strong> with required fields.
+                </p>
+                <p>
+                  Generate a test link:{" "}
+                  <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">python3 scripts/generate_eworks_link.py</code>
+                </p>
+              </div>
+            )}
             {isDev && (
               <EworksButton className="mt-5 w-full sm:w-auto" onClick={() => void startDevTestSession()}>
                 Start local test session
@@ -573,7 +633,7 @@ function EworksCalculateContent() {
       }
     >
       <EworksCard key={step}>
-        {step === 0 && <EworksEstimationFormStep step1={step1} resolved={session.resolved} />}
+        {step === 0 && <EworksEstimationFormStep step1={step1} resolved={session.resolved} onFindingsReportChange={handleFindingsReportChange} findingsReportSaving={findingsReportSaving} submitted={submitted} />}
 
         {step === 1 && (
           <EworksQuestionnaireStep
