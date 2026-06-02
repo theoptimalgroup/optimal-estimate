@@ -26,6 +26,7 @@ from app.schemas.eworks_link import (
     WorkBlockSnapshot,
     WorkBreakdownResult,
     aggregate_work_charges,
+    flatten_supplier_links,
     step2_to_calculation_inputs,
 )
 from app.services.calculation_aggregate_service import (
@@ -852,7 +853,7 @@ def _work_item_row(
     step1: Step1Snapshot,
     breakdown: CalculationBreakdown,
 ) -> dict:
-    material_rows = [*block.materials_to_order, *block.shelf_materials_rows]
+    material_rows = [*flatten_supplier_links(block.materials_to_order), *block.shelf_materials_rows]
     materials_link = format_links_and_quantity(material_rows)
     material_cost = sum((line.total for line in breakdown.materials), Decimal("0"))
     labour_charge = breakdown.labour_charge_to_client or Decimal("0")

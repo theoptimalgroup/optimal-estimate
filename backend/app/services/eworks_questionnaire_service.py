@@ -6,10 +6,18 @@ import re
 from decimal import Decimal
 
 from app.schemas.calculation import InternalNotesContext
-from app.schemas.eworks_link import MaterialOrderRow, Step1Snapshot, Step2Snapshot, WorkBlockSnapshot
+from app.schemas.eworks_link import (
+    MaterialLinkRow,
+    MaterialOrderRow,
+    MaterialSupplier,
+    Step1Snapshot,
+    Step2Snapshot,
+    WorkBlockSnapshot,
+    flatten_supplier_links,
+)
 
 
-def format_links_and_quantity(rows: list[MaterialOrderRow]) -> str:
+def format_links_and_quantity(rows: list[MaterialLinkRow] | list[MaterialOrderRow]) -> str:
     parts: list[str] = []
     for row in rows:
         link = (row.link or "").strip()
@@ -26,7 +34,7 @@ def format_links_and_quantity(rows: list[MaterialOrderRow]) -> str:
 
 
 def build_internal_notes_context(step1: Step1Snapshot, block: WorkBlockSnapshot) -> InternalNotesContext:
-    rows = [*block.materials_to_order, *block.shelf_materials_rows]
+    rows = [*flatten_supplier_links(block.materials_to_order), *block.shelf_materials_rows]
     return InternalNotesContext(
         links_and_quantity=format_links_and_quantity(rows),
         who_quoted=(step1.engineer_name or "").strip(),
@@ -105,18 +113,34 @@ def apply_questionnaire_defaults(step2: Step2Snapshot, *, trade_name: str, defau
     return data
 
 
-def build_material_items(step2: Step2Snapshot) -> list[tuple[str, Decimal, Decimal]]:
-    """Return (name, quantity, unit_cost) tuples for calculation."""
-    items: list[tuple[str, Decimal, Decimal]] = []
-    for index, row in enumerate(step2.materials_to_order, start=1):
-        if row.cost <= 0:
-            continue
-        quantity = row.quantity if row.quantity > 0 else Decimal("1")
-        unit_cost = row.cost / quantity
-        label = f"Ordered material {index}"
-        if row.link:
-            label = row.link[:120]
-        items.append((label, quantity, unit_cost))
+def _append_supplier_materials(
+    items: list[tuple[str, Decimal, Decimal, Decimal]],
+    suppliers: list[MaterialSupplier],
+    *,
+    label_prefix: str,
+) -> None:
+    for supplier_index, supplier in enumerate(suppliers, start=1):
+        first_in_supplier = True
+        for link_index, row in enumerate(supplier.links, start=1):
+            if row.cost <= 0 and not (row.link or "").strip():
+                continue
+            if row.cost <= 0:
+                continue
+            quantity = row.quantity if row.quantity > 0 else Decimal("1")
+            label = f"{label_prefix} {supplier_index}" if len(suppliers) > 1 else label_prefix
+            if row.link:
+                label = row.link[:120]
+            elif len(supplier.links) > 1:
+                label = f"{label_prefix} {link_index}"
+            delivery = supplier.delivery_charge if first_in_supplier else Decimal("0")
+            first_in_supplier = False
+            items.append((label, quantity, row.cost, delivery))
+
+
+def build_material_items(step2: Step2Snapshot) -> list[tuple[str, Decimal, Decimal, Decimal]]:
+    """Return (name, quantity, unit_cost, delivery_cost) tuples for calculation."""
+    items: list[tuple[str, Decimal, Decimal, Decimal]] = []
+    _append_supplier_materials(items, step2.materials_to_order, label_prefix="Ordered material")
     for index, row in enumerate(step2.shelf_materials_rows, start=1):
         if row.cost <= 0:
             continue
@@ -125,11 +149,11 @@ def build_material_items(step2: Step2Snapshot) -> list[tuple[str, Decimal, Decim
         label = f"Shelf material {index}"
         if row.link:
             label = row.link[:120]
-        items.append((label, quantity, unit_cost))
+        items.append((label, quantity, unit_cost, Decimal("0")))
     if step2.shelf_materials_cost > 0 and not step2.shelf_materials_rows:
-        items.append(("Shelf materials", Decimal("1"), step2.shelf_materials_cost))
+        items.append(("Shelf materials", Decimal("1"), step2.shelf_materials_cost, Decimal("0")))
     if not items and step2.unit_cost > 0:
-        items.append((step2.material_name, step2.quantity, step2.unit_cost))
+        items.append((step2.material_name, step2.quantity, step2.unit_cost, Decimal("0")))
     return items
 
 

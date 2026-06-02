@@ -82,6 +82,20 @@
       letter-spacing: 0.04em;
     }
 
+    .subsection-title {
+      margin: 10px 0 6px;
+      color: #374151;
+      font-size: 10pt;
+      font-weight: 700;
+    }
+
+    .supplier-summary {
+      margin: 0 0 10px;
+      color: #374151;
+      font-size: 9.5pt;
+      font-weight: 600;
+    }
+
     .field-grid {
       display: table;
       width: 100%;
@@ -391,16 +405,18 @@
       <div class="field-box tall">{{ work.scope }}</div>
 
       <p class="section-title">Materials to Order and Cost</p>
+      {% for supplier in work.material_suppliers %}
+      <p class="subsection-title">{{ supplier.title }}</p>
       <table class="materials-table">
         <thead>
           <tr>
             <th>Link</th>
             <th style="width: 18%;">Quantity</th>
-            <th style="width: 18%;">Cost</th>
+            <th style="width: 18%;">Cost per item</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in work.materials_to_order %}
+          {% for row in supplier.links %}
           <tr>
             <td>{{ row.link }}</td>
             <td>{{ row.quantity }}</td>
@@ -409,6 +425,8 @@
           {% endfor %}
         </tbody>
       </table>
+      <p class="supplier-summary">Delivery: {{ supplier.delivery_charge }} · Total: {{ supplier.subtotal }}</p>
+      {% endfor %}
 
       <p class="section-title">Materials bought off the Shelf and Cost</p>
       <table class="materials-table">

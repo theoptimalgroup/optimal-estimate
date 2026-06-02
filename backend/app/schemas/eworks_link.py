@@ -56,6 +56,53 @@ class MaterialOrderRow(BaseModel):
     cost: Decimal = Decimal("0")
 
 
+class MaterialLinkRow(BaseModel):
+    link: str | None = None
+    quantity: Decimal = Decimal("0")
+    cost: Decimal = Decimal("0")  # cost per item
+
+
+class MaterialSupplier(BaseModel):
+    links: list[MaterialLinkRow] = Field(default_factory=list)
+    delivery_charge: Decimal = Decimal("0")
+
+
+def migrate_legacy_material_rows(rows: list | None) -> list[dict]:
+    """Convert flat MaterialOrderRow list to supplier shape (one supplier, all links)."""
+    if not rows:
+        return [{"links": [{"link": "", "quantity": 0, "cost": 0}], "delivery_charge": 0}]
+    first = rows[0]
+    if isinstance(first, dict) and "links" in first:
+        return rows
+    if isinstance(first, MaterialSupplier):
+        return [s.model_dump(mode="json") for s in rows]
+    links: list[dict] = []
+    for row in rows:
+        if isinstance(row, dict):
+            qty = Decimal(str(row.get("quantity", 0)))
+            cost = Decimal(str(row.get("cost", 0)))
+            link = row.get("link")
+        else:
+            qty = row.quantity
+            cost = row.cost
+            link = row.link
+        cost_per_item = cost / max(qty, Decimal("1")) if cost > 0 else Decimal("0")
+        links.append({"link": link, "quantity": qty, "cost": cost_per_item})
+    if not links:
+        links = [{"link": "", "quantity": 0, "cost": 0}]
+    return [{"links": links, "delivery_charge": 0}]
+
+
+def flatten_supplier_links(suppliers: list[MaterialSupplier]) -> list[MaterialLinkRow]:
+    rows: list[MaterialLinkRow] = []
+    for supplier in suppliers:
+        rows.extend(supplier.links)
+    return rows
+
+
+def default_material_suppliers() -> list[MaterialSupplier]:
+    return [MaterialSupplier(links=[MaterialLinkRow()])]
+
 class SessionAttachmentMeta(BaseModel):
     id: str
     file_name: str
@@ -113,7 +160,7 @@ class ResolvedRuleInfo(BaseModel):
 
 class WorkBlockSnapshot(BaseModel):
     scope: str | None = None
-    materials_to_order: list[MaterialOrderRow] = Field(default_factory=list)
+    materials_to_order: list[MaterialSupplier] = Field(default_factory=default_material_suppliers)
     shelf_materials_rows: list[MaterialOrderRow] = Field(default_factory=list)
     shelf_materials: str | None = None
     shelf_materials_cost: Decimal = Decimal("0")
@@ -153,6 +200,13 @@ class WorkBlockSnapshot(BaseModel):
     other_charge: Decimal = Decimal("0")
     other_charge_reason: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_materials(cls, data: object) -> object:
+        if isinstance(data, dict) and "materials_to_order" in data:
+            data = {**data, "materials_to_order": migrate_legacy_material_rows(data.get("materials_to_order") or [])}
+        return data
+
     @model_validator(mode="after")
     def ensure_shelf_rows(self) -> "WorkBlockSnapshot":
         if self.shelf_materials_rows:
@@ -176,7 +230,7 @@ class Step2Snapshot(BaseModel):
     works: list[WorkBlockSnapshot] = Field(default_factory=list)
     findings: str | None = None
     scope: str | None = None
-    materials_to_order: list[MaterialOrderRow] = Field(default_factory=list)
+    materials_to_order: list[MaterialSupplier] = Field(default_factory=default_material_suppliers)
     shelf_materials_rows: list[MaterialOrderRow] = Field(default_factory=list)
     shelf_materials: str | None = None
     shelf_materials_cost: Decimal = Decimal("0")
@@ -210,6 +264,23 @@ class Step2Snapshot(BaseModel):
     other_charge: Decimal = Decimal("0")
     other_charge_reason: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_materials(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        updated = dict(data)
+        if "materials_to_order" in updated:
+            updated["materials_to_order"] = migrate_legacy_material_rows(updated.get("materials_to_order") or [])
+        if "works" in updated and isinstance(updated["works"], list):
+            updated["works"] = [
+                {**work, "materials_to_order": migrate_legacy_material_rows(work.get("materials_to_order") or [])}
+                if isinstance(work, dict) and "materials_to_order" in work
+                else work
+                for work in updated["works"]
+            ]
+        return updated
+
     @model_validator(mode="after")
     def ensure_works(self) -> "Step2Snapshot":
         if self.works:
@@ -217,7 +288,7 @@ class Step2Snapshot(BaseModel):
         if self.scope or self.materials_to_order or self.time_frame or self.unit_cost > 0:
             block = WorkBlockSnapshot(
                 scope=self.scope,
-                materials_to_order=self.materials_to_order,
+                materials_to_order=self.materials_to_order or default_material_suppliers(),
                 shelf_materials_rows=self.shelf_materials_rows,
                 shelf_materials=self.shelf_materials,
                 shelf_materials_cost=self.shelf_materials_cost,
@@ -400,12 +471,13 @@ def step2_to_calculation_inputs(
         trade_id=trade_id,
     )
     materials: list[MaterialInput] = []
-    for material_name, quantity, unit_cost in build_material_items(normalized):
+    for material_name, quantity, unit_cost, delivery_cost in build_material_items(normalized):
         materials.append(
             MaterialInput(
                 material_name=material_name,
                 quantity=quantity,
                 unit_cost=unit_cost,
+                delivery_cost=delivery_cost,
                 markup_type="percentage",
                 markup_value=normalized.markup_value,
                 client_visible=True,

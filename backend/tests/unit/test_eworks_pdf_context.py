@@ -71,7 +71,7 @@ def test_build_eworks_pdf_cover_matches_reference_fields():
     assert context["property_address"] == "The Factory, 1 Nile Street"
     assert "Kira Mcintyre" in context["estimation_fields"][8]["value"]
     assert context["work_forms"][0]["scope"].startswith("Door no 12")
-    assert context["work_forms"][0]["materials_to_order"][0]["cost"] == "£30.00"
+    assert context["work_forms"][0]["material_suppliers"][0]["links"][0]["cost"] == "£30.00"
     assert context["total_pages"] == 4
     assert context["combined_page"] == 4
 

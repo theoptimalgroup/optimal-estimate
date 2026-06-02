@@ -53,7 +53,9 @@ function workFieldLabel(path: string[]): string | null {
   const rowIndex = path.findIndex((segment) => /^\d+$/.test(segment));
   const rowNumber = rowIndex >= 0 ? Number(path[rowIndex]) + 1 : null;
   const section = path.includes("materials_to_order")
-    ? "Materials to order"
+    ? path.includes("links")
+      ? "Materials link"
+      : "Materials supplier"
     : path.includes("shelf_materials_rows")
       ? "Shelf materials"
       : null;
@@ -62,7 +64,8 @@ function workFieldLabel(path: string[]): string | null {
     scope: "Scope of works",
     skill_required: "Skill required",
     quantity: "quantity",
-    cost: "cost",
+    cost: "cost per item",
+    delivery_charge: "delivery charge",
     engineers_needed: "Number of engineers",
     engineer_time_value: "Duration",
     engineer_time_unit: "Hours or days",

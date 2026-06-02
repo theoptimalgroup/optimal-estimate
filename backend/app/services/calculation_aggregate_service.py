@@ -17,7 +17,7 @@ from app.schemas.calculation import (
     LineBreakdown,
     MaterialInput,
 )
-from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnapshot, aggregate_work_charges
+from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnapshot, aggregate_work_charges, flatten_supplier_links
 from app.services.eworks_link_service import collect_work_skills, resolve_skill_trade, work_skill_name
 from app.services.eworks_questionnaire_service import (
     build_material_items,
@@ -120,7 +120,7 @@ def build_combined_internal_notes_context(step1: Step1Snapshot, works: list[Work
     link_parts: list[str] = []
     best_engineers: list[str] = []
     for block in works:
-        rows = [*block.materials_to_order, *block.shelf_materials_rows]
+        rows = [*flatten_supplier_links(block.materials_to_order), *block.shelf_materials_rows]
         formatted = format_links_and_quantity(rows)
         if formatted:
             link_parts.append(formatted)
@@ -137,12 +137,13 @@ def build_combined_material_inputs(step1: Step1Snapshot, step2: Step2Snapshot) -
     materials: list[MaterialInput] = []
     for index, block in enumerate(step2.works, start=1):
         work_step2 = work_block_to_step2_snapshot(block, trade_name=step1.trade_name)
-        for material_name, quantity, unit_cost in build_material_items(work_step2):
+        for material_name, quantity, unit_cost, delivery_cost in build_material_items(work_step2):
             materials.append(
                 MaterialInput(
                     material_name=f"Work {index}: {material_name}",
                     quantity=quantity,
                     unit_cost=unit_cost,
+                    delivery_cost=delivery_cost,
                     markup_type="percentage",
                     markup_value=work_step2.markup_value,
                     client_visible=True,

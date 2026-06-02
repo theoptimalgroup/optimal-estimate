@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Step2Snapshot, WorkBlockSnapshot } from "@/lib/eworks-session";
+import type { MaterialSupplier, Step2Snapshot, WorkBlockSnapshot } from "@/lib/eworks-session";
 
 export const materialOrderRowSchema = z
   .object({
@@ -17,6 +17,13 @@ export const materialOrderRowSchema = z
       });
     }
   });
+
+export const materialLinkRowSchema = materialOrderRowSchema;
+
+export const materialSupplierSchema = z.object({
+  links: z.array(materialLinkRowSchema).min(1, "Add at least one link"),
+  delivery_charge: z.number({ error: "Enter delivery charge" }).min(0, "Delivery must be 0 or greater"),
+});
 
 export const attachmentMetaSchema = z.object({
   id: z.string(),
@@ -51,6 +58,63 @@ function normalizeMaterialRow(row: { link?: string | null; quantity?: unknown; c
   };
 }
 
+function normalizeMaterialLinkRow(row: { link?: string | null; quantity?: unknown; cost?: unknown }) {
+  return normalizeMaterialRow(row);
+}
+
+function normalizeMaterialSupplier(supplier: {
+  links?: Array<{ link?: string | null; quantity?: unknown; cost?: unknown }>;
+  delivery_charge?: unknown;
+}): MaterialSupplier {
+  const links =
+    supplier.links && supplier.links.length > 0
+      ? supplier.links.map(normalizeMaterialLinkRow)
+      : [{ link: "", quantity: 0, cost: 0 }];
+  const delivery = Number(supplier.delivery_charge);
+  return {
+    links,
+    delivery_charge: Number.isFinite(delivery) && delivery >= 0 ? delivery : 0,
+  };
+}
+
+function isLegacyMaterialRow(row: unknown): boolean {
+  return typeof row === "object" && row !== null && !("links" in row);
+}
+
+export function migrateLegacyMaterialRows(rows: unknown): MaterialSupplier[] {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return defaultMaterialSuppliers();
+  }
+  if (!isLegacyMaterialRow(rows[0])) {
+    return rows.map((row) => normalizeMaterialSupplier(row as MaterialSupplier));
+  }
+  const links = (rows as Array<{ link?: string | null; quantity?: unknown; cost?: unknown }>).map((row) => {
+    const normalized = normalizeMaterialRow(row);
+    const qty = normalized.quantity > 0 ? normalized.quantity : 1;
+    const costPerItem = normalized.cost > 0 ? normalized.cost / qty : 0;
+    return { link: normalized.link, quantity: normalized.quantity, cost: costPerItem };
+  });
+  return [
+    {
+      links: links.length > 0 ? links : [{ link: "", quantity: 0, cost: 0 }],
+      delivery_charge: 0,
+    },
+  ];
+}
+
+export function defaultMaterialSuppliers(): MaterialSupplier[] {
+  return [{ links: [{ link: "", quantity: 0, cost: 0 }], delivery_charge: 0 }];
+}
+
+export function supplierMaterialsTotal(supplier: MaterialSupplier): number {
+  const linksTotal = supplier.links.reduce((sum, row) => {
+    const qty = Number(row.quantity) || 0;
+    const cost = Number(row.cost) || 0;
+    return sum + qty * cost;
+  }, 0);
+  return linksTotal + (Number(supplier.delivery_charge) || 0);
+}
+
 function toNumericValue(value: unknown): number | undefined {
   if (value === "" || value === null || value === undefined) return undefined;
   if (typeof value === "number") return Number.isNaN(value) ? undefined : value;
@@ -73,10 +137,7 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
     best_engineer: toStringValue(work.best_engineer),
     subcontractors: toStringValue(work.subcontractors),
     other_notes: toStringValue(work.other_notes),
-    materials_to_order:
-      work.materials_to_order?.length > 0
-        ? work.materials_to_order.map(normalizeMaterialRow)
-        : [{ link: "", quantity: 0, cost: 0 }],
+    materials_to_order: migrateLegacyMaterialRows(work.materials_to_order),
     shelf_materials_rows:
       work.shelf_materials_rows?.length > 0
         ? work.shelf_materials_rows.map(normalizeMaterialRow)
@@ -190,7 +251,7 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
 
 export const workBlockFieldsSchema = z.object({
   scope: z.string().min(1, "Scope of works is required"),
-  materials_to_order: z.array(materialOrderRowSchema).min(1, "Add at least one materials row"),
+  materials_to_order: z.array(materialSupplierSchema).min(1, "Add at least one supplier"),
   shelf_materials_rows: z.array(materialOrderRowSchema).min(1, "Add at least one shelf materials row"),
   skill_required: z.string().min(1, "Select a skill"),
   best_engineer: z.string().optional(),
@@ -233,6 +294,8 @@ export const questionnaireSchema = z
 export type WorkBlockFormValues = z.infer<typeof workBlockSchema>;
 export type QuestionnaireFormValues = z.infer<typeof questionnaireSchema>;
 export type MaterialOrderRow = z.infer<typeof materialOrderRowSchema>;
+export type MaterialLinkRow = z.infer<typeof materialLinkRowSchema>;
+export type MaterialSupplierFormValues = z.infer<typeof materialSupplierSchema>;
 export type AttachmentMeta = z.infer<typeof attachmentMetaSchema>;
 
 function toNumericValueOr(value: unknown, fallback: number): number {
@@ -282,7 +345,7 @@ export function parseTimeFrame(timeFrame?: string | null): { time_unit: TimeUnit
 export function defaultWorkBlockValues(tradeName: string): WorkBlockFormValues {
   return normalizeWorkBlockValues({
     scope: "",
-    materials_to_order: [{ link: "", quantity: 0, cost: 0 }],
+    materials_to_order: defaultMaterialSuppliers(),
     shelf_materials_rows: [{ link: "", quantity: 0, cost: 0 }],
     skill_required: tradeName,
     best_engineer: "",
@@ -347,7 +410,7 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
   const labourTimeValue = labourActive ? persistenceNumeric(work.labour_time_value, 1) : 0;
   return {
     scope: work.scope,
-    materials_to_order: work.materials_to_order.map(normalizeMaterialRow),
+    materials_to_order: work.materials_to_order.map(normalizeMaterialSupplier),
     shelf_materials_rows: work.shelf_materials_rows.map(normalizeMaterialRow),
     shelf_materials: work.shelf_materials_rows
       .map((row) => row.link?.trim())
@@ -459,7 +522,7 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
     scope: step2.scope ?? "",
     materials_to_order:
       step2.materials_to_order && step2.materials_to_order.length > 0
-        ? step2.materials_to_order.map((row) => normalizeMaterialRow(row))
+        ? migrateLegacyMaterialRows(step2.materials_to_order)
         : defaultWorkBlockValues(tradeName).materials_to_order,
     shelf_materials_rows: shelfRowsFromLegacy(
       step2.shelf_materials_rows,
@@ -500,7 +563,7 @@ function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlo
       scope: block.scope ?? "",
       materials_to_order:
         block.materials_to_order && block.materials_to_order.length > 0
-          ? block.materials_to_order.map((row) => normalizeMaterialRow(row))
+          ? migrateLegacyMaterialRows(block.materials_to_order)
           : defaultWorkBlockValues(tradeName).materials_to_order,
       shelf_materials_rows: shelfRowsFromLegacy(
         block.shelf_materials_rows,

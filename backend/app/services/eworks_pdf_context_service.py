@@ -8,11 +8,14 @@ from decimal import Decimal
 from app.schemas.calculation import CalculationBreakdown, LineBreakdown
 from app.schemas.eworks_link import (
     AggregatedQuoteSummary,
+    MaterialLinkRow,
     MaterialOrderRow,
+    MaterialSupplier,
     Step1Snapshot,
     Step2Snapshot,
     WorkBlockSnapshot,
     WorkBreakdownResult,
+    migrate_legacy_material_rows,
 )
 from app.services.eworks_questionnaire_service import format_time_frame
 
@@ -58,7 +61,7 @@ def _quote_description(step1: Step1Snapshot) -> str:
     return "\n\n".join(parts) if parts else "—"
 
 
-def _material_table_rows(rows: list[MaterialOrderRow]) -> list[dict[str, str]]:
+def _material_link_table_rows(rows: list[MaterialLinkRow] | list[MaterialOrderRow]) -> list[dict[str, str]]:
     table: list[dict[str, str]] = []
     for row in rows:
         link = (row.link or "").strip()
@@ -68,6 +71,40 @@ def _material_table_rows(rows: list[MaterialOrderRow]) -> list[dict[str, str]]:
             continue
         table.append({"link": link or "—", "quantity": quantity, "cost": cost})
     return table or [{"link": "—", "quantity": "—", "cost": "—"}]
+
+
+def _supplier_material_sections(suppliers: list[MaterialSupplier]) -> list[dict[str, object]]:
+    sections: list[dict[str, object]] = []
+    for index, supplier in enumerate(suppliers, start=1):
+        link_rows = _material_link_table_rows(supplier.links)
+        links_total = sum(
+            (Decimal(str(row.quantity)) * Decimal(str(row.cost)) for row in supplier.links if row.cost > 0),
+            Decimal("0"),
+        )
+        delivery = supplier.delivery_charge or Decimal("0")
+        subtotal = links_total + delivery
+        if link_rows == [{"link": "—", "quantity": "—", "cost": "—"}] and delivery <= 0:
+            continue
+        sections.append(
+            {
+                "title": f"Supplier {index}",
+                "links": link_rows,
+                "delivery_charge": _money(delivery),
+                "subtotal": _money(subtotal),
+            }
+        )
+    return sections or [
+        {
+            "title": "Supplier 1",
+            "links": [{"link": "—", "quantity": "—", "cost": "—"}],
+            "delivery_charge": "—",
+            "subtotal": "—",
+        }
+    ]
+
+
+def _material_table_rows(rows: list[MaterialOrderRow]) -> list[dict[str, str]]:
+    return _material_link_table_rows(rows)
 
 
 def _engineer_summary(block: WorkBlockSnapshot) -> dict[str, str]:
@@ -118,11 +155,12 @@ def _estimation_form_fields(step1: Step1Snapshot) -> list[dict[str, str]]:
 
 
 def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) -> dict:
+    suppliers = [MaterialSupplier.model_validate(item) for item in migrate_legacy_material_rows(block.materials_to_order)]
     return {
         "index": index,
         "title": f"Work {index}",
         "scope": _display(block.scope),
-        "materials_to_order": _material_table_rows(block.materials_to_order),
+        "material_suppliers": _supplier_material_sections(suppliers),
         "shelf_materials_rows": _material_table_rows(block.shelf_materials_rows),
         "skill_required": _display(block.skill_required or trade_name),
         "best_engineer": _display(block.best_engineer),

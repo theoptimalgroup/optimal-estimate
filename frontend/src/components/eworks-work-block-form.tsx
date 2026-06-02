@@ -17,7 +17,8 @@ import {
   cn,
   eworksInputClass,
 } from "@/components/eworks-ui";
-import type { AttachmentMeta, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
+import type { AttachmentMeta, MaterialSupplierFormValues, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
+import { defaultMaterialSuppliers, supplierMaterialsTotal } from "@/lib/eworks-calculate-schema";
 import { getAttachmentUrl, rewordScope } from "@/lib/eworks-session";
 import { withRegisterChange } from "@/lib/form-register";
 
@@ -94,13 +95,11 @@ function fieldPath<T extends keyof WorkBlockFormValues>(workIndex: number, field
   return `works.${workIndex}.${field}` as FieldPath<QuestionnaireFormValues>;
 }
 
-type MaterialTable = "materials_to_order" | "shelf_materials_rows";
-
 type MaterialRowsSectionProps = {
   workIndex: number;
   labelColumn: string;
-  table: MaterialTable;
-  rows: WorkBlockFormValues["materials_to_order"];
+  table: "shelf_materials_rows";
+  rows: WorkBlockFormValues["shelf_materials_rows"];
   register: UseFormRegister<QuestionnaireFormValues>;
   control: Control<QuestionnaireFormValues>;
   onLinkChange: (index: number, value: string) => void;
@@ -193,6 +192,152 @@ function MaterialRowsSection({
   );
 }
 
+type SupplierMaterialsSectionProps = {
+  workIndex: number;
+  suppliers: MaterialSupplierFormValues[];
+  register: UseFormRegister<QuestionnaireFormValues>;
+  control: Control<QuestionnaireFormValues>;
+  setValue: UseFormSetValue<QuestionnaireFormValues>;
+  onAddSupplier: () => void;
+  onRemoveSupplier: (supplierIndex: number) => void;
+  onAddLink: (supplierIndex: number) => void;
+  onRemoveLink: (supplierIndex: number, linkIndex: number) => void;
+  onLinkChange: (supplierIndex: number, linkIndex: number, value: string) => void;
+};
+
+function SupplierMaterialsSection({
+  workIndex,
+  suppliers,
+  register,
+  control,
+  onAddSupplier,
+  onRemoveSupplier,
+  onAddLink,
+  onRemoveLink,
+  onLinkChange,
+}: SupplierMaterialsSectionProps) {
+  return (
+    <div className="space-y-4">
+      {suppliers.map((supplier, supplierIndex) => (
+        <div key={supplierIndex} className="rounded-lg border border-gray-200 bg-white">
+          <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2.5">
+            <span className="text-sm font-semibold text-gray-900">Supplier {supplierIndex + 1}</span>
+            <button
+              type="button"
+              className="flex size-8 items-center justify-center rounded border border-gray-300 text-lg leading-none text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+              disabled={suppliers.length <= 1}
+              onClick={() => onRemoveSupplier(supplierIndex)}
+              aria-label={`Remove supplier ${supplierIndex + 1}`}
+            >
+              −
+            </button>
+          </div>
+          <div className="space-y-3 p-3">
+            <EworksTableShell>
+              <div className="hidden bg-gray-100 px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-gray-700 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_4.5rem] lg:gap-3">
+                <span>Link</span>
+                <span>Quantity</span>
+                <span>Cost per item</span>
+                <span />
+              </div>
+              <div className="divide-y divide-black/10">
+                {supplier.links.map((_, linkIndex) => (
+                  <div key={linkIndex} className={cn("grid grid-cols-1 gap-3 p-3", materialRowGridClass)}>
+                    <div className="min-w-0 w-full">
+                      <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-black lg:hidden">
+                        Link
+                      </span>
+                      <EworksInput
+                        className="min-h-[44px] w-full min-w-0 bg-white text-base lg:min-h-[40px] lg:text-sm"
+                        {...withRegisterChange<HTMLInputElement>(
+                          register(`works.${workIndex}.materials_to_order.${supplierIndex}.links.${linkIndex}.link`),
+                          (event) => onLinkChange(supplierIndex, linkIndex, event.target.value),
+                        )}
+                      />
+                    </div>
+                    <div className="grid min-w-0 grid-cols-2 gap-3 lg:contents">
+                      <div className="min-w-0">
+                        <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-black lg:hidden">
+                          Quantity
+                        </span>
+                        <Controller
+                          name={`works.${workIndex}.materials_to_order.${supplierIndex}.links.${linkIndex}.quantity` as FieldPath<QuestionnaireFormValues>}
+                          control={control}
+                          render={({ field }) => (
+                            <NumericInput
+                              field={field}
+                              placeholder="0"
+                              className="min-h-[44px] w-full min-w-0 bg-white text-base lg:min-h-[40px] lg:text-sm"
+                            />
+                          )}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-black lg:hidden">
+                          Cost per item
+                        </span>
+                        <Controller
+                          name={`works.${workIndex}.materials_to_order.${supplierIndex}.links.${linkIndex}.cost` as FieldPath<QuestionnaireFormValues>}
+                          control={control}
+                          render={({ field }) => (
+                            <NumericInput
+                              field={field}
+                              placeholder="0.00"
+                              className="min-h-[44px] w-full min-w-0 bg-white text-base lg:min-h-[40px] lg:text-sm"
+                            />
+                          )}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center lg:justify-end">
+                      <button
+                        type="button"
+                        className="min-h-[44px] px-1 text-xs font-semibold text-red-500 active:opacity-70 lg:px-2"
+                        disabled={supplier.links.length <= 1}
+                        onClick={() => onRemoveLink(supplierIndex, linkIndex)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </EworksTableShell>
+            <EworksButton variant="ghost" className="min-h-[40px] px-3 text-xs" onClick={() => onAddLink(supplierIndex)}>
+              + Add link
+            </EworksButton>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <EworksLabel>
+                Delivery charges
+                <Controller
+                  name={`works.${workIndex}.materials_to_order.${supplierIndex}.delivery_charge` as FieldPath<QuestionnaireFormValues>}
+                  control={control}
+                  render={({ field }) => (
+                    <NumericInput
+                      field={field}
+                      placeholder="0.00"
+                      className="min-h-[44px] w-full bg-white text-base lg:min-h-[40px] lg:text-sm"
+                    />
+                  )}
+                />
+              </EworksLabel>
+              <div className="flex flex-col justify-end">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-gray-600">Total</span>
+                <p className="mt-1.5 min-h-[44px] rounded-lg bg-optimal-field px-3.5 py-2.5 text-sm font-semibold text-optimal-field-text lg:min-h-[40px]">
+                  £{supplierMaterialsTotal(supplier).toFixed(2)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+      <EworksButton variant="ghost" className="min-h-[40px] px-3 text-xs" onClick={onAddSupplier}>
+        + Add supplier
+      </EworksButton>
+    </div>
+  );
+}
+
 export function EworksWorkBlockForm({
   workIndex,
   control,
@@ -211,7 +356,7 @@ export function EworksWorkBlockForm({
 }: Props) {
   const values = watch(`works.${workIndex}`);
   const workErrors = errors.works?.[workIndex];
-  const rows = values.materials_to_order;
+  const suppliers = values.materials_to_order;
   const shelfRows = values.shelf_materials_rows;
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -238,19 +383,47 @@ export function EworksWorkBlockForm({
     }
   };
 
-  const addRow = () => {
-    setValue(`works.${workIndex}.materials_to_order`, [...rows, { link: "", quantity: 0, cost: 0 }], {
+  const clearSupplierLinkQuantity = (supplierIndex: number, linkIndex: number, link: string) => {
+    if (!link.trim()) {
+      setValue(`works.${workIndex}.materials_to_order.${supplierIndex}.links.${linkIndex}.quantity`, 0, {
+        shouldValidate: true,
+      });
+    }
+  };
+
+  const addSupplier = () => {
+    setValue(`works.${workIndex}.materials_to_order`, [...suppliers, ...defaultMaterialSuppliers()], {
       shouldValidate: true,
     });
   };
 
-  const removeRow = (index: number) => {
-    if (rows.length <= 1) return;
+  const removeSupplier = (supplierIndex: number) => {
+    if (suppliers.length <= 1) return;
     setValue(
       `works.${workIndex}.materials_to_order`,
-      rows.filter((_, rowIndex) => rowIndex !== index),
+      suppliers.filter((_, index) => index !== supplierIndex),
       { shouldValidate: true },
     );
+  };
+
+  const addSupplierLink = (supplierIndex: number) => {
+    const next = suppliers.map((supplier, index) =>
+      index === supplierIndex
+        ? { ...supplier, links: [...supplier.links, { link: "", quantity: 0, cost: 0 }] }
+        : supplier,
+    );
+    setValue(`works.${workIndex}.materials_to_order`, next, { shouldValidate: true });
+  };
+
+  const removeSupplierLink = (supplierIndex: number, linkIndex: number) => {
+    const supplier = suppliers[supplierIndex];
+    if (!supplier || supplier.links.length <= 1) return;
+    const next = suppliers.map((item, index) =>
+      index === supplierIndex
+        ? { ...item, links: item.links.filter((_, rowIndex) => rowIndex !== linkIndex) }
+        : item,
+    );
+    setValue(`works.${workIndex}.materials_to_order`, next, { shouldValidate: true });
   };
 
   const addShelfRow = () => {
@@ -340,20 +513,19 @@ export function EworksWorkBlockForm({
       </div>
 
       <div className="space-y-3">
-        <EworksSectionTitle title="Materials to Order and Cost" subtitle="Optional. Add rows only when materials need ordering." />
-        <MaterialRowsSection
+        <EworksSectionTitle title="Materials to Order and Cost" subtitle="Optional. Add suppliers when materials need ordering." />
+        <SupplierMaterialsSection
           workIndex={workIndex}
-          labelColumn="Link"
-          table="materials_to_order"
-          rows={rows}
+          suppliers={suppliers}
           register={register}
           control={control}
-          onLinkChange={(index, value) => clearMaterialQuantity("materials_to_order", index, value)}
-          onRemove={removeRow}
+          setValue={setValue}
+          onAddSupplier={addSupplier}
+          onRemoveSupplier={removeSupplier}
+          onAddLink={addSupplierLink}
+          onRemoveLink={removeSupplierLink}
+          onLinkChange={clearSupplierLinkQuantity}
         />
-        <EworksButton variant="ghost" className="min-h-[40px] px-3 text-xs" onClick={addRow}>
-          + Add material row
-        </EworksButton>
         <EworksFieldError message={workErrors?.materials_to_order?.message as string | undefined} />
       </div>
 

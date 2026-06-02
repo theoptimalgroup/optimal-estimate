@@ -5,7 +5,8 @@ import { useState } from "react";
 import { EworksButton, EworksSectionTitle, cn } from "@/components/eworks-ui";
 import type { DashboardQuoteItem, DashboardWorkItem } from "@/lib/dashboard";
 import type { AttachmentMeta } from "@/lib/eworks-calculate-schema";
-import type { MaterialOrderRow, WorkBlockSnapshot } from "@/lib/eworks-session";
+import type { MaterialOrderRow, MaterialSupplier, WorkBlockSnapshot } from "@/lib/eworks-session";
+import { migrateLegacyMaterialRows } from "@/lib/eworks-calculate-schema";
 import { getAttachmentUrl } from "@/lib/eworks-session";
 
 export function money(value?: number | string | null) {
@@ -152,6 +153,67 @@ function ReadOnlyMaterialTable({
   );
 }
 
+function supplierTotal(supplier: MaterialSupplier): number {
+  const linksTotal = (supplier.links ?? []).reduce((sum, row) => {
+    const qty = Number(row.quantity) || 0;
+    const cost = Number(row.cost) || 0;
+    return sum + qty * cost;
+  }, 0);
+  return linksTotal + (Number(supplier.delivery_charge) || 0);
+}
+
+function ReadOnlySupplierMaterials({ suppliers }: { suppliers?: MaterialSupplier[] }) {
+  const normalized = migrateLegacyMaterialRows(suppliers ?? []);
+  const visible = normalized.filter(
+    (supplier) =>
+      supplier.links.some((row) => hasText(row.link) || hasNumber(row.quantity) || hasNumber(row.cost)) ||
+      hasNumber(supplier.delivery_charge),
+  );
+  if (visible.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <EworksSectionTitle title="Materials to Order and Cost" />
+      {visible.map((supplier, supplierIndex) => {
+        const linkRows = supplier.links.filter(
+          (row) => hasText(row.link) || hasNumber(row.quantity) || hasNumber(row.cost),
+        );
+        return (
+          <div key={supplierIndex} className="space-y-2 rounded-lg border border-gray-200 p-3">
+            <p className="text-sm font-semibold text-gray-900">Supplier {supplierIndex + 1}</p>
+            {linkRows.length > 0 && (
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase tracking-wide text-optimal-muted">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Link</th>
+                      <th className="px-3 py-2 font-medium">Quantity</th>
+                      <th className="px-3 py-2 font-medium">Cost per item</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {linkRows.map((row, index) => (
+                      <tr key={index}>
+                        <td className="px-3 py-2 text-gray-900">{row.link || "—"}</td>
+                        <td className="px-3 py-2 text-gray-900">{row.quantity ?? "—"}</td>
+                        <td className="px-3 py-2 text-gray-900">{money(row.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="grid gap-2 text-sm sm:grid-cols-2">
+              <p className="text-gray-700">Delivery: {money(supplier.delivery_charge)}</p>
+              <p className="font-semibold text-gray-900">Total: {money(supplierTotal(supplier))}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
   const engineerUnit = details.engineer_time_unit === "days" ? "days" : "hours";
   const engineerDuration =
@@ -193,7 +255,7 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
         </div>
       )}
 
-      <ReadOnlyMaterialTable title="Materials to Order and Cost" linkLabel="Link" rows={details.materials_to_order} />
+      <ReadOnlySupplierMaterials suppliers={details.materials_to_order} />
       <ReadOnlyMaterialTable title="Materials bought off the Shelf and Cost" linkLabel="Item" rows={details.shelf_materials_rows} />
 
       <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

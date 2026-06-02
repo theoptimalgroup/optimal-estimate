@@ -37,9 +37,20 @@ export type MaterialOrderRow = {
   cost: number | string;
 };
 
+export type MaterialLinkRow = {
+  link?: string | null;
+  quantity: number | string;
+  cost: number | string;
+};
+
+export type MaterialSupplier = {
+  links: MaterialLinkRow[];
+  delivery_charge: number | string;
+};
+
 export type WorkBlockSnapshot = {
   scope?: string | null;
-  materials_to_order?: MaterialOrderRow[];
+  materials_to_order?: MaterialSupplier[];
   shelf_materials_rows?: MaterialOrderRow[];
   shelf_materials?: string | null;
   shelf_materials_cost?: number | string;
@@ -80,7 +91,7 @@ export type WorkBlockSnapshot = {
 export type Step2Snapshot = {
   works?: WorkBlockSnapshot[];
   scope?: string | null;
-  materials_to_order?: MaterialOrderRow[];
+  materials_to_order?: MaterialSupplier[];
   shelf_materials_rows?: MaterialOrderRow[];
   shelf_materials?: string | null;
   shelf_materials_cost?: number | string;
