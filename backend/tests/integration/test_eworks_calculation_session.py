@@ -24,7 +24,7 @@ from app.models.trade import Trade
 from tests.helpers.internal_notes import extract_core_internal_notes, normalize_internal_notes_for_test
 from tests.test_db import make_test_session
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 ALEX_ROW_11_NOTES_PATH = ROOT / "tests" / "fixtures" / "alex_row_11_internal_notes.txt"
 TEST_SECRET = "test-eworks-secret"
 CURRENCY_TOLERANCE = Decimal("1")
@@ -493,13 +493,13 @@ def test_single_work_includes_session_charges_in_internal_notes(eworks_api_clien
                 materials_to_order=[{"link": "", "quantity": 1, "cost": 100}],
                 unit_cost=100,
                 quantity=1,
+                parking_required=True,
+                parking_type="fixed",
+                parking_fixed_amount=100,
+                congestion_required=True,
+                congestion_amount=100,
             ),
         ],
-        "parking_required": True,
-        "parking_type": "fixed",
-        "parking_fixed_amount": 100,
-        "congestion_required": True,
-        "congestion_amount": 100,
         "travel_charge": 0,
         "other_charge": 0,
     }
@@ -1119,7 +1119,7 @@ def test_multi_work_mixed_skills_combined_quote(eworks_api_client):
     assert abs(Decimal(str(data["breakdown"]["labour_charge_to_client"])) - expected_labour) <= CURRENCY_TOLERANCE
     assert "--- Plumber ---" in (data["internal_notes"] or "")
     assert "--- Carpenter ---" in (data["internal_notes"] or "")
-    assert "--- Combined materials & session charges ---" in (data["internal_notes"] or "")
+    assert "BUDGET: Materials:" in (data["internal_notes"] or "")
 
 
 def test_multi_work_mixed_skills_includes_parking_in_xlsx_materials_charge(eworks_api_client):
@@ -1128,14 +1128,22 @@ def test_multi_work_mixed_skills_includes_parking_in_xlsx_materials_charge(ework
     headers = {"X-Session-Token": created["session_token"]}
     step2 = {
         "works": [
-            _alex_work_block(scope="Work one", skill_required="Plumber"),
-            _alex_work_block(scope="Work two", skill_required="Carpenter"),
+            _alex_work_block(
+                scope="Work one",
+                skill_required="Plumber",
+                parking_required=True,
+                parking_type="fixed",
+                parking_fixed_amount=100,
+                congestion_required=True,
+                congestion_amount=18,
+            ),
+            _alex_work_block(
+                scope="Work two",
+                skill_required="Carpenter",
+                congestion_required=True,
+                congestion_amount=18,
+            ),
         ],
-        "parking_required": True,
-        "parking_type": "fixed",
-        "parking_fixed_amount": 100,
-        "congestion_required": True,
-        "congestion_amount": 18,
         "travel_charge": 0,
         "other_charge": 0,
     }
