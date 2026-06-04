@@ -61,6 +61,7 @@ from app.services.eworks_questionnaire_service import (
     work_block_to_step2_snapshot,
 )
 from app.services.idempotency_service import check_idempotency, hash_payload, store_idempotency
+from app.services.quote_acceptance_helpers import staff_acceptance_from_session
 from app.engines.rules_engine import find_active_rule
 
 
@@ -394,7 +395,7 @@ def calculate_session(
             step2_data.works[index] = block
         _validate_work_block(step2_data, index)
 
-    charges = aggregate_work_charges(step1, step2_data.works)
+    charges = aggregate_work_charges(step1, step2_data.works, step2=step2_data)
     single_work = len(step2_data.works) == 1
     work_skills = collect_work_skills(step2_data.works, step1.trade_name)
     uniform_skills = skills_are_uniform(step2_data.works, step1.trade_name)
@@ -657,6 +658,7 @@ def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
                 final_total=final_total,
                 internal_notes=internal_notes,
                 works=works,
+                acceptance=staff_acceptance_from_session(session),
             )
         )
 

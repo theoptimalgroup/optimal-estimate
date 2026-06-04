@@ -174,6 +174,49 @@ def test_pdf_charges_hourly_parking_shows_rate_and_hours():
     assert "Parking fixed amount (£)" not in labels
 
 
+def test_pdf_work_parking_section_includes_vehicles_notes_and_maps():
+    step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                scope="Work with parking",
+                parking_required=True,
+                parking_type="fixed",
+                parking_fixed_amount=Decimal("50"),
+                parking_vehicles=2,
+                parking_notes="Bay 12 only; ring caretaker on arrival",
+                parking_latitude=Decimal("51.5074"),
+                parking_longitude=Decimal("-0.1278"),
+            )
+        ],
+        parking_required=True,
+        parking_type="fixed",
+        parking_fixed_amount=Decimal("100"),
+    )
+    context = build_eworks_estimate_pdf_context(
+        step1=_step1(),
+        step2=step2,
+        breakdown=CalculationBreakdown(
+            labour=[],
+            materials=[],
+            charges=[],
+            subtotal=Decimal("100"),
+            vat_rate=Decimal("20"),
+            vat_total=Decimal("20"),
+            final_total=Decimal("120"),
+            formula_version="test",
+        ),
+        client_view={"calculation": {"subtotal": 100, "vat_rate": 20, "vat_total": 20, "final_total": 120}},
+    )
+    parking = context["work_forms"][0]["parking"]
+    assert parking["required"] is True
+    labels = [field["label"] for field in parking["fields"]]
+    assert "Number of vehicles" in labels
+    assert parking["notes"] == "Bay 12 only; ring caretaker on arrival"
+    assert parking["maps_url"] == "https://www.google.com/maps?q=51.5074,-0.1278"
+    charge_labels = [field["label"] for field in context["charges_fields"]]
+    assert "Number of vehicles" in charge_labels
+
+
 def test_build_eworks_pdf_results_context():
     breakdown = CalculationBreakdown(
         labour=[LineBreakdown(label="Labour", formula="x", total=Decimal("145"))],

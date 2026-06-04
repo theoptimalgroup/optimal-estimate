@@ -20,3 +20,7 @@ class RateRuleUsage(BaseModel):
 
 class RateRuleDetailRead(RateRuleListRead):
     usage: RateRuleUsage
+
+
+class RateRuleStatusUpdate(BaseModel):
+    is_active: bool

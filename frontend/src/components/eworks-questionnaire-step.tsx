@@ -4,8 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { useFieldArray } from "react-hook-form";
 import type { Control, FieldErrors, UseFormRegister, UseFormSetValue, UseFormWatch } from "react-hook-form";
 import { EworksWorkBlockForm } from "@/components/eworks-work-block-form";
+import { ProductCombobox } from "@/components/product-combobox";
+import { ScopeReplaceDialog } from "@/components/scope-replace-dialog";
 import { EworksButton, cn } from "@/components/eworks-ui";
-import { defaultWorkBlockValues, type QuestionnaireFormValues } from "@/lib/eworks-calculate-schema";
+import {
+  computeProductTotalPrice,
+  defaultWorkBlockValues,
+  formatProductLabel,
+  type ProductOption,
+  type QuestionnaireFormValues,
+} from "@/lib/eworks-calculate-schema";
+import { canAutoFillScope, productScopeText, shouldPromptScopeReplace } from "@/lib/product-scope";
 
 type Props = {
   control: Control<QuestionnaireFormValues>;
@@ -22,6 +31,11 @@ type Props = {
   uploading: boolean;
   deletingAttachmentId: string | null;
   focusWorkIndex?: number | null;
+};
+
+type PendingScopeReplace = {
+  workIndex: number;
+  product: ProductOption;
 };
 
 export function EworksQuestionnaireStep({
@@ -45,6 +59,8 @@ export function EworksQuestionnaireStep({
   const [expandedIndex, setExpandedIndex] = useState(0);
   const workRefs = useRef<(HTMLDivElement | null)[]>([]);
   const scrollToNewRef = useRef<number | null>(null);
+  const [scopeReplacePrompt, setScopeReplacePrompt] = useState<PendingScopeReplace | null>(null);
+  const [productScopeCache, setProductScopeCache] = useState<Record<number, string>>({});
 
   useEffect(() => {
     if (focusWorkIndex !== null && focusWorkIndex !== undefined && focusWorkIndex >= 0) {
@@ -52,8 +68,6 @@ export function EworksQuestionnaireStep({
     }
   }, [focusWorkIndex]);
 
-  // After a new work block is appended, wait for the 300ms expand animation then scroll
-  // so the Scope of Works field is visible at the top of the viewport.
   useEffect(() => {
     if (scrollToNewRef.current === null) return;
     const targetIndex = scrollToNewRef.current;
@@ -63,6 +77,68 @@ export function EworksQuestionnaireStep({
     }, 320);
     return () => window.clearTimeout(timer);
   }, [fields.length]);
+
+  const applyProductSelection = (
+    workIndex: number,
+    product: ProductOption,
+    replaceScope: boolean,
+  ) => {
+    const work = values.works[workIndex];
+    const base = `works.${workIndex}` as const;
+    const unitPrice = Number(product.selling_price ?? 0);
+    const quantity = work.product_quantity ?? 1;
+    const newScope = productScopeText(product);
+
+    setProductScopeCache((current) => ({
+      ...current,
+      [product.id]: newScope,
+    }));
+
+    setValue(`${base}.selected_product_id`, product.id, { shouldValidate: true });
+    setValue(`${base}.eworks_item_id`, product.eworks_item_id, { shouldValidate: true });
+    setValue(`${base}.product_name`, product.product_name, { shouldValidate: true });
+    setValue(`${base}.product_code`, product.product_code ?? "", { shouldValidate: true });
+    setValue(`${base}.product_unit_price`, unitPrice, { shouldValidate: true });
+    setValue(`${base}.product_total_price`, computeProductTotalPrice(quantity, unitPrice), { shouldValidate: true });
+
+    if (replaceScope) {
+      setValue(`${base}.scope`, newScope, { shouldValidate: true });
+      setValue(`${base}.scope_from_product`, true, { shouldValidate: true });
+    }
+  };
+
+  const clearProductSelection = (workIndex: number) => {
+    const base = `works.${workIndex}` as const;
+    setValue(`${base}.selected_product_id`, null, { shouldValidate: true });
+    setValue(`${base}.eworks_item_id`, null, { shouldValidate: true });
+    setValue(`${base}.product_name`, "", { shouldValidate: true });
+    setValue(`${base}.product_code`, "", { shouldValidate: true });
+    setValue(`${base}.product_unit_price`, 0, { shouldValidate: true });
+    setValue(`${base}.product_total_price`, 0, { shouldValidate: true });
+    setValue(`${base}.scope_from_product`, false, { shouldValidate: true });
+  };
+
+  const handleProductSelect = (workIndex: number, product: ProductOption | null) => {
+    if (!product) {
+      clearProductSelection(workIndex);
+      return;
+    }
+
+    const work = values.works[workIndex];
+    const newScope = productScopeText(product);
+
+    if (canAutoFillScope(work)) {
+      applyProductSelection(workIndex, product, true);
+      return;
+    }
+
+    if (shouldPromptScopeReplace(work, newScope)) {
+      setScopeReplacePrompt({ workIndex, product });
+      return;
+    }
+
+    applyProductSelection(workIndex, product, false);
+  };
 
   const handleAddWork = () => {
     const newIndex = fields.length;
@@ -82,13 +158,38 @@ export function EworksQuestionnaireStep({
 
   return (
     <div className="space-y-5">
-      <p className="text-sm text-optimal-muted">Complete each work block below.</p>
+      <p className="text-sm text-optimal-muted">
+        Complete each work block below. Select a product to auto-fill scope, then review and edit before submitting.
+      </p>
+
+      <ScopeReplaceDialog
+        open={scopeReplacePrompt !== null}
+        onKeep={() => {
+          if (scopeReplacePrompt) {
+            applyProductSelection(scopeReplacePrompt.workIndex, scopeReplacePrompt.product, false);
+          }
+          setScopeReplacePrompt(null);
+        }}
+        onReplace={() => {
+          if (scopeReplacePrompt) {
+            applyProductSelection(scopeReplacePrompt.workIndex, scopeReplacePrompt.product, true);
+          }
+          setScopeReplacePrompt(null);
+        }}
+      />
 
       <div className="space-y-3">
         {fields.map((field, index) => {
           const isExpanded = expandedIndex === index;
-          const scopePreview = values.works[index]?.scope?.trim();
+          const work = values.works[index];
+          const scopePreview = work?.scope?.trim();
+          const productPreview =
+            work?.selected_product_id != null && work?.product_name
+              ? formatProductLabel({ product_name: work.product_name, product_code: work.product_code ?? null })
+              : null;
           const hasErrors = !!errors.works?.[index];
+          const cachedProductScope =
+            work?.selected_product_id != null ? productScopeCache[work.selected_product_id] : undefined;
 
           return (
             <div
@@ -101,34 +202,50 @@ export function EworksQuestionnaireStep({
                 isExpanded ? "overflow-visible border-optimal-orange/40 bg-white shadow-lg" : "overflow-hidden border-gray-200 bg-white",
                 hasErrors && !isExpanded && "border-red-400/40 ring-1 ring-red-400/20",
               )}
+              data-testid={`work-block-${index}`}
             >
               <div className="flex items-center gap-2 p-2 pl-3">
+                <span
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all duration-200",
+                    isExpanded ? "bg-optimal-orange text-gray-900" : "bg-gray-100 text-gray-900",
+                  )}
+                  aria-label={`Work ${index + 1}`}
+                >
+                  {index + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Work {index + 1}
+                    {productPreview ? ` · ${productPreview}` : scopePreview ? " · Scope entered" : ""}
+                  </p>
+                  <div
+                    className="mt-1"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ProductCombobox
+                      selectedProductId={work?.selected_product_id}
+                      productName={work?.product_name}
+                      productCode={work?.product_code}
+                      onSelect={(product) => handleProductSelect(index, product)}
+                    />
+                  </div>
+                  {!isExpanded && scopePreview && (
+                    <span className="mt-1 block truncate text-xs text-optimal-muted">
+                      {scopePreview.slice(0, 72)}
+                      {scopePreview.length > 72 ? "…" : ""}
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
-                  className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors duration-200 hover:bg-gray-50 active:bg-gray-100"
+                  className="flex min-h-[44px] shrink-0 items-center rounded-lg px-2 py-2 text-optimal-muted transition-colors hover:bg-gray-50"
                   onClick={() => setExpandedIndex(isExpanded ? -1 : index)}
                   aria-expanded={isExpanded}
+                  aria-label={isExpanded ? `Collapse work ${index + 1}` : `Expand work ${index + 1}`}
                 >
-                  <span
-                    className={cn(
-                      "flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all duration-200",
-                      isExpanded ? "bg-optimal-orange text-gray-900" : "bg-gray-100 text-gray-900",
-                    )}
-                  >
-                    {index + 1}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-gray-900">Work {index + 1}</span>
-                    {!isExpanded && scopePreview && (
-                      <span className="block truncate text-xs text-optimal-muted">
-                        {scopePreview.slice(0, 72)}
-                        {scopePreview.length > 72 ? "…" : ""}
-                      </span>
-                    )}
-                  </span>
-                  <span className={cn("shrink-0 text-optimal-muted transition-transform duration-200", isExpanded && "rotate-180")}>
-                    ▾
-                  </span>
+                  <span className={cn("transition-transform duration-200", isExpanded && "rotate-180")}>▾</span>
                 </button>
                 {index > 0 && (
                   <EworksButton variant="danger" className="min-h-[40px] px-3 py-2 text-xs" onClick={() => handleRemoveWork(index)}>
@@ -146,6 +263,7 @@ export function EworksQuestionnaireStep({
                   <div className="border-t border-gray-200 px-4 pb-4 pt-2">
                     <EworksWorkBlockForm
                       workIndex={index}
+                      workNumber={index + 1}
                       control={control}
                       register={register}
                       watch={watch}
@@ -159,6 +277,7 @@ export function EworksQuestionnaireStep({
                       onDeleteAttachment={onDeleteAttachment}
                       uploading={uploading}
                       deletingAttachmentId={deletingAttachmentId}
+                      cachedProductScope={cachedProductScope}
                     />
                   </div>
                 </div>

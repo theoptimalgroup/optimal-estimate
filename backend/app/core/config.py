@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 EnvironmentName = Literal["development", "staging", "production"]
 
 
+AuthProviderName = Literal["dev", "azure"]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -28,11 +31,35 @@ class Settings(BaseSettings):
     eworks_attachment_path: str = "./storage/eworks-attachments"
     dashboard_password: str = "optimal-dev"
 
+    # Auth provider: dev (local) or azure (Microsoft Entra ID)
+    auth_provider: AuthProviderName = "dev"
+
+    # Dev auth (internal users; used when auth_provider=dev)
+    dev_auth_enabled: bool = False
+    dev_user_id: str = "dev-user-1"
+    dev_user_email: str = "admin@optimal.example"
+    dev_user_name: str = "Admin User"
+    dev_user_role: str = "admin"
+    dev_user_is_active: bool = True
+    dev_auth_auto_create_user: bool = False
+
+    # Microsoft Entra ID (Azure AD) — used when auth_provider=azure
+    azure_tenant_id: str | None = None
+    azure_api_client_id: str | None = None
+    azure_issuer: str | None = None
+    azure_jwks_url: str | None = None
+
     # eWorks REST API (Customer lookup on link open)
     eworks_base_url: str | None = None
     eworks_api_key: str | None = None
     eworks_api_enabled: bool = False
     eworks_api_timeout_seconds: float = 10.0
+
+    # eWorks acceptance sync (client quote acceptance → eWorks custom field)
+    eworks_acceptance_sync_enabled: bool = False
+    eworks_acceptance_sync_mode: str = "custom_field"
+    eworks_acceptance_custom_field_id: int = 45
+    eworks_acceptance_custom_field_key: str = "txtar_45"
 
     # Storage
     storage_backend: str = "local"  # local | azure_blob
@@ -82,6 +109,38 @@ class Settings(BaseSettings):
         if not self.scope_reword_enabled:
             return False
         return self.scope_reword_configured
+
+    @property
+    def effective_azure_issuer(self) -> str | None:
+        if self.azure_issuer:
+            return self.azure_issuer.rstrip("/")
+        if self.azure_tenant_id:
+            return f"https://login.microsoftonline.com/{self.azure_tenant_id}/v2.0"
+        return None
+
+    @property
+    def effective_azure_jwks_url(self) -> str | None:
+        if self.azure_jwks_url:
+            return self.azure_jwks_url
+        if self.azure_tenant_id:
+            return f"https://login.microsoftonline.com/{self.azure_tenant_id}/discovery/v2.0/keys"
+        return None
+
+    @property
+    def is_azure_auth(self) -> bool:
+        return self.auth_provider == "azure"
+
+    @property
+    def is_dev_auth(self) -> bool:
+        return self.auth_provider == "dev"
+
+    @field_validator("auth_provider", mode="before")
+    @classmethod
+    def normalize_auth_provider(cls, value: str) -> str:
+        normalized = (value or "dev").lower()
+        if normalized not in {"dev", "azure"}:
+            return "dev"
+        return normalized
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -169,6 +228,10 @@ class Settings(BaseSettings):
         if self.eworks_api_enabled:
             if not self.eworks_base_url or not self.eworks_api_key:
                 raise ValueError("EWORKS_API_ENABLED requires EWORKS_BASE_URL and EWORKS_API_KEY")
+
+        if self.auth_provider == "azure":
+            if not self.azure_tenant_id or not self.azure_api_client_id:
+                raise ValueError("AUTH_PROVIDER=azure requires AZURE_TENANT_ID and AZURE_API_CLIENT_ID")
 
         return self
 

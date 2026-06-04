@@ -15,6 +15,7 @@ class UserRole(str, Enum):
     ESTIMATOR = "estimator"
     MANAGER = "manager"
     ENGINEER = "engineer"
+    CLIENT = "client"
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

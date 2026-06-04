@@ -15,6 +15,7 @@ out/
 storage/pdfs/*
 backend/storage/pdfs/*
 !backend/storage/pdfs/.gitkeep
+backend/storage/eworks-attachments/
 .DS_Store
 *.log
 backend/test-report*.txt

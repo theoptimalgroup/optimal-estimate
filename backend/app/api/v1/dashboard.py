@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from app.core.config import settings
+from app.auth.dependencies import DashboardAccess, require_dashboard_access
 from app.core.exceptions import AppError, success_response
 from app.db.session import DbSession
 from app.schemas.eworks_link import (
@@ -13,6 +13,7 @@ from app.schemas.eworks_link import (
     DashboardQuotesResponse,
     ReopenQuoteResponse,
 )
+from app.services.audit_helpers import record_dashboard_audit
 from app.services.calculation_session_service import (
     combine_selected_work_internal_notes,
     list_submitted_quotes,
@@ -23,23 +24,24 @@ from app.services.calculation_session_service import (
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
-def _require_dashboard_password(
-    x_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
-) -> None:
-    if not x_dashboard_password or x_dashboard_password != settings.dashboard_password:
-        raise HTTPException(status_code=401, detail="Invalid dashboard password")
-
-
 @router.get("/quotes")
-def get_submitted_quotes(db: DbSession, _auth=Depends(_require_dashboard_password)):
+def get_submitted_quotes(db: DbSession, _auth=Depends(require_dashboard_access)):
     result = list_submitted_quotes(db)
     return success_response(DashboardQuotesResponse.model_validate(result))
 
 
 @router.post("/quotes/{session_id}/reopen")
-def reopen_quote(session_id: UUID, db: DbSession, _auth=Depends(_require_dashboard_password)):
+def reopen_quote(session_id: UUID, db: DbSession, auth: DashboardAccess = Depends(require_dashboard_access)):
     try:
         result = reopen_submitted_session(db, session_id=session_id)
+        record_dashboard_audit(
+            db,
+            access=auth,
+            action="quote_reopened",
+            entity_type="calculation_session",
+            entity_id=session_id,
+            after={"status": "in_progress"},
+        )
         db.commit()
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -51,7 +53,7 @@ def combine_work_notes(
     session_id: UUID,
     payload: CombineWorkNotesRequest,
     db: DbSession,
-    _auth=Depends(_require_dashboard_password),
+    _auth=Depends(require_dashboard_access),
 ):
     try:
         result = combine_selected_work_internal_notes(
@@ -69,7 +71,7 @@ def download_combined_pdf(
     session_id: UUID,
     payload: CombinedPdfRequest,
     db: DbSession,
-    _auth=Depends(_require_dashboard_password),
+    auth: DashboardAccess = Depends(require_dashboard_access),
 ):
     try:
         content, file_name, media_type = render_combined_works_pdf(
@@ -78,6 +80,15 @@ def download_combined_pdf(
             work_indexes=payload.work_indexes,
             view_type=payload.view_type,
         )
+        record_dashboard_audit(
+            db,
+            access=auth,
+            action="combined_pdf_generated",
+            entity_type="calculation_session",
+            entity_id=session_id,
+            metadata={"file_name": file_name, "view_type": payload.view_type, "work_indexes": payload.work_indexes},
+        )
+        db.commit()
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return Response(

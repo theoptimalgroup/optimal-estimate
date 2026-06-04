@@ -1,6 +1,7 @@
 import { getApiUrl } from "@/lib/api";
 import type { AttachmentMeta } from "@/lib/eworks-calculate-schema";
 import type { WorkBlockSnapshot } from "@/lib/eworks-session";
+import type { QuoteAcceptanceStatus } from "@/lib/quote-acceptance";
 
 const DASHBOARD_PASSWORD_KEY = "eworks-dashboard-password";
 
@@ -25,6 +26,7 @@ export type DashboardQuoteItem = {
   final_total?: number | string | null;
   internal_notes?: string | null;
   works: DashboardWorkItem[];
+  acceptance?: QuoteAcceptanceStatus;
 };
 
 export type DashboardQuotesResponse = {

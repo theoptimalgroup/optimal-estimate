@@ -128,15 +128,43 @@ function toStringValue(value: unknown): string {
   return String(value);
 }
 
+/** Combine legacy split notes or step1 link fields into one parking/access notes string. */
+function mergeParkingAccessNotes(
+  parkingNotes?: string | null,
+  accessNotes?: string | null,
+): string {
+  const parking = parkingNotes?.trim() ?? "";
+  const access = accessNotes?.trim() ?? "";
+  if (parking && access) {
+    if (parking.includes(access) || access.includes(parking)) {
+      return parking.length >= access.length ? parking : access;
+    }
+    return `${parking}\n${access}`;
+  }
+  return parking || access;
+}
+
 function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValues {
   const engineersRequired = work.engineers_required !== false;
   return {
     ...work,
     scope: toStringValue(work.scope),
+    selected_product_id: toNumericValue(work.selected_product_id) ?? null,
+    eworks_item_id: toNumericValue(work.eworks_item_id) ?? null,
+    product_name: toStringValue(work.product_name),
+    product_code: toStringValue(work.product_code),
+    product_quantity: Math.max(0.01, toNumericValue(work.product_quantity) ?? 1),
+    product_unit_price: toNumericValue(work.product_unit_price) ?? 0,
+    product_total_price: computeProductTotalPrice(
+      Math.max(0.01, toNumericValue(work.product_quantity) ?? 1),
+      toNumericValue(work.product_unit_price) ?? 0,
+    ),
+    scope_from_product: Boolean(work.scope_from_product),
     skill_required: toStringValue(work.skill_required),
     best_engineer: toStringValue(work.best_engineer),
     subcontractors: toStringValue(work.subcontractors),
     other_notes: toStringValue(work.other_notes),
+    findings: toStringValue(work.findings),
     materials_to_order: migrateLegacyMaterialRows(work.materials_to_order),
     shelf_materials_rows:
       work.shelf_materials_rows?.length > 0
@@ -155,6 +183,11 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
     parking_fixed_amount: toNumericValue(work.parking_fixed_amount) ?? 0,
     parking_rate_per_hour: toNumericValue(work.parking_rate_per_hour) ?? 0,
     parking_hours: toNumericValue(work.parking_hours) ?? 0,
+    parking_vehicles: Math.max(1, Math.floor(toNumericValue(work.parking_vehicles) ?? 1)),
+    parking_notes: toStringValue(work.parking_notes),
+    parking_same_location_as_work1: Boolean(work.parking_same_location_as_work1),
+    parking_latitude: toNumericValue(work.parking_latitude) ?? null,
+    parking_longitude: toNumericValue(work.parking_longitude) ?? null,
     congestion_required: Boolean(work.congestion_required),
     congestion_amount: toNumericValue(work.congestion_amount) ?? 0,
     travel_charge: toNumericValue(work.travel_charge) ?? 0,
@@ -240,6 +273,24 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
       ctx.addIssue({ code: "custom", message: "Parking rate required for hourly parking", path: [path("parking_rate_per_hour")] });
     }
   }
+  if (data.parking_required) {
+    const vehicles = toNumericValue(data.parking_vehicles);
+    if (vehicles === undefined || vehicles < 1 || !Number.isInteger(vehicles)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Number of vehicles must be at least 1",
+        path: [path("parking_vehicles")],
+      });
+    }
+  }
+  const lat = toNumericValue(data.parking_latitude);
+  const lng = toNumericValue(data.parking_longitude);
+  if (lat !== undefined && (lat < -90 || lat > 90)) {
+    ctx.addIssue({ code: "custom", message: "Latitude must be between -90 and 90", path: [path("parking_latitude")] });
+  }
+  if (lng !== undefined && (lng < -180 || lng > 180)) {
+    ctx.addIssue({ code: "custom", message: "Longitude must be between -180 and 180", path: [path("parking_longitude")] });
+  }
   if (data.other_charge > 0 && !data.other_charge_reason?.trim()) {
     ctx.addIssue({
       code: "custom",
@@ -251,6 +302,14 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
 
 export const workBlockFieldsSchema = z.object({
   scope: z.string().min(1, "Scope of works is required"),
+  selected_product_id: z.number().nullable().optional(),
+  eworks_item_id: z.number().nullable().optional(),
+  product_name: z.string().optional(),
+  product_code: z.string().optional(),
+  product_quantity: z.number().min(0.01),
+  product_unit_price: z.number().min(0),
+  product_total_price: z.number().min(0),
+  scope_from_product: z.boolean().optional(),
   materials_to_order: z.array(materialSupplierSchema).min(1, "Add at least one supplier"),
   shelf_materials_rows: z.array(materialOrderRowSchema).min(1, "Add at least one shelf materials row"),
   skill_required: z.string().min(1, "Select a skill"),
@@ -264,6 +323,7 @@ export const workBlockFieldsSchema = z.object({
   labour_needed: z.number({ error: "Enter number of labour" }).int().min(0),
   labour_time_value: z.number().min(0),
   other_notes: z.string().optional(),
+  findings: z.string().optional(),
   attachments: z.array(attachmentMetaSchema),
   markup_value: z.number({ error: "Enter markup percentage" }).min(0),
   // Per-work charges
@@ -272,6 +332,11 @@ export const workBlockFieldsSchema = z.object({
   parking_fixed_amount: z.number().min(0),
   parking_rate_per_hour: z.number().min(0),
   parking_hours: z.number().min(0),
+  parking_vehicles: z.number().int().min(1),
+  parking_notes: z.string().optional(),
+  parking_same_location_as_work1: z.boolean().optional(),
+  parking_latitude: z.number().min(-90).max(90).nullable().optional(),
+  parking_longitude: z.number().min(-180).max(180).nullable().optional(),
   congestion_required: z.boolean(),
   congestion_amount: z.number({ error: "Enter congestion amount" }).min(0),
   travel_charge: z.number({ error: "Enter travel charge" }).min(0),
@@ -345,6 +410,14 @@ export function parseTimeFrame(timeFrame?: string | null): { time_unit: TimeUnit
 export function defaultWorkBlockValues(tradeName: string): WorkBlockFormValues {
   return normalizeWorkBlockValues({
     scope: "",
+    selected_product_id: null,
+    eworks_item_id: null,
+    product_name: "",
+    product_code: "",
+    product_quantity: 1,
+    product_unit_price: 0,
+    product_total_price: 0,
+    scope_from_product: false,
     materials_to_order: defaultMaterialSuppliers(),
     shelf_materials_rows: [{ link: "", quantity: 0, cost: 0 }],
     skill_required: tradeName,
@@ -358,6 +431,7 @@ export function defaultWorkBlockValues(tradeName: string): WorkBlockFormValues {
     labour_needed: 0,
     labour_time_value: 1,
     other_notes: "",
+    findings: "",
     attachments: [],
     markup_value: 20,
     parking_required: false,
@@ -365,6 +439,11 @@ export function defaultWorkBlockValues(tradeName: string): WorkBlockFormValues {
     parking_fixed_amount: 0,
     parking_rate_per_hour: 0,
     parking_hours: 0,
+    parking_vehicles: 1,
+    parking_notes: "",
+    parking_same_location_as_work1: false,
+    parking_latitude: null,
+    parking_longitude: null,
     congestion_required: false,
     congestion_amount: 0,
     travel_charge: 0,
@@ -399,6 +478,26 @@ export function shelfMaterialsCostTotal(rows: MaterialOrderRow[]): number {
   return rows.reduce((sum, row) => sum + Number(row.cost ?? 0), 0);
 }
 
+export type ProductOption = {
+  id: number;
+  eworks_item_id: number;
+  product_name: string;
+  product_code: string | null;
+  scope_of_work: string | null;
+  selling_price: number;
+  category: string | null;
+  type: string | null;
+};
+
+export function formatProductLabel(product: Pick<ProductOption, "product_name" | "product_code">): string {
+  const code = product.product_code?.trim();
+  return code ? `${product.product_name} — ${code}` : product.product_name;
+}
+
+export function computeProductTotalPrice(quantity: number, unitPrice: number): number {
+  return Math.round(quantity * unitPrice * 100) / 100;
+}
+
 export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapshot {
   const labourActive = work.labour_required && work.engineers_required && work.engineer_time_unit === "days";
   const primaryUnit = work.engineers_required ? work.engineer_time_unit : "days";
@@ -410,6 +509,17 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
   const labourTimeValue = labourActive ? persistenceNumeric(work.labour_time_value, 1) : 0;
   return {
     scope: work.scope,
+    selected_product_id: work.selected_product_id ?? null,
+    eworks_item_id: work.eworks_item_id ?? null,
+    product_name: work.product_name?.trim() || null,
+    product_code: work.product_code?.trim() || null,
+    product_quantity: persistenceNumeric(work.product_quantity, 1),
+    product_unit_price: persistenceNumeric(work.product_unit_price, 0),
+    product_total_price: computeProductTotalPrice(
+      persistenceNumeric(work.product_quantity, 1),
+      persistenceNumeric(work.product_unit_price, 0),
+    ),
+    scope_from_product: Boolean(work.scope_from_product),
     materials_to_order: work.materials_to_order.map(normalizeMaterialSupplier),
     shelf_materials_rows: work.shelf_materials_rows.map(normalizeMaterialRow),
     shelf_materials: work.shelf_materials_rows
@@ -429,6 +539,7 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
     labour_time_value: labourTimeValue,
     time_frame: formatTimeFrame(primaryUnit, primaryValue),
     other_notes: work.other_notes || null,
+    findings: work.findings?.trim() || null,
     attachments: work.attachments,
     markup_value: persistenceNumeric(work.markup_value, 20),
     engineers: engineersNeeded,
@@ -443,6 +554,11 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
     parking_fixed_amount: persistenceNumeric(work.parking_fixed_amount, 0),
     parking_rate_per_hour: persistenceNumeric(work.parking_rate_per_hour, 0),
     parking_hours: persistenceNumeric(work.parking_hours, 0),
+    parking_vehicles: Math.max(1, Math.floor(persistenceNumeric(work.parking_vehicles, 1))),
+    parking_notes: work.parking_notes?.trim() || null,
+    parking_same_location_as_work1: Boolean(work.parking_same_location_as_work1),
+    parking_latitude: work.parking_latitude ?? null,
+    parking_longitude: work.parking_longitude ?? null,
     congestion_required: work.congestion_required,
     congestion_amount: persistenceNumeric(work.congestion_amount, 0),
     travel_charge: persistenceNumeric(work.travel_charge, 0),
@@ -451,16 +567,33 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
   };
 }
 
+/** Raw parking cost for one work block, including vehicle multiplier. */
+export function workParkingRaw(work: WorkBlockFormValues): number {
+  if (!work.parking_required) return 0;
+  const vehicles = Math.max(1, Math.floor(work.parking_vehicles ?? 1));
+  if (work.parking_type === "hourly") {
+    return (work.parking_rate_per_hour ?? 0) * (work.parking_hours ?? 0) * vehicles;
+  }
+  return (work.parking_fixed_amount ?? 0) * vehicles;
+}
+
+export const PARKING_COPY_FIELDS = [
+  "parking_required",
+  "parking_type",
+  "parking_fixed_amount",
+  "parking_rate_per_hour",
+  "parking_hours",
+  "parking_vehicles",
+  "parking_notes",
+  "parking_same_location_as_work1",
+  "parking_latitude",
+  "parking_longitude",
+] as const satisfies ReadonlyArray<keyof WorkBlockFormValues>;
+
 /** Aggregate per-work charges into a single set of top-level charges for the backend. */
 function aggregateCharges(works: WorkBlockFormValues[]) {
   const hasParking = works.some((w) => w.parking_required);
-  const parkingTotal = works.reduce((sum, w) => {
-    if (!w.parking_required) return sum;
-    if (w.parking_type === "hourly") {
-      return sum + (w.parking_rate_per_hour ?? 0) * (w.parking_hours ?? 0);
-    }
-    return sum + (w.parking_fixed_amount ?? 0);
-  }, 0);
+  const parkingTotal = works.reduce((sum, w) => sum + workParkingRaw(w), 0);
 
   const hasCongestion = works.some((w) => w.congestion_required);
   const congestionTotal = works.reduce((sum, w) => sum + (w.congestion_required ? (w.congestion_amount ?? 0) : 0), 0);
@@ -520,6 +653,14 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
   const labourerDays = Number(step2.labourer_days ?? 0);
   return {
     scope: step2.scope ?? "",
+    selected_product_id: null,
+    eworks_item_id: null,
+    product_name: "",
+    product_code: "",
+    product_quantity: 1,
+    product_unit_price: 0,
+    product_total_price: 0,
+    scope_from_product: false,
     materials_to_order:
       step2.materials_to_order && step2.materials_to_order.length > 0
         ? migrateLegacyMaterialRows(step2.materials_to_order)
@@ -549,6 +690,11 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
     parking_fixed_amount: Number(step2.parking_fixed_amount ?? 0),
     parking_rate_per_hour: Number(step2.parking_rate_per_hour ?? 0),
     parking_hours: Number(step2.parking_hours ?? 0),
+    parking_vehicles: 1,
+    parking_notes: "",
+    parking_same_location_as_work1: false,
+    parking_latitude: null,
+    parking_longitude: null,
     congestion_required: step2.congestion_required ?? false,
     congestion_amount: Number(step2.congestion_amount ?? 0),
     travel_charge: Number(step2.travel_charge ?? 0),
@@ -561,6 +707,17 @@ function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlo
   if (block.engineer_time_unit) {
     return {
       scope: block.scope ?? "",
+      selected_product_id: block.selected_product_id != null ? Number(block.selected_product_id) : null,
+      eworks_item_id: block.eworks_item_id != null ? Number(block.eworks_item_id) : null,
+      product_name: block.product_name ?? "",
+      product_code: block.product_code ?? "",
+      product_quantity: Number(block.product_quantity ?? 1),
+      product_unit_price: Number(block.product_unit_price ?? 0),
+      product_total_price: Number(
+        block.product_total_price ??
+          computeProductTotalPrice(Number(block.product_quantity ?? 1), Number(block.product_unit_price ?? 0)),
+      ),
+      scope_from_product: Boolean(block.scope_from_product ?? false),
       materials_to_order:
         block.materials_to_order && block.materials_to_order.length > 0
           ? migrateLegacyMaterialRows(block.materials_to_order)
@@ -587,6 +744,7 @@ function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlo
           : 0,
       labour_time_value: Number(block.labour_time_value ?? 1),
       other_notes: block.other_notes ?? "",
+      findings: block.findings ?? "",
       attachments: block.attachments ?? [],
       markup_value: Number(block.markup_value ?? 20),
       // Per-work charges — restore from snapshot if present
@@ -595,6 +753,20 @@ function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlo
       parking_fixed_amount: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_fixed_amount ?? 0),
       parking_rate_per_hour: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_rate_per_hour ?? 0),
       parking_hours: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_hours ?? 0),
+      parking_vehicles: Math.max(1, Number((block as WorkBlockSnapshot).parking_vehicles ?? 1)),
+      parking_notes: mergeParkingAccessNotes(
+        (block as WorkBlockSnapshot).parking_notes,
+        (block as WorkBlockSnapshot & Record<string, unknown>).access_notes as string | null | undefined,
+      ),
+      parking_same_location_as_work1: Boolean((block as WorkBlockSnapshot).parking_same_location_as_work1 ?? false),
+      parking_latitude:
+        (block as WorkBlockSnapshot).parking_latitude != null
+          ? Number((block as WorkBlockSnapshot).parking_latitude)
+          : null,
+      parking_longitude:
+        (block as WorkBlockSnapshot).parking_longitude != null
+          ? Number((block as WorkBlockSnapshot).parking_longitude)
+          : null,
       congestion_required: Boolean((block as WorkBlockSnapshot & Record<string, unknown>).congestion_required ?? false),
       congestion_amount: Number((block as WorkBlockSnapshot & Record<string, unknown>).congestion_amount ?? 0),
       travel_charge: Number((block as WorkBlockSnapshot & Record<string, unknown>).travel_charge ?? 0),
@@ -609,14 +781,26 @@ export function step2ToQuestionnaire(
   step2: Step2Snapshot | null | undefined,
   tradeName: string,
   overrides?: Partial<QuestionnaireFormValues>,
+  step1?: { parking_notes?: string | null; access_notes?: string | null } | null,
 ): QuestionnaireFormValues {
   if (!step2 && !overrides) {
-    return { works: [defaultWorkBlockValues(tradeName)] };
+    const first = defaultWorkBlockValues(tradeName);
+    if (step1) {
+      first.parking_notes = mergeParkingAccessNotes(step1.parking_notes, step1.access_notes);
+    }
+    return { works: [first] };
   }
   const works =
     step2?.works && step2.works.length > 0
       ? step2.works.map((block) => normalizeWorkBlockValues(blockFromSnapshot(block, tradeName)))
       : [normalizeWorkBlockValues(legacyBlockFromStep2(step2 ?? {}, tradeName))];
+
+  if (step1 && works.length > 0) {
+    const first = works[0];
+    if (!first.parking_notes?.trim()) {
+      first.parking_notes = mergeParkingAccessNotes(step1.parking_notes, step1.access_notes);
+    }
+  }
 
   return {
     works,

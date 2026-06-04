@@ -399,7 +399,7 @@
 
     {% for work in work_forms %}
     <div class="work-card">
-      <h2 class="work-card-title">{{ work.title }}</h2>
+      <h2 class="work-card-title">{{ work.title }}{% if work.product_label %} — {{ work.product_label }}{% endif %}</h2>
 
       <p class="section-title">Scope of Works</p>
       <div class="field-box tall">{{ work.scope }}</div>
@@ -517,6 +517,30 @@
           </div>
         </div>
       </div>
+      {% endif %}
+
+      {% if work.parking.required %}
+      <p class="section-title">Parking &amp; Access</p>
+      <div class="field-grid">
+        <div class="field-row">
+          {% for field in work.parking.fields %}
+          <div class="field-cell">
+            <div class="field-block">
+              <p class="field-label">{{ field.label }}</p>
+              <div class="field-box">{{ field.value }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% if work.parking.notes %}
+      <p class="subsection-title">Parking and access notes</p>
+      <div class="field-box">{{ work.parking.notes }}</div>
+      {% endif %}
+      {% if work.parking.maps_url %}
+      <p class="subsection-title">Parking location</p>
+      <div class="field-box">{{ work.parking.maps_url }}</div>
+      {% endif %}
       {% endif %}
 
       <p class="section-title">Any Other Notes</p>

@@ -17,8 +17,9 @@ import {
   cn,
   eworksInputClass,
 } from "@/components/eworks-ui";
+import { fetchProduct } from "@/lib/products-api";
 import type { AttachmentMeta, MaterialSupplierFormValues, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
-import { defaultMaterialSuppliers, supplierMaterialsTotal } from "@/lib/eworks-calculate-schema";
+import { defaultMaterialSuppliers, PARKING_COPY_FIELDS, computeProductTotalPrice, supplierMaterialsTotal } from "@/lib/eworks-calculate-schema";
 import { getAttachmentUrl, rewordScope } from "@/lib/eworks-session";
 import { withRegisterChange } from "@/lib/form-register";
 
@@ -76,6 +77,7 @@ function NumericInput({
 
 type Props = {
   workIndex: number;
+  workNumber: number;
   control: Control<QuestionnaireFormValues>;
   register: UseFormRegister<QuestionnaireFormValues>;
   watch: UseFormWatch<QuestionnaireFormValues>;
@@ -89,6 +91,7 @@ type Props = {
   onDeleteAttachment: (workIndex: number, attachmentId: string) => Promise<void>;
   uploading: boolean;
   deletingAttachmentId: string | null;
+  cachedProductScope?: string;
 };
 
 function fieldPath<T extends keyof WorkBlockFormValues>(workIndex: number, field: T) {
@@ -340,6 +343,7 @@ function SupplierMaterialsSection({
 
 export function EworksWorkBlockForm({
   workIndex,
+  workNumber,
   control,
   register,
   watch,
@@ -353,8 +357,10 @@ export function EworksWorkBlockForm({
   onDeleteAttachment,
   uploading,
   deletingAttachmentId,
+  cachedProductScope,
 }: Props) {
   const values = watch(`works.${workIndex}`);
+  const work1Parking = watch("works.0");
   const workErrors = errors.works?.[workIndex];
   const suppliers = values.materials_to_order;
   const shelfRows = values.shelf_materials_rows;
@@ -363,14 +369,54 @@ export function EworksWorkBlockForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [rewordingScope, setRewordingScope] = useState(false);
   const [rewordError, setRewordError] = useState<string | null>(null);
+  const [resettingScope, setResettingScope] = useState(false);
+  const [resetScopeError, setResetScopeError] = useState<string | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [capturingGps, setCapturingGps] = useState(false);
 
   const scopeText = values.scope?.trim() ?? "";
+  const hasSelectedProduct = values.selected_product_id != null;
+  const productScopeAvailable = Boolean((cachedProductScope ?? "").trim());
+  const showMissingScopeWarning = hasSelectedProduct && !productScopeAvailable && !scopeText;
+  const engineerNotes = values.other_notes?.trim() ?? "";
+  const engineerFindings = values.findings?.trim() ?? "";
+
+  const handleResetScopeFromProduct = async () => {
+    if (values.selected_product_id == null) return;
+    setResettingScope(true);
+    setResetScopeError(null);
+    try {
+      const product = await fetchProduct(values.selected_product_id);
+      const scope = product.scope_of_work?.trim() ?? "";
+      setValue(fieldPath(workIndex, "scope"), scope, { shouldValidate: true });
+      setValue(fieldPath(workIndex, "scope_from_product"), true, { shouldValidate: false });
+    } catch (error) {
+      setResetScopeError(error instanceof Error ? error.message : "Failed to load product scope");
+    } finally {
+      setResettingScope(false);
+    }
+  };
 
   useEffect(() => {
     if (values.markup_value === undefined || Number.isNaN(Number(values.markup_value))) {
       setValue(`works.${workIndex}.markup_value`, 20, { shouldValidate: false });
     }
   }, [setValue, values.markup_value, workIndex]);
+
+  useEffect(() => {
+    if (values.selected_product_id == null) return;
+    const total = computeProductTotalPrice(values.product_quantity ?? 1, values.product_unit_price ?? 0);
+    if (values.product_total_price !== total) {
+      setValue(fieldPath(workIndex, "product_total_price"), total, { shouldValidate: false });
+    }
+  }, [
+    values.selected_product_id,
+    values.product_quantity,
+    values.product_unit_price,
+    values.product_total_price,
+    workIndex,
+    setValue,
+  ]);
 
   const handleAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
     void onUploadFiles(event.target.files, workIndex);
@@ -443,6 +489,83 @@ export function EworksWorkBlockForm({
 
   const showLabour = values.engineers_required && values.engineer_time_unit === "days";
 
+  const copyParkingFromPreviousWork = () => {
+    if (workIndex === 0) return;
+    const source = watch(`works.${workIndex - 1}`);
+    for (const field of PARKING_COPY_FIELDS) {
+      setValue(fieldPath(workIndex, field), source[field] as WorkBlockFormValues[typeof field], {
+        shouldValidate: true,
+      });
+    }
+    setGpsError(null);
+  };
+
+  const captureParkingGps = () => {
+    setGpsError(null);
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setGpsError("Geolocation is not supported in this browser.");
+      return;
+    }
+    setCapturingGps(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = Math.round(position.coords.latitude * 1_000_000) / 1_000_000;
+        const lng = Math.round(position.coords.longitude * 1_000_000) / 1_000_000;
+        setValue(fieldPath(workIndex, "parking_latitude"), lat, { shouldValidate: true });
+        setValue(fieldPath(workIndex, "parking_longitude"), lng, { shouldValidate: true });
+        setCapturingGps(false);
+      },
+      (error) => {
+        setCapturingGps(false);
+        if (error.code === error.PERMISSION_DENIED) {
+          setGpsError("Location permission denied. Allow location access and try again.");
+        } else {
+          setGpsError("Could not capture location. Try again or enter coordinates manually.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+  };
+
+  const clearParkingGps = () => {
+    setValue(fieldPath(workIndex, "parking_latitude"), null, { shouldValidate: true });
+    setValue(fieldPath(workIndex, "parking_longitude"), null, { shouldValidate: true });
+    setGpsError(null);
+  };
+
+  const openParkingInGoogleMaps = () => {
+    const lat = values.parking_latitude;
+    const lng = values.parking_longitude;
+    if (lat == null || lng == null) return;
+    window.open(`https://www.google.com/maps?q=${lat},${lng}`, "_blank", "noopener,noreferrer");
+  };
+
+  const hasParkingGps = values.parking_latitude != null && values.parking_longitude != null;
+  const usesWork1ParkingLocation = workIndex > 0 && values.parking_same_location_as_work1 === true;
+  const work1HasParkingGps =
+    work1Parking.parking_latitude != null && work1Parking.parking_longitude != null;
+
+  useEffect(() => {
+    if (!usesWork1ParkingLocation) return;
+    const lat = work1Parking.parking_latitude;
+    const lng = work1Parking.parking_longitude;
+    if (lat == null || lng == null) return;
+    if (values.parking_latitude !== lat) {
+      setValue(fieldPath(workIndex, "parking_latitude"), lat, { shouldValidate: true });
+    }
+    if (values.parking_longitude !== lng) {
+      setValue(fieldPath(workIndex, "parking_longitude"), lng, { shouldValidate: true });
+    }
+  }, [
+    usesWork1ParkingLocation,
+    work1Parking.parking_latitude,
+    work1Parking.parking_longitude,
+    values.parking_latitude,
+    values.parking_longitude,
+    workIndex,
+    setValue,
+  ]);
+
   const engineerTimeUnitField = register(fieldPath(workIndex, "engineer_time_unit"));
 
   const skillChoices = useMemo(() => {
@@ -477,18 +600,79 @@ export function EworksWorkBlockForm({
 
   return (
     <div className="space-y-6">
+      <p className="text-sm font-medium text-gray-900">Work {workNumber} details</p>
+
+      {(engineerNotes || engineerFindings) && (
+        <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <EworksSectionTitle title="Site visit information" subtitle="From engineer site visit — preserved for estimator review" />
+          {engineerFindings ? (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Engineer findings</p>
+              <pre className="mt-1 whitespace-pre-wrap text-sm text-blue-950">{engineerFindings}</pre>
+            </div>
+          ) : null}
+          {engineerNotes ? (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Site notes</p>
+              <pre className="mt-1 whitespace-pre-wrap text-sm text-blue-950">{engineerNotes}</pre>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <EworksSectionTitle title="Scope of Works" />
-          <EworksButton
-            variant="secondary"
-            className="min-h-[36px] px-3 text-xs"
-            disabled={rewordingScope || !scopeText}
-            onClick={() => void handleRewordScope()}
-          >
-            {rewordingScope ? "Rewording…" : "Reword with AI"}
-          </EworksButton>
+          <div className="flex flex-wrap items-center gap-2">
+            {values.selected_product_id != null && (
+              <>
+                <EworksLabel className="flex-row items-center gap-2 space-y-0">
+                  <span className="shrink-0 text-xs text-optimal-muted">Qty</span>
+                  <Controller
+                    name={fieldPath(workIndex, "product_quantity")}
+                    control={control}
+                    render={({ field }) => (
+                      <NumericInput
+                        field={field}
+                        className="w-20 min-h-[36px] text-sm"
+                      />
+                    )}
+                  />
+                </EworksLabel>
+                <EworksButton
+                  type="button"
+                  variant="secondary"
+                  className="min-h-[36px] px-3 text-xs"
+                  disabled={resettingScope || !hasSelectedProduct}
+                  onClick={() => void handleResetScopeFromProduct()}
+                  data-testid={`reset-scope-work-${workIndex}`}
+                >
+                  {resettingScope ? "Resetting…" : "Reset from Product Scope"}
+                </EworksButton>
+              </>
+            )}
+            <EworksButton
+              variant="secondary"
+              className="min-h-[36px] px-3 text-xs"
+              disabled={rewordingScope || !scopeText}
+              onClick={() => void handleRewordScope()}
+            >
+              {rewordingScope ? "Rewording…" : "Reword with AI"}
+            </EworksButton>
+          </div>
         </div>
+        <p className="text-xs text-optimal-muted">
+          Auto-filled from selected product. You can edit before generating the quote.
+        </p>
+        {showMissingScopeWarning ? (
+          <p className="text-xs text-amber-700" data-testid={`missing-product-scope-work-${workIndex}`}>
+            No default scope configured for this product. Admin can add it in Products / Scope.
+          </p>
+        ) : null}
+        {values.scope_from_product && scopeText ? (
+          <p className="text-xs text-green-700">Scope linked to selected product.</p>
+        ) : null}
+        {resetScopeError ? <EworksFieldError message={resetScopeError} /> : null}
         <Controller
           name={fieldPath(workIndex, "scope")}
           control={control}
@@ -504,7 +688,9 @@ export function EworksWorkBlockForm({
                 onChange={(event) => {
                   setRewordError(null);
                   field.onChange(event);
+                  setValue(fieldPath(workIndex, "scope_from_product"), false, { shouldValidate: false });
                 }}
+                data-testid={`work-scope-${workIndex}`}
               />
               <EworksFieldError message={rewordError ?? fieldState.error?.message} />
             </>
@@ -748,6 +934,18 @@ export function EworksWorkBlockForm({
           />
           {values.parking_required && (
             <>
+              {workIndex > 0 && (
+                <div className="sm:col-span-2">
+                  <EworksButton
+                    type="button"
+                    variant="ghost"
+                    className="min-h-[40px] px-3 text-xs"
+                    onClick={copyParkingFromPreviousWork}
+                  >
+                    Use parking from Work {workIndex}
+                  </EworksButton>
+                </div>
+              )}
               <EworksLabel>
                 Parking type
                 <select className={eworksInputClass()} {...register(fieldPath(workIndex, "parking_type"))}>
@@ -790,6 +988,110 @@ export function EworksWorkBlockForm({
                   />
                 </EworksLabel>
               )}
+              <EworksLabel>
+                Number of vehicles
+                <Controller
+                  name={fieldPath(workIndex, "parking_vehicles")}
+                  control={control}
+                  render={({ field, fieldState }) => (
+                    <>
+                      <EworksInput
+                        type="text"
+                        inputMode="numeric"
+                        hasError={!!fieldState.error}
+                        name={field.name}
+                        ref={field.ref}
+                        value={String(field.value ?? 1)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\D/g, "");
+                          const parsed = raw === "" ? 1 : Math.max(1, parseInt(raw, 10));
+                          field.onChange(parsed);
+                        }}
+                        onBlur={field.onBlur}
+                      />
+                      <EworksFieldError message={fieldState.error?.message} />
+                    </>
+                  )}
+                />
+              </EworksLabel>
+              <EworksLabel className="sm:col-span-2">
+                Parking and access notes
+                <EworksTextarea
+                  rows={3}
+                  placeholder="Parking bays, permits, site access, gates, contact on arrival…"
+                  {...register(fieldPath(workIndex, "parking_notes"))}
+                />
+              </EworksLabel>
+              <div className="space-y-3 sm:col-span-2">
+                <p className="text-sm font-semibold text-optimal-orange">Parking GPS location</p>
+                {workIndex > 0 && (
+                  <Controller
+                    name={fieldPath(workIndex, "parking_same_location_as_work1")}
+                    control={control}
+                    render={({ field }) => (
+                      <EworksCheckbox
+                        label="Same parking location as Work 1"
+                        name={field.name}
+                        ref={field.ref}
+                        checked={field.value === true}
+                        onBlur={field.onBlur}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          field.onChange(checked);
+                          if (checked) {
+                            const lat = work1Parking.parking_latitude;
+                            const lng = work1Parking.parking_longitude;
+                            if (lat != null && lng != null) {
+                              setValue(fieldPath(workIndex, "parking_latitude"), lat, { shouldValidate: true });
+                              setValue(fieldPath(workIndex, "parking_longitude"), lng, { shouldValidate: true });
+                              setGpsError(null);
+                            }
+                          }
+                        }}
+                      />
+                    )}
+                  />
+                )}
+                {usesWork1ParkingLocation && !work1HasParkingGps && (
+                  <p className="text-xs text-amber-700">Set parking location on Work 1 first.</p>
+                )}
+                {usesWork1ParkingLocation && work1HasParkingGps && (
+                  <p className="text-xs text-optimal-muted">
+                    Using Work 1 location: {work1Parking.parking_latitude}, {work1Parking.parking_longitude}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <EworksButton
+                    type="button"
+                    variant="secondary"
+                    className="min-h-[40px] text-xs"
+                    disabled={capturingGps || usesWork1ParkingLocation}
+                    onClick={captureParkingGps}
+                  >
+                    {capturingGps ? "Capturing…" : "Capture location"}
+                  </EworksButton>
+                  <EworksButton
+                    type="button"
+                    variant="secondary"
+                    className="min-h-[40px] text-xs"
+                    disabled={!hasParkingGps}
+                    onClick={openParkingInGoogleMaps}
+                  >
+                    Open in Google Maps
+                  </EworksButton>
+                  {hasParkingGps && !usesWork1ParkingLocation && (
+                    <EworksButton type="button" variant="ghost" className="min-h-[40px] text-xs" onClick={clearParkingGps}>
+                      Clear location
+                    </EworksButton>
+                  )}
+                </div>
+                {!usesWork1ParkingLocation && hasParkingGps && (
+                  <p className="text-xs text-optimal-muted">
+                    {values.parking_latitude}, {values.parking_longitude}
+                  </p>
+                )}
+                {gpsError && !usesWork1ParkingLocation && <EworksFieldError message={gpsError} />}
+              </div>
             </>
           )}
           <Controller

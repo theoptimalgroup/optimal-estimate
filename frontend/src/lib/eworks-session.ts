@@ -50,6 +50,14 @@ export type MaterialSupplier = {
 
 export type WorkBlockSnapshot = {
   scope?: string | null;
+  selected_product_id?: number | null;
+  eworks_item_id?: number | null;
+  product_name?: string | null;
+  product_code?: string | null;
+  product_quantity?: number | string;
+  product_unit_price?: number | string;
+  product_total_price?: number | string;
+  scope_from_product?: boolean;
   materials_to_order?: MaterialSupplier[];
   shelf_materials_rows?: MaterialOrderRow[];
   shelf_materials?: string | null;
@@ -81,6 +89,11 @@ export type WorkBlockSnapshot = {
   parking_fixed_amount?: number | string | null;
   parking_rate_per_hour?: number | string | null;
   parking_hours?: number | string | null;
+  parking_vehicles?: number | null;
+  parking_notes?: string | null;
+  parking_same_location_as_work1?: boolean;
+  parking_latitude?: number | string | null;
+  parking_longitude?: number | string | null;
   congestion_required?: boolean;
   congestion_amount?: number | string;
   travel_charge?: number | string;

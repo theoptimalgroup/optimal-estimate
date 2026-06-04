@@ -1,3 +1,5 @@
+import { getAccessToken } from "@/lib/auth/token-provider";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function getApiUrl() {
@@ -25,7 +27,14 @@ export async function apiFetch<T>(
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let authToken = token;
+  if (authToken === undefined) {
+    authToken = await getAccessToken();
+  }
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
 
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
   const payload = await response.json();

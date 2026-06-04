@@ -179,7 +179,7 @@ def build_combined_calculation_inputs(
     aggregated = aggregate_work_blocks(step2.works)
     labour, _ = build_skill_group_labour_inputs(step2.works, trade_id=trade_id)
     materials = build_combined_material_inputs(step1, step2)
-    charges = aggregate_work_charges(step1, step2.works)
+    charges = aggregate_work_charges(step1, step2.works, step2=step2)
     return labour, materials, charges, aggregated
 
 

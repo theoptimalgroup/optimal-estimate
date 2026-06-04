@@ -227,12 +227,14 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
 
   const chargeLines: string[] = [];
   if (details.parking_required) {
+    const vehicles = Math.max(1, Number(details.parking_vehicles ?? 1));
+    const vehicleSuffix = vehicles > 1 ? ` × ${vehicles} vehicles` : "";
     if (details.parking_type === "hourly") {
       chargeLines.push(
-        `Parking: ${money(details.parking_rate_per_hour)}/hr × ${details.parking_hours ?? 0} hrs`,
+        `Parking: ${money(details.parking_rate_per_hour)}/hr × ${details.parking_hours ?? 0} hrs${vehicleSuffix}`,
       );
     } else {
-      chargeLines.push(`Parking: ${money(details.parking_fixed_amount)}`);
+      chargeLines.push(`Parking: ${money(details.parking_fixed_amount)}${vehicleSuffix}`);
     }
   }
   if (details.congestion_required && hasNumber(details.congestion_amount)) {
@@ -292,6 +294,22 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
             ))}
           </ul>
         </div>
+      )}
+
+      {hasText(details.parking_notes) && (
+        <DetailRow label="Parking and access notes" value={details.parking_notes} />
+      )}
+      {details.parking_latitude != null && details.parking_longitude != null && (
+        <p className="text-sm">
+          <a
+            href={`https://www.google.com/maps?q=${details.parking_latitude},${details.parking_longitude}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-optimal-orange underline-offset-2 hover:underline"
+          >
+            View parking location on Google Maps
+          </a>
+        </p>
       )}
 
       <DetailRow label="Any other notes" value={details.other_notes} />
@@ -554,7 +572,13 @@ export function QuoteSummaryCard({ quote }: { quote: DashboardQuoteItem }) {
   );
 }
 
-export function QuotesTable({ quotes }: { quotes: DashboardQuoteItem[] }) {
+export function QuotesTable({
+  quotes,
+  detailHref = (sessionId) => `/eworks/dashboard/${sessionId}`,
+}: {
+  quotes: DashboardQuoteItem[];
+  detailHref?: (sessionId: string) => string;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200">
       <table className="min-w-full text-left text-sm">
@@ -577,7 +601,7 @@ export function QuotesTable({ quotes }: { quotes: DashboardQuoteItem[] }) {
             >
               <td className="px-4 py-3 lg:px-5">
                 <Link
-                  href={`/eworks/dashboard/${quote.session_id}`}
+                  href={detailHref(quote.session_id)}
                   className="font-semibold text-optimal-orange hover:underline"
                 >
                   {quote.quote_number}

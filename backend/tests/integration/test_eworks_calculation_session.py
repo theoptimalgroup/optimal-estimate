@@ -699,6 +699,61 @@ def test_single_work_includes_session_charges_in_internal_notes(eworks_api_clien
     assert abs(Decimal(str(breakdown["profit_pct"])) - Decimal("37")) <= PCT_TOLERANCE
 
 
+def test_parking_vehicle_count_multiplies_materials_charge(eworks_api_client):
+    """Two vehicles doubles raw parking before XLSX uplift."""
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(congestion_required=False, congestion_amount=0)).json()["data"]
+    headers = {"X-Session-Token": created["session_token"]}
+
+    one_vehicle = {
+        "works": [
+            _alex_work_block(
+                parking_required=True,
+                parking_type="fixed",
+                parking_fixed_amount=100,
+                parking_vehicles=1,
+                congestion_required=False,
+                congestion_amount=0,
+            ),
+        ],
+        "travel_charge": 0,
+        "other_charge": 0,
+    }
+    two_vehicles = {
+        "works": [
+            _alex_work_block(
+                parking_required=True,
+                parking_type="fixed",
+                parking_fixed_amount=100,
+                parking_vehicles=2,
+                congestion_required=False,
+                congestion_amount=0,
+            ),
+        ],
+        "travel_charge": 0,
+        "other_charge": 0,
+    }
+
+    one_response = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={"step2": one_vehicle},
+    )
+    assert one_response.status_code == 200
+    one_materials = Decimal(str(one_response.json()["data"]["breakdown"]["materials_parking_cc_charge"]))
+
+    two_response = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={"step2": two_vehicles},
+    )
+    assert two_response.status_code == 200
+    two_materials = Decimal(str(two_response.json()["data"]["breakdown"]["materials_parking_cc_charge"]))
+
+    # Doubling parking raw (£100 → £200) adds £125 uplifted at 20% material denominator.
+    assert abs(two_materials - one_materials - Decimal("125")) <= CURRENCY_TOLERANCE
+
+
 def test_calculate_persists_ui_state(eworks_api_client):
     test_client, _ = eworks_api_client
     created = _from_link(test_client, _base_payload()).json()["data"]

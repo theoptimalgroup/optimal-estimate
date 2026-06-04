@@ -154,11 +154,47 @@ def _estimation_form_fields(step1: Step1Snapshot) -> list[dict[str, str]]:
     ]
 
 
+def _google_maps_url(latitude: Decimal | float | None, longitude: Decimal | float | None) -> str | None:
+    if latitude is None or longitude is None:
+        return None
+    return f"https://www.google.com/maps?q={latitude},{longitude}"
+
+
+def _work_parking_section(block: WorkBlockSnapshot) -> dict[str, object]:
+    if not block.parking_required:
+        return {"required": False, "fields": [], "notes": None, "maps_url": None}
+    parking_type = (block.parking_type or "fixed").strip().lower()
+    fields: list[dict[str, str]] = [
+        {"label": "Parking type", "value": _display(block.parking_type or "fixed")},
+        {"label": "Number of vehicles", "value": _display(max(1, block.parking_vehicles or 1))},
+    ]
+    if parking_type == "hourly":
+        fields.extend(
+            [
+                {"label": "Parking rate per hour (£)", "value": _money(block.parking_rate_per_hour)},
+                {"label": "Parking hours", "value": _display(block.parking_hours)},
+            ]
+        )
+    else:
+        fields.append({"label": "Parking fixed amount (£)", "value": _money(block.parking_fixed_amount)})
+    return {
+        "required": True,
+        "fields": fields,
+        "notes": _display(block.parking_notes) if block.parking_notes and block.parking_notes.strip() else None,
+        "maps_url": _google_maps_url(block.parking_latitude, block.parking_longitude),
+    }
+
+
 def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) -> dict:
     suppliers = [MaterialSupplier.model_validate(item) for item in migrate_legacy_material_rows(block.materials_to_order)]
+    product_label = None
+    if block.product_name:
+        code = (block.product_code or "").strip()
+        product_label = f"{block.product_name} — {code}" if code else block.product_name
     return {
         "index": index,
         "title": f"Work {index}",
+        "product_label": product_label,
         "scope": _display(block.scope),
         "material_suppliers": _supplier_material_sections(suppliers),
         "shelf_materials_rows": _material_table_rows(block.shelf_materials_rows),
@@ -168,6 +204,7 @@ def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) ->
         "time_frame": _time_frame_display(block),
         "engineer": _engineer_summary(block),
         "labour": _labour_summary(block),
+        "parking": _work_parking_section(block),
         "other_notes": _display(block.other_notes),
     }
 
@@ -179,6 +216,9 @@ def _charges_fields(step2: Step2Snapshot) -> list[dict[str, str]]:
     if step2.parking_required:
         parking_type = (step2.parking_type or "fixed").strip().lower()
         fields.append({"label": "Parking type", "value": _display(step2.parking_type or "fixed")})
+        works = step2.works or []
+        if len(works) == 1 and works[0].parking_required:
+            fields.append({"label": "Number of vehicles", "value": _display(max(1, works[0].parking_vehicles or 1))})
         if parking_type == "hourly":
             fields.extend(
                 [

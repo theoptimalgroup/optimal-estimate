@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.quote_acceptance import QuoteAcceptanceStatusRead
+
 from app.schemas.calculation import CalculationBreakdown, ChargeInput, LabourInput, MaterialInput
 
 
@@ -160,6 +162,14 @@ class ResolvedRuleInfo(BaseModel):
 
 class WorkBlockSnapshot(BaseModel):
     scope: str | None = None
+    selected_product_id: int | None = None
+    eworks_item_id: int | None = None
+    product_name: str | None = None
+    product_code: str | None = None
+    product_quantity: Decimal = Decimal("1")
+    product_unit_price: Decimal = Decimal("0")
+    product_total_price: Decimal = Decimal("0")
+    scope_from_product: bool = False
     materials_to_order: list[MaterialSupplier] = Field(default_factory=default_material_suppliers)
     shelf_materials_rows: list[MaterialOrderRow] = Field(default_factory=list)
     shelf_materials: str | None = None
@@ -194,11 +204,20 @@ class WorkBlockSnapshot(BaseModel):
     parking_fixed_amount: Decimal | None = None
     parking_rate_per_hour: Decimal | None = None
     parking_hours: Decimal | None = None
+    parking_vehicles: int = 1
+    parking_notes: str | None = None
+    parking_same_location_as_work1: bool = False
+    parking_latitude: Decimal | None = None
+    parking_longitude: Decimal | None = None
     congestion_required: bool = False
     congestion_amount: Decimal = Decimal("0")
     travel_charge: Decimal = Decimal("0")
     other_charge: Decimal = Decimal("0")
     other_charge_reason: str | None = None
+    ulez_required: bool = False
+    ulez_amount: Decimal = Decimal("0")
+    waste_disposal_required: bool = False
+    waste_disposal_amount: Decimal = Decimal("0")
 
     @model_validator(mode="before")
     @classmethod
@@ -263,6 +282,10 @@ class Step2Snapshot(BaseModel):
     travel_charge: Decimal = Decimal("0")
     other_charge: Decimal = Decimal("0")
     other_charge_reason: str | None = None
+    ulez_required: bool = False
+    ulez_amount: Decimal = Decimal("0")
+    waste_disposal_required: bool = False
+    waste_disposal_amount: Decimal = Decimal("0")
 
     @model_validator(mode="before")
     @classmethod
@@ -424,6 +447,7 @@ class DashboardQuoteItem(BaseModel):
     final_total: Decimal | None = None
     internal_notes: str | None = None
     works: list[DashboardWorkItem] = Field(default_factory=list)
+    acceptance: QuoteAcceptanceStatusRead = Field(default_factory=QuoteAcceptanceStatusRead)
 
 
 class DashboardQuotesResponse(BaseModel):
@@ -499,24 +523,38 @@ def step2_to_calculation_inputs(
         travel_charge=travel,
         other_charge=step2.other_charge,
         other_charge_reason=step2.other_charge_reason,
+        ulez_required=step2.ulez_required,
+        ulez_amount=step2.ulez_amount,
+        waste_disposal_required=step2.waste_disposal_required,
+        waste_disposal_amount=step2.waste_disposal_amount,
     )
     return [labour], materials, charges
 
 
-def aggregate_work_charges(step1: Step1Snapshot, works: list[WorkBlockSnapshot]) -> ChargeInput:
+def work_parking_raw(block: WorkBlockSnapshot) -> Decimal:
+    """Raw parking cost for one work block, including vehicle multiplier."""
+    if not block.parking_required:
+        return Decimal("0")
+    vehicles = max(1, block.parking_vehicles or 1)
+    if block.parking_type == "hourly" and block.parking_rate_per_hour and block.parking_hours:
+        return block.parking_rate_per_hour * block.parking_hours * Decimal(vehicles)
+    if block.parking_fixed_amount:
+        return block.parking_fixed_amount * Decimal(vehicles)
+    return Decimal("0")
+
+
+def aggregate_work_charges(
+    step1: Step1Snapshot,
+    works: list[WorkBlockSnapshot],
+    *,
+    step2: Step2Snapshot | None = None,
+) -> ChargeInput:
     """Aggregate per-work charges from individual WorkBlockSnapshot entries.
 
     Falls back to step1 link-level values when no per-work values are set.
     """
     has_parking = any(b.parking_required for b in works)
-    parking_total = Decimal("0")
-    for b in works:
-        if not b.parking_required:
-            continue
-        if b.parking_type == "hourly" and b.parking_rate_per_hour and b.parking_hours:
-            parking_total += b.parking_rate_per_hour * b.parking_hours
-        elif b.parking_fixed_amount:
-            parking_total += b.parking_fixed_amount
+    parking_total = sum((work_parking_raw(b) for b in works), Decimal("0"))
     has_congestion = any(b.congestion_required for b in works) or step1.congestion_required
     congestion_total = sum((b.congestion_amount for b in works if b.congestion_required), Decimal("0"))
     if not congestion_total and step1.congestion_required:
@@ -526,6 +564,11 @@ def aggregate_work_charges(step1: Step1Snapshot, works: list[WorkBlockSnapshot])
     other_reasons = " / ".join(
         b.other_charge_reason for b in works if b.other_charge_reason and b.other_charge_reason.strip()
     )
+    ulez_required = step2.ulez_required if step2 else False
+    ulez_total = step2.ulez_amount if step2 and step2.ulez_required else Decimal("0")
+    waste_required = step2.waste_disposal_required if step2 else False
+    waste_total = step2.waste_disposal_amount if step2 and step2.waste_disposal_required else Decimal("0")
+
     return ChargeInput(
         parking_required=has_parking,
         parking_type="fixed" if has_parking else None,
@@ -535,6 +578,10 @@ def aggregate_work_charges(step1: Step1Snapshot, works: list[WorkBlockSnapshot])
         travel_charge=travel_total,
         other_charge=other_total,
         other_charge_reason=other_reasons or None,
+        ulez_required=ulez_required,
+        ulez_amount=ulez_total,
+        waste_disposal_required=waste_required,
+        waste_disposal_amount=waste_total,
     )
 
 

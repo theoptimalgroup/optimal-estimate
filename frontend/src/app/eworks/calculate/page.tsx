@@ -211,7 +211,7 @@ function EworksCalculateContent() {
         data.session_id,
         data.session_token,
       );
-      const questionnaire = step2ToQuestionnaire(data.step2, data.step1.trade_name);
+      const questionnaire = step2ToQuestionnaire(data.step2, data.step1.trade_name, undefined, data.step1);
       // Seed link-level congestion/travel into work 0 only when no saved step2 charges exist
       if (!data.step2?.works?.[0]?.congestion_required && data.step1.congestion_required) {
         questionnaire.works[0].congestion_required = true;
