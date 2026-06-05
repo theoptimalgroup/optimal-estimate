@@ -11,6 +11,18 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        app: {
+          bg: "var(--app-bg)",
+          card: "var(--app-card)",
+          text: "var(--app-text)",
+          muted: "var(--app-text-secondary)",
+          border: "var(--app-border)",
+          primary: "var(--app-primary)",
+          "primary-hover": "var(--app-primary-hover)",
+          success: "var(--app-success)",
+          warning: "var(--app-warning)",
+          error: "var(--app-error)",
+        },
         optimal: {
           bg: "var(--optimal-bg)",
           elevated: "var(--optimal-bg-elevated)",
@@ -23,6 +35,15 @@ const config: Config = {
           muted: "var(--optimal-muted)",
           text: "var(--optimal-text)",
         },
+      },
+      maxWidth: {
+        content: "1400px",
+      },
+      fontSize: {
+        "page-title": ["1.625rem", { lineHeight: "2rem", fontWeight: "600" }],
+        "section-title": ["1rem", { lineHeight: "1.5rem", fontWeight: "600" }],
+        body: ["0.875rem", { lineHeight: "1.375rem" }],
+        helper: ["0.8125rem", { lineHeight: "1.25rem" }],
       },
       keyframes: {
         "fade-in": {

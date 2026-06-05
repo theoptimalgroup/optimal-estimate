@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import { SubmittedQuotesList } from "@/components/dashboard/submitted-quotes-list";
+import { ErrorState, LoadingState, PageHeader, SecondaryButton } from "@/components/ui";
 import { createRoleDashboardClient } from "@/lib/dashboard-client";
 import type { DashboardQuoteItem } from "@/lib/dashboard";
 
@@ -30,19 +32,23 @@ export default function ManagerReviewPage() {
   }, [loadQuotes]);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Approvals & Quotes</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Review submitted estimates, reopen questionnaires, and download combined PDFs.
-        </p>
-      </div>
-      <SubmittedQuotesList
-        quotes={quotes}
-        loading={loading}
-        error={error}
-        detailHref={(sessionId) => `/manager/review/${sessionId}`}
+    <div className="space-y-6" data-testid="manager-review-page">
+      <PageHeader
+        title="Approvals & Quotes"
+        description="Review submitted estimates, reopen questionnaires, and download combined PDFs."
+        actions={
+          <SecondaryButton onClick={() => void loadQuotes()} disabled={loading}>
+            Refresh
+          </SecondaryButton>
+        }
       />
+      {loading ? (
+        <LoadingState message="Loading submitted quotes…" />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void loadQuotes()} />
+      ) : (
+        <SubmittedQuotesList quotes={quotes} detailHref={(sessionId) => `/manager/review/${sessionId}`} />
+      )}
     </div>
   );
 }

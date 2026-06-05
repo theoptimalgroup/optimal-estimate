@@ -14,7 +14,7 @@ export function AzureSignOutButton() {
       type="button"
       onClick={() => void handleSignOut()}
       data-testid="azure-sign-out"
-      className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+      className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
     >
       Sign out
     </button>

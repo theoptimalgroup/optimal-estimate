@@ -12,12 +12,21 @@ import {
 } from "@/components/eworks-dashboard";
 import { ClientLinkPanel } from "@/components/dashboard/client-link-panel";
 import { QuoteAcceptancePanel } from "@/components/quote-acceptance-panel";
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  MoneyText,
+  PageHeader,
+  PrimaryButton,
+  SecondaryButton,
+  SectionCard,
+} from "@/components/ui";
 import { retryEworksAcceptanceSync } from "@/lib/client-quotes";
 import { normalizeQuoteAcceptance } from "@/lib/quote-acceptance";
 import {
   EworksButton,
   DashboardPageShell,
-  EworksLoadingScreen,
   EworksSectionTitle,
   cn,
 } from "@/components/eworks-ui";
@@ -191,32 +200,33 @@ export function QuoteReviewDetail({
 
   const content = (() => {
     if (unlockMessage) {
-      return <EworksLoadingScreen message={unlockMessage} />;
+      return <LoadingState message={unlockMessage} />;
     }
 
     if (loading) {
-      return <EworksLoadingScreen message="Loading quote details…" />;
+      return <LoadingState message="Loading quote details…" />;
     }
 
     if (notFound) {
       return (
-        <div className="space-y-4 rounded-lg border border-gray-200 bg-optimal-elevated p-6 text-center">
-          <p className="text-sm text-optimal-muted">The requested quote is not available or has been removed.</p>
-          <Link href={backHref}>
-            <EworksButton variant="secondary">Back to quotes</EworksButton>
-          </Link>
-        </div>
+        <EmptyState
+          title="Quote not found"
+          description="The requested quote is not available or has been removed."
+          action={
+            <Link href={backHref}>
+              <SecondaryButton>Back to quotes</SecondaryButton>
+            </Link>
+          }
+        />
       );
     }
 
     if (error || !quote) {
       return (
-        <div className="space-y-4 rounded-lg border border-gray-200 bg-optimal-elevated p-6 text-center">
-          <p className="text-sm text-red-600">{error ?? "Failed to load quote"}</p>
-          <Link href={backHref}>
-            <EworksButton variant="secondary">Back to quotes</EworksButton>
-          </Link>
-        </div>
+        <ErrorState
+          message={error ?? "Failed to load quote"}
+          onRetry={() => void loadQuote()}
+        />
       );
     }
 
@@ -246,20 +256,21 @@ export function QuoteReviewDetail({
                 : undefined
             }
           />
-          <section className="rounded-lg border border-gray-200 bg-optimal-elevated p-5 lg:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-1">
-                <p className="text-sm text-optimal-muted">{quote.trade_name}</p>
-                <p className="text-xs text-optimal-muted">Submitted {formatSubmittedAt(quote.submitted_at)}</p>
-              </div>
+          <SectionCard title={quote.trade_name} description={`Submitted ${formatSubmittedAt(quote.submitted_at)}`}>
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <p className="text-sm text-slate-600">
+                Job {quote.job_number} · {quote.client_name}
+              </p>
               <div className="text-right">
-                <p className="text-xs uppercase tracking-wide text-optimal-muted">Final total</p>
-                <p className="text-2xl font-bold text-optimal-orange">{money(quote.final_total)}</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Final total</p>
+                <p className="text-2xl font-bold text-blue-700">
+                  <MoneyText value={money(quote.final_total)} />
+                </p>
               </div>
             </div>
-            {pdfError && <p className="mt-3 text-sm text-red-600">{pdfError}</p>}
-            {refillError && <p className="mt-3 text-sm text-red-600">{refillError}</p>}
-          </section>
+            {pdfError ? <p className="mt-3 text-sm text-rose-600">{pdfError}</p> : null}
+            {refillError ? <p className="mt-3 text-sm text-rose-600">{refillError}</p> : null}
+          </SectionCard>
 
           <div className="space-y-3">
             <EworksSectionTitle title="Works" />
@@ -279,14 +290,13 @@ export function QuoteReviewDetail({
             ))}
           </div>
 
-          {quote.internal_notes && (
-            <section className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <EworksSectionTitle title="Internal notes (combined)" />
-              <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-optimal-field p-3 text-xs leading-relaxed text-optimal-field-text">
+          {quote.internal_notes ? (
+            <SectionCard title="Internal notes (combined)">
+              <pre className="whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-800">
                 {quote.internal_notes}
               </pre>
-            </section>
-          )}
+            </SectionCard>
+          ) : null}
         </div>
 
         {selectedWorks.size > 0 && (
@@ -317,12 +327,12 @@ export function QuoteReviewDetail({
   const actionButtons =
     quote && !loading && !notFound && !error && !unlockMessage ? (
       <div className="flex flex-wrap items-center gap-2">
-        <EworksButton disabled={refilling} onClick={() => void handleUnlockQuestionnaire()}>
+        <PrimaryButton disabled={refilling} onClick={() => void handleUnlockQuestionnaire()}>
           {refilling ? "Unlocking…" : "Unlock Estimating Questionnaire"}
-        </EworksButton>
-        <EworksButton variant="secondary" disabled={downloadingPdf} onClick={() => void handleDownloadPdf()}>
+        </PrimaryButton>
+        <SecondaryButton disabled={downloadingPdf} onClick={() => void handleDownloadPdf()}>
           {downloadingPdf ? "Generating PDF…" : "Download PDF"}
-        </EworksButton>
+        </SecondaryButton>
       </div>
     ) : null;
 
@@ -338,26 +348,19 @@ export function QuoteReviewDetail({
 
   if (shell === "embedded") {
     return (
-      <div className="space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <Link
-              href={backHref}
-              className="text-sm text-optimal-muted underline-offset-2 hover:text-gray-900 hover:underline"
-            >
-              ← Back to quotes
-            </Link>
-            {quote && !loading && !notFound && !error && (
-              <h1 className="mt-2 text-2xl font-semibold text-gray-900">Quote {quote.quote_number}</h1>
-            )}
-            {quote && (
-              <p className="mt-1 text-sm text-gray-600">
-                Job {quote.job_number} · {quote.client_name}
-              </p>
-            )}
-          </div>
-          {actionButtons}
-        </div>
+      <div className="space-y-6" data-testid="manager-quote-review-detail">
+        <Link href={backHref} className="text-sm font-medium text-blue-600 hover:text-blue-700">
+          ← Back to quotes
+        </Link>
+        {quote && !loading && !notFound && !error && !unlockMessage ? (
+          <PageHeader
+            title={`Quote ${quote.quote_number}`}
+            description={`Job ${quote.job_number} · ${quote.client_name}`}
+            actions={actionButtons}
+          />
+        ) : (
+          <PageHeader title="Quote details" />
+        )}
         {content}
       </div>
     );

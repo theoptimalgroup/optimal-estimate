@@ -103,6 +103,7 @@ export function ProductCombobox({
           <button
             type="button"
             role="option"
+            aria-selected={selectedProductId == null}
             className="block w-full px-3 py-2 text-left text-sm text-optimal-muted hover:bg-gray-50"
             onClick={() => {
               onSelect(null);

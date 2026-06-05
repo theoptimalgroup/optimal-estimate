@@ -2,7 +2,21 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { EworksButton, EworksLoadingScreen } from "@/components/eworks-ui";
+import {
+  activeStatusTone,
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  SecondaryButton,
+  SectionCard,
+  StatusBadge,
+} from "@/components/ui";
 import { listEstimatorClients, type EstimatorClient } from "@/lib/estimator";
 
 export default function EstimatorClientsPage() {
@@ -29,49 +43,43 @@ export default function EstimatorClientsPage() {
 
   return (
     <div className="space-y-6" data-testid="estimator-clients-page">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Clients</h1>
-          <p className="mt-2 text-sm text-gray-600">Read-only list of active clients available for estimates</p>
-        </div>
-        <EworksButton type="button" onClick={() => void loadClients()} disabled={loading}>
-          Refresh
-        </EworksButton>
-      </div>
+      <PageHeader
+        title="Clients"
+        description="Read-only list of active clients available for estimates"
+        actions={
+          <SecondaryButton onClick={() => void loadClients()} disabled={loading}>
+            Refresh
+          </SecondaryButton>
+        }
+      />
 
       {loading ? (
-        <EworksLoadingScreen message="Loading clients…" />
+        <LoadingState message="Loading clients…" />
       ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <ErrorState message={error} onRetry={() => void loadClients()} />
       ) : clients.length === 0 ? (
-        <p className="text-sm text-gray-500">No active clients found.</p>
+        <EmptyState title="No clients" description="No active clients found." />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200 text-sm" data-testid="estimator-clients-table">
-            <thead className="bg-gray-50">
-              <tr>
-                {["Client", "Aliases", "Status"].map((header) => (
-                  <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
-                    {header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+        <SectionCard padding="none">
+          <DataTable testId="estimator-clients-table">
+            <DataTableHead>
+              <DataTableCell header>Client</DataTableCell>
+              <DataTableCell header>Aliases</DataTableCell>
+              <DataTableCell header>Status</DataTableCell>
+            </DataTableHead>
+            <DataTableBody>
               {clients.map((client) => (
-                <tr key={client.id}>
-                  <td className="px-4 py-3 font-medium text-gray-900">{client.name}</td>
-                  <td className="px-4 py-3 text-gray-700">{client.aliases.length ? client.aliases.join(", ") : "—"}</td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                      Active
-                    </span>
-                  </td>
-                </tr>
+                <DataTableRow key={client.id}>
+                  <DataTableCell className="font-medium text-slate-900">{client.name}</DataTableCell>
+                  <DataTableCell>{client.aliases.length ? client.aliases.join(", ") : "—"}</DataTableCell>
+                  <DataTableCell>
+                    <StatusBadge tone={activeStatusTone(true)}>Active</StatusBadge>
+                  </DataTableCell>
+                </DataTableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </DataTableBody>
+          </DataTable>
+        </SectionCard>
       )}
     </div>
   );

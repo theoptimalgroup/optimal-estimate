@@ -4,28 +4,32 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { EworksButton } from "@/components/eworks-ui";
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DateText,
+  EmptyState,
+  MoneyText,
+  PrimaryButton,
+  quoteStatusTone,
+  StatusBadge,
+  type StatusTone,
+} from "@/components/ui";
 import { QuoteAcceptanceBadge } from "@/components/quote-acceptance-badge";
 import {
   buildCalculatorResumeUrl,
-  formatEstimatorDate,
   formatMoney,
   resumeEstimatorQuote,
   statusLabel,
   type EstimatorQuoteRow,
 } from "@/lib/estimator";
 
-function StatusBadge({ status, isReopened }: { status: string; isReopened?: boolean }) {
-  const label = statusLabel(status, isReopened);
-  const tone =
-    status === "submitted"
-      ? "bg-emerald-100 text-emerald-800"
-      : isReopened
-        ? "bg-orange-100 text-orange-800"
-        : status === "in_progress"
-          ? "bg-amber-100 text-amber-800"
-          : "bg-slate-100 text-slate-700";
-  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{label}</span>;
+function estimatorQuoteTone(status: string, isReopened?: boolean): StatusTone {
+  if (isReopened && status === "in_progress") return "warning";
+  return quoteStatusTone(status);
 }
 
 type EstimatorQuotesTableProps = {
@@ -61,7 +65,13 @@ export function EstimatorQuotesTable({
   };
 
   if (quotes.length === 0) {
-    return <p className="text-sm text-gray-500">No quotes match the current filters.</p>;
+    return (
+      <EmptyState
+        title="No quotes found"
+        description="No quotes match the current filters."
+        className="border-0 bg-transparent"
+      />
+    );
   }
 
   const headers = ["Quote Ref", "Client", "Trade", "Status", ...(showWorks ? ["Works"] : []), "Total", "Updated"];
@@ -70,77 +80,84 @@ export function EstimatorQuotesTable({
 
   return (
     <div data-testid={testId}>
-      {resumeError ? <p className="mb-3 text-sm text-red-600">{resumeError}</p> : null}
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              {headers.map((header) => (
-                <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
-                  {header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 bg-white">
-            {quotes.map((quote) => (
-              <tr key={quote.session_id}>
-                <td className="px-4 py-3 font-medium text-gray-900">{quote.quote_ref}</td>
-                <td className="px-4 py-3 text-gray-700">{quote.client_name || "—"}</td>
-                <td className="px-4 py-3 text-gray-700">{quote.trade_name || "—"}</td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge status={quote.status} isReopened={quote.is_reopened} />
-                    {quote.acceptance?.accepted ? <QuoteAcceptanceBadge accepted /> : null}
-                  </div>
-                </td>
-                {showWorks ? <td className="px-4 py-3 text-gray-700">{quote.work_count}</td> : null}
-                <td className="px-4 py-3 text-gray-900">{formatMoney(quote.total)}</td>
-                <td className="px-4 py-3 text-gray-700">{formatEstimatorDate(quote.updated_at)}</td>
-                {showSubmitted ? (
-                  <td className="px-4 py-3 text-gray-700">{formatEstimatorDate(quote.submitted_at)}</td>
-                ) : null}
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-2">
-                    {quote.can_resume ? (
-                      <EworksButton
-                        type="button"
-                        className="px-2 py-1 text-xs"
-                        disabled={resumingId === quote.session_id}
-                        onClick={() => void handleResume(quote.session_id)}
-                        data-testid={`resume-${quote.session_id}`}
-                      >
-                        {resumingId === quote.session_id ? "Opening…" : "Continue"}
-                      </EworksButton>
-                    ) : null}
-                    {quote.can_view_review ? (
-                      <Link
-                        href={detailHref(quote.session_id)}
-                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-                        data-testid={`view-${quote.session_id}`}
-                      >
-                        View
-                      </Link>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {resumeError ? (
+        <p className="mb-3 text-sm text-rose-700" role="alert">
+          {resumeError}
+        </p>
+      ) : null}
+      <DataTable>
+        <DataTableHead>
+          {headers.map((header) => (
+            <DataTableCell key={header} header>
+              {header}
+            </DataTableCell>
+          ))}
+        </DataTableHead>
+        <DataTableBody>
+          {quotes.map((quote) => (
+            <DataTableRow key={quote.session_id}>
+              <DataTableCell className="font-medium text-slate-900">{quote.quote_ref}</DataTableCell>
+              <DataTableCell>{quote.client_name || "—"}</DataTableCell>
+              <DataTableCell>{quote.trade_name || "—"}</DataTableCell>
+              <DataTableCell>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge tone={estimatorQuoteTone(quote.status, quote.is_reopened)}>
+                    {statusLabel(quote.status, quote.is_reopened)}
+                  </StatusBadge>
+                  {quote.acceptance?.accepted ? <QuoteAcceptanceBadge accepted /> : null}
+                </div>
+              </DataTableCell>
+              {showWorks ? <DataTableCell>{quote.work_count}</DataTableCell> : null}
+              <DataTableCell>
+                <MoneyText value={formatMoney(quote.total)} />
+              </DataTableCell>
+              <DataTableCell>
+                <DateText value={quote.updated_at} includeTime />
+              </DataTableCell>
+              {showSubmitted ? (
+                <DataTableCell>
+                  <DateText value={quote.submitted_at} includeTime />
+                </DataTableCell>
+              ) : null}
+              <DataTableCell>
+                <div className="flex flex-wrap items-center gap-2">
+                  {quote.can_resume ? (
+                    <PrimaryButton
+                      className="min-h-0 px-2.5 py-1 text-xs"
+                      disabled={resumingId === quote.session_id}
+                      onClick={() => void handleResume(quote.session_id)}
+                      data-testid={`resume-${quote.session_id}`}
+                    >
+                      {resumingId === quote.session_id ? "Opening…" : "Continue"}
+                    </PrimaryButton>
+                  ) : null}
+                  {quote.can_view_review ? (
+                    <Link
+                      href={detailHref(quote.session_id)}
+                      className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                      data-testid={`view-${quote.session_id}`}
+                    >
+                      View
+                    </Link>
+                  ) : null}
+                </div>
+              </DataTableCell>
+            </DataTableRow>
+          ))}
+        </DataTableBody>
+      </DataTable>
     </div>
   );
 }
 
 export function EstimatorKpiCard({ label, value }: { label: string; value: string }) {
+  const testId = `kpi-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
-    <div
-      className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
-      data-testid={`kpi-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-    >
-      <p className="text-sm font-medium text-gray-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-gray-900">{value}</p>
+    <div data-testid={testId}>
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-sm font-medium text-slate-600">{label}</p>
+        <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{value}</p>
+      </div>
     </div>
   );
 }

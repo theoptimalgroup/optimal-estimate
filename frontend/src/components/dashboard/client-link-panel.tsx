@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { EworksButton } from "@/components/eworks-ui";
+import { PrimaryButton, SecondaryButton, SectionCard } from "@/components/ui";
 import {
   buildAbsoluteClientQuoteUrl,
   buildClientQuotePageUrl,
@@ -63,44 +63,37 @@ export function ClientLinkPanel({ sessionId }: ClientLinkPanelProps) {
   };
 
   return (
-    <section
-      className="rounded-lg border border-indigo-200 bg-indigo-50 p-4"
-      data-testid="client-link-panel"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-gray-900">Client quote link</h2>
-          <p className="mt-1 text-sm text-gray-600">
-            Generate a secure public link for the client to view this quote without staff login.
+    <div data-testid="client-link-panel">
+      <SectionCard
+        title="Client quote link"
+        description="Generate a secure public link for the client to view this quote without staff login."
+        className="border-blue-200 bg-blue-50/40"
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <PrimaryButton disabled={loading} onClick={() => void handleCreateLink()}>
+              {loading ? "Creating…" : linkUrl ? "Refresh link" : "Create client link"}
+            </PrimaryButton>
+            {linkUrl ? (
+              <>
+                <SecondaryButton onClick={() => void handleCopy()}>{copied ? "Copied" : "Copy link"}</SecondaryButton>
+                <a href={buildClientQuotePageUrl(publicToken ?? "")} target="_blank" rel="noopener noreferrer">
+                  <SecondaryButton>Open</SecondaryButton>
+                </a>
+                <SecondaryButton disabled={revoking} onClick={() => void handleRevoke()}>
+                  {revoking ? "Revoking…" : "Revoke"}
+                </SecondaryButton>
+              </>
+            ) : null}
+          </div>
+        }
+      >
+        {linkUrl ? (
+          <p className="break-all font-mono text-xs text-slate-700" data-testid="client-link-url">
+            {linkUrl}
           </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <EworksButton type="button" disabled={loading} onClick={() => void handleCreateLink()}>
-            {loading ? "Creating…" : linkUrl ? "Refresh link" : "Create client link"}
-          </EworksButton>
-          {linkUrl ? (
-            <>
-              <EworksButton type="button" variant="secondary" onClick={() => void handleCopy()}>
-                {copied ? "Copied" : "Copy link"}
-              </EworksButton>
-              <a href={buildClientQuotePageUrl(publicToken ?? "")} target="_blank" rel="noopener noreferrer">
-                <EworksButton type="button" variant="secondary">
-                  Open
-                </EworksButton>
-              </a>
-              <EworksButton type="button" variant="secondary" disabled={revoking} onClick={() => void handleRevoke()}>
-                {revoking ? "Revoking…" : "Revoke"}
-              </EworksButton>
-            </>
-          ) : null}
-        </div>
-      </div>
-      {linkUrl ? (
-        <p className="mt-3 break-all font-mono text-xs text-gray-700" data-testid="client-link-url">
-          {linkUrl}
-        </p>
-      ) : null}
-      {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
-    </section>
+        ) : null}
+        {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
+      </SectionCard>
+    </div>
   );
 }

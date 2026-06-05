@@ -7,14 +7,14 @@ export type NavItem = {
 
 const ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/admin/dashboard" },
-  { label: "Quotes", href: "/manager/review" },
   { label: "New Estimate", href: "/eworks/calculate" },
-  { label: "Approvals", href: "/manager/review" },
+  { label: "Quote Review", href: "/manager/review" },
+  { label: "Reports", href: "/manager/reports" },
+  { label: "Users & Roles", href: "/admin/users" },
   { label: "Clients", href: "/admin/clients" },
   { label: "Trades", href: "/admin/trades" },
   { label: "Products/Scope", href: "/admin/products" },
   { label: "Rate Rules", href: "/admin/rate-rules" },
-  { label: "Users & Roles", href: "/admin/users" },
   { label: "Audit Logs", href: "/admin/audit-logs" },
   { label: "Settings", href: "/admin/settings" },
 ];
@@ -30,10 +30,9 @@ const ESTIMATOR_NAV: NavItem[] = [
 
 const MANAGER_NAV: NavItem[] = [
   { label: "Dashboard", href: "/manager/dashboard" },
-  { label: "Approvals", href: "/manager/review" },
-  { label: "Quotes", href: "/manager/review" },
-  { label: "Clients", href: "/manager/clients" },
+  { label: "Quote Review", href: "/manager/review" },
   { label: "Reports", href: "/manager/reports" },
+  { label: "Clients", href: "/manager/clients" },
 ];
 
 const ENGINEER_NAV: NavItem[] = [

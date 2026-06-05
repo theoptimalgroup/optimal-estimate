@@ -178,7 +178,7 @@ export function EworksQuestionnaireStep({
         }}
       />
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         {fields.map((field, index) => {
           const isExpanded = expandedIndex === index;
           const work = values.works[index];
@@ -198,17 +198,17 @@ export function EworksQuestionnaireStep({
                 workRefs.current[index] = el;
               }}
               className={cn(
-                "rounded-lg border transition-all duration-300 ease-out",
-                isExpanded ? "overflow-visible border-optimal-orange/40 bg-white shadow-lg" : "overflow-hidden border-gray-200 bg-white",
-                hasErrors && !isExpanded && "border-red-400/40 ring-1 ring-red-400/20",
+                "rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-out",
+                isExpanded ? "overflow-visible ring-1 ring-blue-100" : "overflow-hidden",
+                hasErrors && !isExpanded && "border-red-300 ring-1 ring-red-100",
               )}
               data-testid={`work-block-${index}`}
             >
-              <div className="flex items-center gap-2 p-2 pl-3">
+              <div className="flex items-center gap-3 p-4">
                 <span
                   className={cn(
                     "flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all duration-200",
-                    isExpanded ? "bg-optimal-orange text-gray-900" : "bg-gray-100 text-gray-900",
+                    isExpanded ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700",
                   )}
                   aria-label={`Work ${index + 1}`}
                 >
@@ -260,7 +260,7 @@ export function EworksQuestionnaireStep({
                 )}
               >
                 <div className="min-h-0 min-w-0">
-                  <div className="border-t border-gray-200 px-4 pb-4 pt-2">
+                  <div className="border-t border-slate-200 px-5 pb-5 pt-4">
                     <EworksWorkBlockForm
                       workIndex={index}
                       workNumber={index + 1}

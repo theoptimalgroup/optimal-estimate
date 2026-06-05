@@ -1,12 +1,26 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useMsal } from "@azure/msal-react";
 
+import { PrimaryButton } from "@/components/ui/buttons";
+import { LoadingState } from "@/components/ui/states";
 import { useCurrentUser } from "@/lib/auth/auth-context";
 import { getDashboardForRole, isRegistrationError } from "@/lib/auth/dashboard-routes";
 import { getLoginRequest } from "@/lib/auth/msal-config";
+
+function MicrosoftIcon() {
+  return (
+    <svg aria-hidden className="size-4" viewBox="0 0 21 21" fill="none">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
+  );
+}
 
 export function AzureLoginPanel() {
   const router = useRouter();
@@ -42,17 +56,17 @@ export function AzureLoginPanel() {
 
   if (isLoading || msalBusy || signingIn) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50" data-testid="login-loading">
-        <p className="text-sm text-gray-600">Signing in…</p>
+      <main className="flex min-h-screen items-center justify-center bg-slate-50" data-testid="login-loading">
+        <LoadingState message="Signing in…" />
       </main>
     );
   }
 
   if (isAuthenticated && user?.role === "client") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
         <div
-          className="w-full max-w-md space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-8 text-center"
+          className="w-full max-w-md space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center shadow-sm"
           data-testid="login-client-unsupported"
         >
           <h1 className="text-xl font-semibold text-amber-900">Internal access not available</h1>
@@ -65,35 +79,44 @@ export function AzureLoginPanel() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md space-y-6 rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-        <div className="space-y-2 text-center">
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Optimal Estimate</p>
-          <h1 className="text-2xl font-bold text-gray-900">Sign in</h1>
-          <p className="text-sm text-gray-600">Use your Microsoft work account to access the estimate workspace.</p>
+    <main className="flex min-h-screen items-center justify-center bg-app-bg px-4">
+      <div className="w-full max-w-md space-y-6 rounded-xl border border-app-border bg-app-card p-8 shadow-sm">
+        <div className="space-y-4 text-center">
+          <Image
+            src="/optimal-group-logo-light.png"
+            alt="Optimal Group"
+            width={200}
+            height={58}
+            className="mx-auto h-9 w-auto object-contain"
+            priority
+          />
+          <div className="space-y-1">
+            <h1 className="text-page-title text-app-text">Sign in</h1>
+            <p className="text-body text-app-muted">Sign in with your company Microsoft account</p>
+          </div>
         </div>
 
         {displayError ? (
           <div
-            className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
             data-testid="login-error"
+            role="alert"
           >
             {displayError}
           </div>
         ) : null}
 
-        <button
-          type="button"
+        <PrimaryButton
           onClick={() => void handleSignIn()}
           disabled={signingIn || msalBusy}
           data-testid="login-microsoft-button"
-          className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#2f2f2f] px-4 py-2.5 text-sm font-medium text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full bg-[#2f2f2f] hover:bg-black"
         >
-          <span aria-hidden="true">⬡</span>
+          <MicrosoftIcon />
           Sign in with Microsoft
-        </button>
+        </PrimaryButton>
 
-        <p className="text-center text-xs text-gray-500">
+        <p className="text-center text-helper text-app-muted">
           After sign-in, your app role comes from the users table — not from Microsoft groups.
         </p>
 
@@ -101,7 +124,7 @@ export function AzureLoginPanel() {
           <button
             type="button"
             onClick={() => void refetchUser()}
-            className="text-xs text-gray-500 underline underline-offset-2 hover:text-gray-800"
+            className="text-xs text-slate-500 underline underline-offset-2 hover:text-slate-800"
           >
             Already signed in? Refresh session
           </button>

@@ -222,8 +222,8 @@ function SupplierMaterialsSection({
   return (
     <div className="space-y-4">
       {suppliers.map((supplier, supplierIndex) => (
-        <div key={supplierIndex} className="rounded-lg border border-gray-200 bg-white">
-          <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2.5">
+        <div key={supplierIndex} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
             <span className="text-sm font-semibold text-gray-900">Supplier {supplierIndex + 1}</span>
             <button
               type="button"
@@ -425,7 +425,8 @@ export function EworksWorkBlockForm({
 
   const clearMaterialQuantity = (table: "materials_to_order" | "shelf_materials_rows", index: number, link: string) => {
     if (!link.trim()) {
-      setValue(`works.${workIndex}.${table}.${index}.quantity`, 0, { shouldValidate: true });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setValue(`works.${workIndex}.${table}.${index}.quantity` as any, 0, { shouldValidate: true });
     }
   };
 
@@ -438,7 +439,8 @@ export function EworksWorkBlockForm({
   };
 
   const addSupplier = () => {
-    setValue(`works.${workIndex}.materials_to_order`, [...suppliers, ...defaultMaterialSuppliers()], {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setValue(`works.${workIndex}.materials_to_order` as any, [...suppliers, ...defaultMaterialSuppliers()] as any, {
       shouldValidate: true,
     });
   };
@@ -600,10 +602,10 @@ export function EworksWorkBlockForm({
 
   return (
     <div className="space-y-6">
-      <p className="text-sm font-medium text-gray-900">Work {workNumber} details</p>
+      <p className="text-sm font-semibold text-slate-900">Work {workNumber} details</p>
 
       {(engineerNotes || engineerFindings) && (
-        <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/80 p-4 shadow-sm">
           <EworksSectionTitle title="Site visit information" subtitle="From engineer site visit — preserved for estimator review" />
           {engineerFindings ? (
             <div>
@@ -756,7 +758,7 @@ export function EworksWorkBlockForm({
         </EworksLabel>
       </div>
 
-      <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5">
         <Controller
           name={fieldPath(workIndex, "engineers_required")}
           control={control}
@@ -847,7 +849,7 @@ export function EworksWorkBlockForm({
       </div>
 
       {showLabour && (
-        <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5">
           <Controller
             name={fieldPath(workIndex, "labour_required")}
             control={control}
@@ -914,7 +916,7 @@ export function EworksWorkBlockForm({
         </div>
       )}
 
-      <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5">
         <EworksSectionTitle title="Charges" />
         <div className="grid gap-4 sm:grid-cols-2">
           <Controller

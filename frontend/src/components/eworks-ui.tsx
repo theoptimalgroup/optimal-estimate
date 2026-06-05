@@ -167,12 +167,16 @@ export const EworksCheckbox = forwardRef<
 });
 
 export function EworksCard({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("space-y-5", className)}>{children}</div>;
+  return (
+    <div className={cn("space-y-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm", className)}>
+      {children}
+    </div>
+  );
 }
 
 export function EworksTableShell({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 shadow-sm", className)}>
+    <div className={cn("overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/80 shadow-sm", className)}>
       {children}
     </div>
   );
@@ -192,10 +196,10 @@ export function EworksStepIndicator({
   const progress = ((currentStep + 1) / steps.length) * 100;
 
   return (
-    <div className="space-y-3">
-      <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
+    <div className="space-y-4">
+      <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
         <div
-          className="h-full rounded-full bg-optimal-orange transition-all duration-500 ease-out"
+          className="h-full rounded-full bg-blue-600 transition-all duration-500 ease-out"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -212,21 +216,21 @@ export function EworksStepIndicator({
               disabled={!reachable}
               onClick={() => onStepClick(index)}
               className={cn(
-                "shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold transition-all duration-200 ease-out",
+                "shrink-0 rounded-lg px-3.5 py-2 text-xs font-semibold transition-all duration-200 ease-out",
                 "min-h-[36px] active:scale-[0.97] disabled:cursor-not-allowed disabled:active:scale-100",
-                active && "bg-optimal-orange text-gray-900 shadow-sm",
-                !active && reachable && "border border-gray-300 bg-white text-gray-900 hover:border-gray-400 hover:bg-gray-50",
-                !reachable && "border border-gray-200 bg-gray-50 text-optimal-muted",
+                active && "border border-blue-200 bg-blue-50 text-blue-700 shadow-sm",
+                !active && reachable && "border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+                !reachable && "border border-slate-200 bg-slate-50 text-slate-400",
               )}
             >
               <span className="flex items-center gap-1.5">
                 <span
                   className={cn(
                     "flex size-5 items-center justify-center rounded-full text-[10px] font-bold",
-                    active && "bg-white/30 text-gray-900",
+                    active && "bg-blue-600 text-white",
                     !active && complete && "bg-emerald-100 text-emerald-700",
-                    !active && !complete && reachable && "bg-gray-200 text-gray-700",
-                    !reachable && "bg-gray-100 text-gray-400",
+                    !active && !complete && reachable && "bg-slate-200 text-slate-700",
+                    !reachable && "bg-slate-100 text-slate-400",
                   )}
                 >
                   {complete ? "✓" : index + 1}
@@ -287,12 +291,12 @@ export function DashboardPageShell({
   footer?: ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto w-full px-6 py-5 lg:px-8">
+    <div className="min-h-screen bg-slate-50">
+      <header className="border-b border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto w-full px-6 py-6 lg:px-8 lg:py-7">
           <div className="flex items-start justify-between gap-6">
-            <div className="min-w-0 flex-1 space-y-1">
-              <h1 className="text-2xl font-bold uppercase tracking-wide text-gray-900 lg:text-3xl">{title}</h1>
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <h1 className="text-2xl font-bold uppercase tracking-wide text-slate-900 lg:text-3xl">{title}</h1>
               {subtitle && <p className="text-sm text-optimal-muted lg:text-base">{subtitle}</p>}
               {meta && <div className="pt-0.5 text-xs text-optimal-muted">{meta}</div>}
             </div>
@@ -303,12 +307,12 @@ export function DashboardPageShell({
         </div>
       </header>
 
-      <main className="mx-auto w-full px-6 py-6 lg:px-8 lg:py-8">
+      <main className="mx-auto w-full px-6 py-7 lg:px-8 lg:py-9">
         <div className="animate-fade-in">{children}</div>
       </main>
 
       {footer && (
-        <footer className="border-t border-gray-200 bg-white px-6 py-5 lg:px-8 lg:py-6">
+        <footer className="border-t border-slate-200 bg-white px-6 py-6 shadow-[0_-1px_3px_rgba(15,23,42,0.04)] lg:px-8 lg:py-7">
           {footer}
         </footer>
       )}
@@ -336,12 +340,12 @@ export function EworksPageShell({
   footer?: ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-50 pb-28 md:pb-8">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
+    <div className="min-h-screen bg-slate-50 pb-28 md:pb-8">
+      <header className="border-b border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <h1 className="truncate text-xl font-bold uppercase tracking-wide text-gray-900 sm:text-2xl">{title}</h1>
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <h1 className="truncate text-xl font-bold uppercase tracking-wide text-slate-900 sm:text-2xl">{title}</h1>
               {subtitle && <p className="text-sm text-optimal-muted">{subtitle}</p>}
               {meta && <div className="pt-0.5 text-xs text-optimal-muted">{meta}</div>}
               {badge}
@@ -351,16 +355,16 @@ export function EworksPageShell({
               {saveStatus}
             </div>
           </div>
-          {stepIndicator && <div className="mt-4">{stepIndicator}</div>}
+          {stepIndicator && <div className="mt-6">{stepIndicator}</div>}
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-6">
-        <div className="animate-fade-in">{children}</div>
+      <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <div className="animate-fade-in space-y-8">{children}</div>
       </main>
 
       {footer && (
-        <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 p-4 backdrop-blur-xl md:static md:mx-auto md:max-w-3xl md:border-0 md:bg-transparent md:p-0 md:px-6 md:pb-8 md:backdrop-blur-none">
+        <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 p-4 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] backdrop-blur-xl md:static md:mx-auto md:max-w-3xl md:border-0 md:bg-transparent md:p-0 md:px-6 md:pb-8 md:shadow-none md:backdrop-blur-none">
           <div className="mx-auto max-w-3xl">{footer}</div>
         </footer>
       )}

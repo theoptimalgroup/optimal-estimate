@@ -2,7 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { EworksButton, EworksInput, EworksLabel, EworksLoadingScreen } from "@/components/eworks-ui";
+import { EworksInput } from "@/components/eworks-ui";
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DateText,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FilterField,
+  LoadingState,
+  PageHeader,
+  PrimaryButton,
+  SecondaryButton,
+  SectionCard,
+  StatusBadge,
+  filterInputClass,
+  filterSelectClass,
+} from "@/components/ui";
 import {
   COMMON_ACTIONS,
   COMMON_ENTITY_TYPES,
@@ -17,19 +37,11 @@ import {
 const PAGE_SIZE = 25;
 
 function ActionBadge({ action }: { action: string }) {
-  return (
-    <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
-      {action}
-    </span>
-  );
+  return <StatusBadge tone="info">{action}</StatusBadge>;
 }
 
 function EntityBadge({ entityType }: { entityType: string }) {
-  return (
-    <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-      {entityType}
-    </span>
-  );
+  return <StatusBadge tone="neutral">{entityType}</StatusBadge>;
 }
 
 function AuditDetailPanel({
@@ -47,61 +59,74 @@ function AuditDetailPanel({
       aria-labelledby="audit-detail-title"
       data-testid="audit-detail-modal"
     >
-      <div className="w-full max-w-3xl rounded-lg border border-gray-200 bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-4">
+      <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
           <div>
-            <h2 id="audit-detail-title" className="text-lg font-semibold text-gray-900">
+            <h2 id="audit-detail-title" className="text-lg font-semibold text-slate-900">
               Audit Log Details
             </h2>
-            <p className="mt-1 text-sm text-gray-600">{log.summary}</p>
+            <p className="mt-1 text-sm text-slate-600">{log.summary}</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          >
             Close
           </button>
         </div>
 
-        <div className="space-y-4 px-6 py-5">
-          <dl className="grid gap-3 rounded-lg bg-gray-50 p-4 text-sm sm:grid-cols-2">
+        <div className="space-y-5 px-6 py-6">
+          <dl className="grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Time</dt>
-              <dd className="mt-1 text-gray-900">{formatDate(log.created_at)}</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Time</dt>
+              <dd className="mt-1 text-slate-900">{formatDate(log.created_at)}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Actor</dt>
-              <dd className="mt-1 text-gray-900">{log.actor_email ?? "—"}</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Actor</dt>
+              <dd className="mt-1 text-slate-900">{log.actor_email ?? "—"}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Action</dt>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Action</dt>
               <dd className="mt-1">
                 <ActionBadge action={log.action} />
               </dd>
             </div>
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Entity</dt>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Entity</dt>
               <dd className="mt-1 flex flex-wrap items-center gap-2">
                 <EntityBadge entityType={log.entity_type} />
-                <span className="font-mono text-xs text-gray-700">{log.entity_id ?? "—"}</span>
+                <span className="font-mono text-xs text-slate-700">{log.entity_id ?? "—"}</span>
               </dd>
             </div>
           </dl>
 
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Metadata</h3>
-            <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100" data-testid="audit-metadata">
+            <h3 className="text-sm font-semibold text-slate-900">Metadata</h3>
+            <pre
+              className="mt-2 max-h-40 overflow-auto rounded-xl bg-slate-900 p-4 text-xs text-slate-100"
+              data-testid="audit-metadata"
+            >
               {formatJson(log.metadata)}
             </pre>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">Before</h3>
-              <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100" data-testid="audit-before">
+              <h3 className="text-sm font-semibold text-slate-900">Before</h3>
+              <pre
+                className="mt-2 max-h-64 overflow-auto rounded-xl bg-slate-900 p-4 text-xs text-slate-100"
+                data-testid="audit-before"
+              >
                 {formatJson(log.before_snapshot)}
               </pre>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">After</h3>
-              <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100" data-testid="audit-after">
+              <h3 className="text-sm font-semibold text-slate-900">After</h3>
+              <pre
+                className="mt-2 max-h-64 overflow-auto rounded-xl bg-slate-900 p-4 text-xs text-slate-100"
+                data-testid="audit-after"
+              >
                 {formatJson(log.after_snapshot)}
               </pre>
             </div>
@@ -187,42 +212,43 @@ export default function AdminAuditLogsPage() {
 
   return (
     <div className="space-y-6" data-testid="admin-audit-logs-page">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Audit Logs</h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Review configuration changes, admin updates, and dashboard actions.
-          </p>
-        </div>
-        <EworksButton type="button" variant="secondary" onClick={() => void loadLogs()} disabled={loading}>
-          Refresh
-        </EworksButton>
-      </div>
+      <PageHeader
+        title="Audit Logs"
+        description="Review configuration changes, admin updates, and dashboard actions."
+        actions={
+          <SecondaryButton onClick={() => void loadLogs()} disabled={loading}>
+            Refresh
+          </SecondaryButton>
+        }
+      />
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <EworksLabel>
-            Search
-            <EworksInput
+      <FilterBar className="flex-col sm:flex-col sm:items-stretch">
+        <div className="grid w-full gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <FilterField label="Search">
+            <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Action, entity, actor"
+              className={filterInputClass}
               data-testid="audit-search"
             />
-          </EworksLabel>
-          <EworksLabel>
-            Actor email
-            <EworksInput value={actorEmail} onChange={(e) => setActorEmail(e.target.value)} placeholder="admin@example.com" />
-          </EworksLabel>
-          <EworksLabel>
-            Action
+          </FilterField>
+          <FilterField label="Actor email">
+            <input
+              value={actorEmail}
+              onChange={(e) => setActorEmail(e.target.value)}
+              placeholder="admin@example.com"
+              className={filterInputClass}
+            />
+          </FilterField>
+          <FilterField label="Action">
             <select
               value={actionFilter}
               onChange={(e) => {
                 setActionFilter(e.target.value);
                 setOffset(0);
               }}
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm focus:border-optimal-orange focus:outline-none focus:ring-2 focus:ring-optimal-orange/30"
+              className={filterSelectClass}
             >
               <option value="">All actions</option>
               {COMMON_ACTIONS.map((action) => (
@@ -231,16 +257,15 @@ export default function AdminAuditLogsPage() {
                 </option>
               ))}
             </select>
-          </EworksLabel>
-          <EworksLabel>
-            Entity type
+          </FilterField>
+          <FilterField label="Entity type">
             <select
               value={entityTypeFilter}
               onChange={(e) => {
                 setEntityTypeFilter(e.target.value);
                 setOffset(0);
               }}
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm focus:border-optimal-orange focus:outline-none focus:ring-2 focus:ring-optimal-orange/30"
+              className={filterSelectClass}
             >
               <option value="">All entity types</option>
               {COMMON_ENTITY_TYPES.map((type) => (
@@ -249,109 +274,91 @@ export default function AdminAuditLogsPage() {
                 </option>
               ))}
             </select>
-          </EworksLabel>
-          <EworksLabel>
-            From
+          </FilterField>
+          <FilterField label="From">
             <EworksInput type="datetime-local" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </EworksLabel>
-          <EworksLabel>
-            To
+          </FilterField>
+          <FilterField label="To">
             <EworksInput type="datetime-local" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </EworksLabel>
+          </FilterField>
         </div>
-        <div className="mt-4">
-          <EworksButton type="button" onClick={applyFilters}>
-            Apply filters
-          </EworksButton>
+        <div>
+          <PrimaryButton onClick={applyFilters}>Apply filters</PrimaryButton>
         </div>
-      </div>
+      </FilterBar>
 
       {loading ? (
-        <EworksLoadingScreen message="Loading audit logs…" />
+        <LoadingState message="Loading audit logs…" />
       ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-          <p className="text-sm text-red-600">{error}</p>
-        </div>
+        <ErrorState message={error} />
       ) : logs.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-6 text-center">
-          <p className="text-sm text-gray-600">No audit logs match your filters.</p>
-        </div>
+        <EmptyState title="No audit logs found" description="No audit logs match your filters." />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm" data-testid="audit-logs-table">
-              <thead className="bg-gray-50">
-                <tr>
-                  {["Time", "Actor", "Action", "Entity Type", "Entity ID", "Summary", "Actions"].map((heading) => (
-                    <th
-                      key={heading}
-                      scope="col"
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+        <SectionCard padding="none">
+          <DataTable testId="audit-logs-table" className="rounded-none border-0 shadow-none">
+            <DataTableHead>
+              {["Time", "Actor", "Action", "Entity Type", "Entity ID", "Summary", "Actions"].map((heading) => (
+                <DataTableCell key={heading} header>
+                  {heading}
+                </DataTableCell>
+              ))}
+            </DataTableHead>
+            <DataTableBody>
+              {logs.map((log) => (
+                <DataTableRow key={log.id} data-testid={`audit-row-${log.id}`}>
+                  <DataTableCell>
+                    <DateText value={log.created_at} includeTime />
+                  </DataTableCell>
+                  <DataTableCell>{log.actor_email ?? "—"}</DataTableCell>
+                  <DataTableCell>
+                    <ActionBadge action={log.action} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <EntityBadge entityType={log.entity_type} />
+                  </DataTableCell>
+                  <DataTableCell className="font-mono text-xs">{log.entity_id ?? "—"}</DataTableCell>
+                  <DataTableCell>{log.summary}</DataTableCell>
+                  <DataTableCell>
+                    <button
+                      type="button"
+                      onClick={() => void openDetail(log.id)}
+                      className="text-sm font-medium text-blue-600 underline-offset-2 hover:text-blue-700 hover:underline"
+                      data-testid={`audit-view-${log.id}`}
                     >
-                      {heading}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 bg-white">
-                {logs.map((log) => (
-                  <tr key={log.id} data-testid={`audit-row-${log.id}`}>
-                    <td className="px-4 py-3 text-gray-700">{formatDate(log.created_at)}</td>
-                    <td className="px-4 py-3 text-gray-700">{log.actor_email ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      <ActionBadge action={log.action} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <EntityBadge entityType={log.entity_type} />
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-700">{log.entity_id ?? "—"}</td>
-                    <td className="px-4 py-3 text-gray-700">{log.summary}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => void openDetail(log.id)}
-                        className="text-sm font-medium text-gray-900 underline-offset-2 hover:underline"
-                        data-testid={`audit-view-${log.id}`}
-                      >
-                        View Details
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      View Details
+                    </button>
+                  </DataTableCell>
+                </DataTableRow>
+              ))}
+            </DataTableBody>
+          </DataTable>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-sm text-gray-600">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
             <p>
               Page {currentPage} of {lastPage} · {total} total
             </p>
             <div className="flex gap-2">
-              <EworksButton
-                type="button"
-                variant="secondary"
+              <SecondaryButton
                 disabled={offset <= 0 || loading}
                 onClick={() => setOffset((c) => Math.max(0, c - PAGE_SIZE))}
               >
                 Previous
-              </EworksButton>
-              <EworksButton
-                type="button"
-                variant="secondary"
+              </SecondaryButton>
+              <SecondaryButton
                 disabled={!hasMore || loading}
                 onClick={() => setOffset((c) => c + PAGE_SIZE)}
                 data-testid="audit-load-more"
               >
                 Next
-              </EworksButton>
+              </SecondaryButton>
             </div>
           </div>
-        </div>
+        </SectionCard>
       )}
 
       {detailLoading && !selectedLog ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20">
-          <EworksLoadingScreen message="Loading audit log…" />
+          <LoadingState message="Loading audit log…" />
         </div>
       ) : null}
 

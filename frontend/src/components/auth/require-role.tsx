@@ -1,6 +1,9 @@
 "use client";
 
 import Link from "next/link";
+
+import { LoadingState } from "@/components/ui/states";
+import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 import type { ReactNode } from "react";
 
 import { useCurrentUser } from "@/lib/auth/auth-context";
@@ -13,77 +16,69 @@ type RequireRoleProps = {
   children: ReactNode;
 };
 
+function AccessCard({ children, testId }: { children: ReactNode; testId: string }) {
+  return (
+    <div
+      className="flex min-h-screen items-center justify-center bg-app-bg px-4"
+      data-testid={testId}
+    >
+      <div className="w-full max-w-md rounded-xl border border-app-border bg-app-card p-8 text-center shadow-sm">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function RequireRole({ allowedRoles, children }: RequireRoleProps) {
   const { isLoading, isAuthenticated, hasRole, error } = useCurrentUser();
 
   if (isLoading) {
     return (
-      <div
-        className="flex min-h-screen items-center justify-center bg-gray-50"
-        data-testid="require-role-loading"
-      >
-        <p className="text-sm text-gray-600">Loading…</p>
+      <div className="flex min-h-screen items-center justify-center bg-slate-50" data-testid="require-role-loading">
+        <LoadingState message="Loading…" />
       </div>
     );
   }
 
   if (error && isRegistrationError(error)) {
     return (
-      <div
-        className="flex min-h-screen items-center justify-center bg-gray-50 px-4"
-        data-testid="require-role-registration-error"
-      >
-        <div className="max-w-md space-y-3 rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-          <p className="text-lg font-semibold text-red-900">Access denied</p>
-          <p className="text-sm text-red-800">User not registered or inactive. Contact admin.</p>
-          {isAzureAuthRequested() ? (
-            <Link
-              href="/login"
-              className="inline-block text-sm font-medium text-red-900 underline underline-offset-2 hover:text-red-700"
-            >
-              Back to sign in
+      <AccessCard testId="require-role-registration-error">
+        <p className="text-lg font-semibold text-rose-900">Access denied</p>
+        <p className="mt-2 text-sm text-slate-600">User not registered or inactive. Contact admin.</p>
+        {isAzureAuthRequested() ? (
+          <div className="mt-5">
+            <Link href="/login">
+              <SecondaryButton>Back to sign in</SecondaryButton>
             </Link>
-          ) : null}
-        </div>
-      </div>
+          </div>
+        ) : null}
+      </AccessCard>
     );
   }
 
   if (!isAuthenticated) {
     return (
-      <div
-        className="flex min-h-screen items-center justify-center bg-gray-50 px-4"
-        data-testid="require-role-unauthenticated"
-      >
-        <div className="max-w-md space-y-4 text-center">
-          <p className="text-sm text-gray-700">Sign in to access this page.</p>
-          {isAzureAuthRequested() ? (
-            <Link
-              href="/login"
-              data-testid="require-role-sign-in"
-              className="inline-flex items-center justify-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-            >
-              Sign in with Microsoft
+      <AccessCard testId="require-role-unauthenticated">
+        <p className="text-sm text-slate-700">Sign in to access this page.</p>
+        {isAzureAuthRequested() ? (
+          <div className="mt-5">
+            <Link href="/login" data-testid="require-role-sign-in">
+              <PrimaryButton>Sign in with Microsoft</PrimaryButton>
             </Link>
-          ) : (
-            <p className="text-xs text-gray-500">Enable dev auth on the backend or open /internal/auth-test.</p>
-          )}
-        </div>
-      </div>
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-slate-500">Enable dev auth on the backend or open /internal/auth-test.</p>
+        )}
+      </AccessCard>
     );
   }
 
   if (!hasRole(...allowedRoles)) {
     return (
-      <div
-        className="flex min-h-screen items-center justify-center bg-gray-50"
-        data-testid="require-role-forbidden"
-      >
-        <div className="text-center">
-          <p className="text-3xl font-semibold text-gray-900">403</p>
-          <p className="mt-2 text-sm text-gray-600">You do not have access to this page.</p>
-        </div>
-      </div>
+      <AccessCard testId="require-role-forbidden">
+        <p className="text-3xl font-semibold text-slate-900">403</p>
+        <p className="mt-2 text-sm text-slate-600">You do not have access to this page.</p>
+      </AccessCard>
     );
   }
 

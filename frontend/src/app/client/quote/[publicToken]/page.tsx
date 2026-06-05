@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { EworksButton, EworksLoadingScreen } from "@/components/eworks-ui";
 import { ClientQuoteAcceptForm } from "@/components/client-quote-accept-form";
 import {
-  formatMoney,
-  formatQuoteDate,
+  DateText,
+  ErrorState,
+  LoadingState,
+  MoneyText,
+  PrimaryButton,
+  SectionCard,
+  StatusBadge,
+  quoteStatusTone,
+} from "@/components/ui";
+import {
   getPublicQuote,
   getPublicQuotePdfUrl,
   type PublicClientQuote,
@@ -36,115 +43,123 @@ export default function ClientQuotePage({ params }: { params: { publicToken: str
   }, [loadQuote]);
 
   return (
-    <div className="min-h-screen bg-gray-50" data-testid="client-quote-page">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-5">
+    <div className="min-h-screen bg-slate-50" data-testid="client-quote-page">
+      <header className="border-b border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700">The Optimal Group</p>
-            <h1 className="mt-1 text-2xl font-semibold text-gray-900">Client Quote</h1>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">The Optimal Group</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Client Quote</h1>
+            <p className="mt-1 text-sm text-slate-600">Professional estimate for your review</p>
           </div>
           {quote ? (
-            <div className="text-right">
-              <p className="text-sm text-gray-500">Quote ref</p>
-              <p className="text-lg font-semibold text-gray-900">{quote.quote_ref}</p>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Quote ref</p>
+              <p className="mt-0.5 text-xl font-semibold text-slate-900">{quote.quote_ref}</p>
             </div>
           ) : null}
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-8">
+      <main className="mx-auto max-w-3xl space-y-6 px-6 py-8">
         {loading ? (
-          <EworksLoadingScreen message="Loading your quote…" />
+          <LoadingState message="Loading your quote…" />
         ) : error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" data-testid="client-quote-error">
-            {error}
+          <div data-testid="client-quote-error">
+            <ErrorState title="Quote unavailable" message={error} />
           </div>
         ) : quote ? (
           <div className="space-y-6">
-            <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <div className="grid gap-4 sm:grid-cols-2">
+            <SectionCard title="Quote details">
+              <div className="grid gap-5 sm:grid-cols-2">
                 <div>
-                  <p className="text-sm text-gray-500">Client</p>
-                  <p className="font-medium text-gray-900">{quote.client_name}</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Client</p>
+                  <p className="mt-1 font-medium text-slate-900">{quote.client_name}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Trade</p>
-                  <p className="font-medium text-gray-900">{quote.trade_name}</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Trade</p>
+                  <p className="mt-1 font-medium text-slate-900">{quote.trade_name}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Quote date</p>
-                  <p className="font-medium text-gray-900">{formatQuoteDate(quote.submitted_at ?? quote.created_at)}</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Quote date</p>
+                  <p className="mt-1">
+                    <DateText value={quote.submitted_at ?? quote.created_at} />
+                  </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Status</p>
-                  <p className="font-medium capitalize text-gray-900">{quote.status.replace("_", " ")}</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</p>
+                  <p className="mt-1">
+                    <StatusBadge tone={quoteStatusTone(quote.status)}>
+                      {quote.status.replace("_", " ")}
+                    </StatusBadge>
+                  </p>
                 </div>
               </div>
-            </section>
+            </SectionCard>
 
             {quote.scope_of_work ? (
-              <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-                <h2 className="text-lg font-semibold text-gray-900">Scope of Work</h2>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{quote.scope_of_work}</p>
-              </section>
+              <SectionCard title="Scope of Work">
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{quote.scope_of_work}</p>
+              </SectionCard>
             ) : null}
 
             {quote.works.length > 0 ? (
-              <section className="space-y-4">
-                <h2 className="text-lg font-semibold text-gray-900">Works</h2>
+              <div className="space-y-4">
+                <h2 className="text-lg font-semibold text-slate-900">Works</h2>
                 {quote.works.map((work) => (
-                  <article key={work.title} className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-                    <h3 className="font-semibold text-gray-900">{work.title}</h3>
-                    {work.product_name ? <p className="mt-1 text-sm text-gray-600">{work.product_name}</p> : null}
+                  <SectionCard key={work.title} title={work.title}>
+                    {work.product_name ? <p className="text-sm text-slate-600">{work.product_name}</p> : null}
                     {work.scope ? (
-                      <p className="mt-3 whitespace-pre-wrap text-sm text-gray-700">{work.scope}</p>
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{work.scope}</p>
                     ) : null}
                     {work.description ? (
-                      <p className="mt-3 whitespace-pre-wrap text-sm text-gray-600">{work.description}</p>
+                      <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{work.description}</p>
                     ) : null}
                     {work.materials_summary ? (
-                      <p className="mt-3 text-sm text-gray-600">Materials: {work.materials_summary}</p>
+                      <p className="mt-3 text-sm text-slate-600">Materials: {work.materials_summary}</p>
                     ) : null}
-                  </article>
+                  </SectionCard>
                 ))}
-              </section>
+              </div>
             ) : null}
 
-            <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm" data-testid="client-quote-summary">
-              <h2 className="text-lg font-semibold text-gray-900">Quote Summary</h2>
-              <dl className="mt-4 space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-gray-600">Work charges</dt>
-                  <dd className="font-medium text-gray-900">{formatMoney(quote.summary.work_charges)}</dd>
+            <div data-testid="client-quote-summary">
+              <SectionCard title="Quote Summary">
+                <dl className="space-y-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-slate-600">Work charges</dt>
+                    <dd className="text-right"><MoneyText value={quote.summary.work_charges} /></dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-slate-600">Materials</dt>
+                    <dd className="text-right"><MoneyText value={quote.summary.materials} /></dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-slate-600">Additional charges</dt>
+                    <dd className="text-right"><MoneyText value={quote.summary.additional_charges} /></dd>
+                  </div>
+                  <div className="flex justify-between gap-4 border-t border-slate-200 pt-3">
+                    <dt className="text-slate-600">Subtotal</dt>
+                    <dd className="text-right"><MoneyText value={quote.summary.subtotal} /></dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-slate-600">VAT</dt>
+                    <dd className="text-right"><MoneyText value={quote.summary.vat} /></dd>
+                  </div>
+                </dl>
+                <div className="mt-5 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-5 py-4">
+                  <dt className="text-base font-semibold text-slate-900">Total (inc. VAT)</dt>
+                  <dd>
+                    <MoneyText value={quote.summary.total} className="text-2xl font-bold text-slate-900" />
+                  </dd>
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-600">Materials</dt>
-                  <dd className="font-medium text-gray-900">{formatMoney(quote.summary.materials)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-600">Additional charges</dt>
-                  <dd className="font-medium text-gray-900">{formatMoney(quote.summary.additional_charges)}</dd>
-                </div>
-                <div className="flex justify-between border-t border-gray-100 pt-3">
-                  <dt className="text-gray-600">Subtotal</dt>
-                  <dd className="font-medium text-gray-900">{formatMoney(quote.summary.subtotal)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-600">VAT</dt>
-                  <dd className="font-medium text-gray-900">{formatMoney(quote.summary.vat)}</dd>
-                </div>
-                <div className="flex justify-between border-t border-gray-200 pt-3 text-base">
-                  <dt className="font-semibold text-gray-900">Total</dt>
-                  <dd className="font-bold text-indigo-700">{formatMoney(quote.summary.total)}</dd>
-                </div>
-              </dl>
-            </section>
+              </SectionCard>
+            </div>
 
-            <section className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3">
               <a href={getPublicQuotePdfUrl(publicToken)} target="_blank" rel="noopener noreferrer">
-                <EworksButton type="button">Download PDF</EworksButton>
+                <PrimaryButton type="button">Download PDF</PrimaryButton>
               </a>
-            </section>
+            </div>
 
             <ClientQuoteAcceptForm
               publicToken={publicToken}
@@ -153,14 +168,14 @@ export default function ClientQuotePage({ params }: { params: { publicToken: str
             />
 
             {quote.terms ? (
-              <footer className="rounded-lg border border-gray-200 bg-white p-5 text-sm text-gray-600 shadow-sm">
+              <footer className="rounded-xl border border-slate-200 bg-white px-6 py-5 text-sm leading-relaxed text-slate-600 shadow-sm">
                 <p>{quote.terms}</p>
-                <p className="mt-3">Contact The Optimal Group to discuss this quote.</p>
+                <p className="mt-3 text-slate-500">Contact The Optimal Group to discuss this quote.</p>
               </footer>
             ) : null}
           </div>
         ) : (
-          <p className="text-sm text-gray-500">Quote not available.</p>
+          <p className="text-sm text-slate-500">Quote not available.</p>
         )}
       </main>
     </div>

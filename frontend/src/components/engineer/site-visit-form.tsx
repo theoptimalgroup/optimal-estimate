@@ -6,14 +6,19 @@ import { useCallback, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 
 import {
-  EworksButton,
   EworksFieldError,
   EworksInput,
   EworksLabel,
-  EworksSectionTitle,
   EworksTextarea,
   eworksInputClass,
 } from "@/components/eworks-ui";
+import {
+  PrimaryButton,
+  SecondaryButton,
+  SectionCard,
+  StatusBadge,
+  quoteStatusTone,
+} from "@/components/ui";
 import type { AttachmentMeta } from "@/lib/eworks-calculate-schema";
 import {
   deleteSessionAttachment,
@@ -57,6 +62,9 @@ function toPayload(values: EngineerSiteVisitFormValues): EngineerSiteVisitPayloa
     waste_amount: values.waste_required ? values.waste_amount ?? 0 : null,
   };
 }
+
+const checkboxClass =
+  "size-5 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/40";
 
 export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormProps) {
   const [attachments, setAttachments] = useState<AttachmentMeta[]>(session.site_visit.attachments ?? []);
@@ -131,44 +139,46 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
   );
 
   return (
-    <form onSubmit={onSubmit} className="space-y-8" data-testid="engineer-site-visit-form">
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <EworksSectionTitle title="Job summary" subtitle="Read-only details from eWorks" />
-        <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+    <form onSubmit={onSubmit} className="space-y-6" data-testid="engineer-site-visit-form">
+      <SectionCard title="Job summary" description="Read-only details from eWorks">
+        <dl className="grid gap-4 sm:grid-cols-2">
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Quote ref</dt>
-            <dd className="text-sm text-gray-900">{session.job.quote_number}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Quote ref</dt>
+            <dd className="mt-1 text-sm font-medium text-slate-900">{session.job.quote_number}</dd>
           </div>
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Job number</dt>
-            <dd className="text-sm text-gray-900">{session.job.job_number}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Job number</dt>
+            <dd className="mt-1 text-sm font-medium text-slate-900">{session.job.job_number}</dd>
           </div>
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Client</dt>
-            <dd className="text-sm text-gray-900">{session.job.client_name}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Client</dt>
+            <dd className="mt-1 text-sm font-medium text-slate-900">{session.job.client_name}</dd>
           </div>
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Trade</dt>
-            <dd className="text-sm text-gray-900">{session.job.trade_name}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Trade</dt>
+            <dd className="mt-1 text-sm font-medium text-slate-900">{session.job.trade_name}</dd>
           </div>
           <div className="sm:col-span-2">
-            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Property</dt>
-            <dd className="text-sm text-gray-900">{session.job.property_address}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Property</dt>
+            <dd className="mt-1 text-sm text-slate-900">{session.job.property_address}</dd>
           </div>
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Status</dt>
-            <dd className="text-sm capitalize text-gray-900">{session.status.replace(/_/g, " ")}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</dt>
+            <dd className="mt-1">
+              <StatusBadge tone={quoteStatusTone(session.status)}>
+                {session.status.replace(/_/g, " ")}
+              </StatusBadge>
+            </dd>
           </div>
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Session ID</dt>
-            <dd className="break-all font-mono text-xs text-gray-700">{session.session_id}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Session ID</dt>
+            <dd className="mt-1 break-all font-mono text-xs text-slate-600">{session.session_id}</dd>
           </div>
         </dl>
-      </section>
+      </SectionCard>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <EworksSectionTitle title="Work" subtitle="Scope and on-site notes for the estimator" />
-        <div className="mt-4 space-y-4">
+      <SectionCard title="Work" description="Scope and on-site notes for the estimator">
+        <div className="space-y-4">
           <EworksLabel>
             Scope of works
             <EworksTextarea {...register("scope")} placeholder="Describe the work required on site" />
@@ -180,25 +190,24 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
             <EworksFieldError message={errors.site_notes?.message} />
           </EworksLabel>
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <EworksSectionTitle title="Photos" subtitle="Upload site photos for the estimator" />
-        <div className="mt-4 space-y-4">
+      <SectionCard title="Photos" description="Upload site photos for the estimator">
+        <div className="space-y-4">
           <input
             type="file"
             accept="image/*"
             capture="environment"
             onChange={handlePhotoUpload}
-            className="block w-full text-sm text-gray-700"
+            className="block w-full cursor-pointer rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-600 file:mr-4 file:rounded-md file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:border-slate-400"
             data-testid="engineer-photo-upload"
           />
           <EworksFieldError message={uploadError ?? undefined} />
           {attachments.length > 0 ? (
             <ul className="grid gap-3 sm:grid-cols-2">
               {attachments.map((attachment) => (
-                <li key={attachment.id} className="rounded-md border border-gray-200 p-2">
-                  <div className="relative aspect-video overflow-hidden rounded bg-gray-100">
+                <li key={attachment.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="relative aspect-video overflow-hidden bg-slate-100">
                     <Image
                       src={getAttachmentUrl(session.session_id, sessionToken, attachment.id)}
                       alt={attachment.file_name}
@@ -207,28 +216,28 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
                       unoptimized
                     />
                   </div>
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="truncate text-xs text-gray-600">{attachment.file_name}</span>
-                    <EworksButton
+                  <div className="flex items-center justify-between gap-2 px-3 py-2">
+                    <span className="truncate text-xs text-slate-600">{attachment.file_name}</span>
+                    <SecondaryButton
                       type="button"
                       variant="ghost"
+                      className="min-h-[36px] px-2 text-xs"
                       onClick={() => void handleDeleteAttachment(attachment.id)}
                     >
                       Remove
-                    </EworksButton>
+                    </SecondaryButton>
                   </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-gray-500">No photos uploaded yet.</p>
+            <p className="text-sm text-slate-500">No photos uploaded yet.</p>
           )}
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <EworksSectionTitle title="Labour" subtitle="Engineers and labourers on site" />
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <SectionCard title="Labour" description="Engineers and labourers on site">
+        <div className="grid gap-4 sm:grid-cols-2">
           <EworksLabel>
             Engineers on site
             <EworksInput type="number" min={0} step={1} {...register("engineer_count", { valueAsNumber: true })} />
@@ -263,11 +272,10 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
             </EworksLabel>
           )}
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <EworksSectionTitle title="Materials" subtitle="Materials required on site (no markup shown)" />
-        <div className="mt-4 space-y-4">
+      <SectionCard title="Materials" description="Materials required on site (no markup shown)">
+        <div className="space-y-4">
           <EworksLabel>
             Materials required
             <EworksTextarea {...register("materials_required")} placeholder="List materials needed" />
@@ -279,13 +287,12 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
             <EworksFieldError message={errors.unit_cost?.message} />
           </EworksLabel>
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <EworksSectionTitle title="Site charges" subtitle="Tick applicable charges and enter amounts" />
-        <div className="mt-4 space-y-4">
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-800">
-            <input type="checkbox" {...register("parking_required")} />
+      <SectionCard title="Site charges" description="Tick applicable charges and enter amounts">
+        <div className="space-y-4">
+          <label className="flex min-h-[44px] items-center gap-3 text-sm font-medium text-slate-800">
+            <input type="checkbox" className={checkboxClass} {...register("parking_required")} />
             Parking
           </label>
           {parkingRequired && (
@@ -295,8 +302,8 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
               <EworksFieldError message={errors.parking_amount?.message} />
             </EworksLabel>
           )}
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-800">
-            <input type="checkbox" {...register("congestion_required")} />
+          <label className="flex min-h-[44px] items-center gap-3 text-sm font-medium text-slate-800">
+            <input type="checkbox" className={checkboxClass} {...register("congestion_required")} />
             Congestion charge
           </label>
           {congestionRequired && (
@@ -311,8 +318,8 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
               <EworksFieldError message={errors.congestion_amount?.message} />
             </EworksLabel>
           )}
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-800">
-            <input type="checkbox" {...register("ulez_required")} />
+          <label className="flex min-h-[44px] items-center gap-3 text-sm font-medium text-slate-800">
+            <input type="checkbox" className={checkboxClass} {...register("ulez_required")} />
             ULEZ
           </label>
           {ulezRequired && (
@@ -322,8 +329,8 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
               <EworksFieldError message={errors.ulez_amount?.message} />
             </EworksLabel>
           )}
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-800">
-            <input type="checkbox" {...register("waste_required")} />
+          <label className="flex min-h-[44px] items-center gap-3 text-sm font-medium text-slate-800">
+            <input type="checkbox" className={checkboxClass} {...register("waste_required")} />
             Waste disposal
           </label>
           {wasteRequired && (
@@ -334,17 +341,17 @@ export function SiteVisitForm({ session, sessionToken, onSaved }: SiteVisitFormP
             </EworksLabel>
           )}
         </div>
-      </section>
+      </SectionCard>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <EworksButton type="submit" disabled={isSaving} data-testid="engineer-submit-site-visit">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <PrimaryButton type="submit" disabled={isSaving} data-testid="engineer-submit-site-visit">
           {isSaving ? "Saving…" : "Submit to estimator"}
-        </EworksButton>
-        {saveMessage && (
-          <p className="text-sm font-medium text-green-700" data-testid="engineer-save-success">
+        </PrimaryButton>
+        {saveMessage ? (
+          <p className="text-sm font-medium text-emerald-700" data-testid="engineer-save-success">
             {saveMessage}
           </p>
-        )}
+        ) : null}
         <EworksFieldError message={saveError ?? undefined} />
       </div>
     </form>

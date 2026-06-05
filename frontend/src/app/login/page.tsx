@@ -8,26 +8,25 @@ import { isAzureAuth, isAzureAuthRequested, isDevAuth } from "@/lib/auth/auth-co
 
 function DevLoginPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md space-y-6 rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+    <main className="flex min-h-screen items-center justify-center bg-app-bg px-4">
+      <div className="w-full max-w-md space-y-6 rounded-xl border border-app-border bg-app-card p-8 shadow-sm">
         <div className="space-y-2 text-center">
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Optimal Estimate</p>
-          <h1 className="text-2xl font-bold text-gray-900">Dev authentication</h1>
-          <p className="text-sm text-gray-600">
-            Microsoft sign-in is disabled. Enable <code className="rounded bg-gray-100 px-1">DEV_AUTH_ENABLED</code> on
+          <h1 className="text-page-title text-app-text">Dev authentication</h1>
+          <p className="text-body text-app-muted">
+            Microsoft sign-in is disabled. Enable <code className="rounded bg-slate-100 px-1">DEV_AUTH_ENABLED</code> on
             the backend and open a protected route directly.
           </p>
         </div>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
           <Link
             href="/internal/auth-test"
-            className="inline-flex items-center justify-center rounded-md bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800"
+            className="inline-flex h-9 items-center justify-center rounded-md bg-app-primary px-4 text-sm font-medium text-white hover:bg-app-primary-hover"
           >
             Open auth test page
           </Link>
           <Link
             href="/eworks/calculate"
-            className="inline-flex items-center justify-center rounded-md border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-app-border px-4 text-sm font-medium text-app-text hover:bg-slate-50"
           >
             Continue to calculator
           </Link>

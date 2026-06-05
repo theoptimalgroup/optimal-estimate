@@ -159,6 +159,8 @@ test.describe("Client public quote page", () => {
     await expect(page.getByText(/This quote was accepted on/i)).toBeVisible();
     await expect(page.getByTestId("client-quote-accept-form")).toHaveCount(0);
     await assertForbiddenStringsAbsent(page);
+  });
+
   test("public quote page does not show eWorks sync status", async ({ page }) => {
     await mockPublicQuoteApi(page, mockAcceptedQuote);
     await page.goto("/client/quote/test-public-token");

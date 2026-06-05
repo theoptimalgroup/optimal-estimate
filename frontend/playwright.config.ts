@@ -20,6 +20,7 @@ export default defineConfig({
         reuseExistingServer: !process.env.CI,
         env: {
           ...process.env,
+          NEXT_PUBLIC_AUTH_PROVIDER: "dev",
           NEXT_PUBLIC_API_URL: process.env.PLAYWRIGHT_API_URL ?? "http://127.0.0.1:8000",
         },
       },

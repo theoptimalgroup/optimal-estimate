@@ -4,17 +4,32 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { EworksButton, EworksLoadingScreen } from "@/components/eworks-ui";
 import { QuoteAcceptancePanel } from "@/components/quote-acceptance-panel";
 import {
+  DateText,
+  ErrorState,
+  LoadingState,
+  MoneyText,
+  PageHeader,
+  PrimaryButton,
+  quoteStatusTone,
+  SectionCard,
+  StatusBadge,
+  type StatusTone,
+} from "@/components/ui";
+import {
   buildCalculatorResumeUrl,
-  formatEstimatorDate,
   formatMoney,
   getEstimatorQuote,
   resumeEstimatorQuote,
   statusLabel,
   type EstimatorQuoteDetail,
 } from "@/lib/estimator";
+
+function estimatorQuoteTone(status: string, isReopened?: boolean): StatusTone {
+  if (isReopened && status === "in_progress") return "warning";
+  return quoteStatusTone(status);
+}
 
 export default function EstimatorQuoteDetailPage({ params }: { params: { sessionId: string } }) {
   const { sessionId } = params;
@@ -56,77 +71,90 @@ export default function EstimatorQuoteDetailPage({ params }: { params: { session
 
   return (
     <div className="space-y-6" data-testid="estimator-quote-detail-page">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <Link href="/estimator/quotes" className="text-sm text-indigo-600 hover:text-indigo-800">
-            ← Back to quotes
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-gray-900">Quote Details</h1>
-        </div>
-        {quote?.can_resume ? (
-          <EworksButton type="button" onClick={() => void handleResume()} disabled={resuming}>
-            {resuming ? "Opening…" : "Continue Estimate"}
-          </EworksButton>
-        ) : null}
-      </div>
+      <Link href="/estimator/quotes" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+        ← Back to quotes
+      </Link>
+      <PageHeader
+        title="Quote Details"
+        description={quote?.quote_ref}
+        actions={
+          quote?.can_resume ? (
+            <PrimaryButton onClick={() => void handleResume()} disabled={resuming}>
+              {resuming ? "Opening…" : "Continue Estimate"}
+            </PrimaryButton>
+          ) : undefined
+        }
+      />
 
       {loading ? (
-        <EworksLoadingScreen message="Loading quote…" />
+        <LoadingState message="Loading quote…" />
       ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <ErrorState message={error} onRetry={() => void loadQuote()} />
       ) : quote ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-          <dl className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Quote ref</dt>
-              <dd className="mt-1 text-gray-900">{quote.quote_ref}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Job number</dt>
-              <dd className="mt-1 text-gray-900">{quote.job_number || "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Client</dt>
-              <dd className="mt-1 text-gray-900">{quote.client_name || "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Trade</dt>
-              <dd className="mt-1 text-gray-900">{quote.trade_name || "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Status</dt>
-              <dd className="mt-1 text-gray-900">{statusLabel(quote.status, quote.is_reopened)}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Total</dt>
-              <dd className="mt-1 text-gray-900">{formatMoney(quote.total)}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Works</dt>
-              <dd className="mt-1 text-gray-900">{quote.work_count}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Updated</dt>
-              <dd className="mt-1 text-gray-900">{formatEstimatorDate(quote.updated_at)}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-gray-500">Submitted</dt>
-              <dd className="mt-1 text-gray-900">{formatEstimatorDate(quote.submitted_at)}</dd>
-            </div>
-            <div className="sm:col-span-2">
-              <dt className="text-sm font-medium text-gray-500">Property address</dt>
-              <dd className="mt-1 text-gray-900">{quote.property_address || "—"}</dd>
-            </div>
-          </dl>
-          <div className="mt-6">
-            <QuoteAcceptancePanel acceptance={quote.acceptance} />
-          </div>
+        <>
+          <SectionCard title="Overview">
+            <dl className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Quote ref</dt>
+                <dd className="mt-1 font-medium text-slate-900">{quote.quote_ref}</dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Job number</dt>
+                <dd className="mt-1 text-slate-900">{quote.job_number || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Client</dt>
+                <dd className="mt-1 text-slate-900">{quote.client_name || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Trade</dt>
+                <dd className="mt-1 text-slate-900">{quote.trade_name || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Status</dt>
+                <dd className="mt-1">
+                  <StatusBadge tone={estimatorQuoteTone(quote.status, quote.is_reopened)}>
+                    {statusLabel(quote.status, quote.is_reopened)}
+                  </StatusBadge>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Total</dt>
+                <dd className="mt-1">
+                  <MoneyText value={formatMoney(quote.total)} />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Works</dt>
+                <dd className="mt-1 text-slate-900">{quote.work_count}</dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Updated</dt>
+                <dd className="mt-1">
+                  <DateText value={quote.updated_at} includeTime />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium text-slate-500">Submitted</dt>
+                <dd className="mt-1">
+                  <DateText value={quote.submitted_at} includeTime />
+                </dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="text-sm font-medium text-slate-500">Property address</dt>
+                <dd className="mt-1 text-slate-900">{quote.property_address || "—"}</dd>
+              </div>
+            </dl>
+          </SectionCard>
+
+          <QuoteAcceptancePanel acceptance={quote.acceptance} />
+
           {quote.status === "submitted" ? (
-            <p className="mt-6 text-sm text-gray-600">
+            <p className="text-sm text-slate-600">
               This quote is in the manager review queue. Estimators cannot approve or reject submitted quotes here.
             </p>
           ) : null}
-        </div>
+        </>
       ) : null}
     </div>
   );

@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useForm, type FieldErrors } from "react-hook-form";
 import { questionnaireResolver } from "@/lib/eworks-questionnaire-resolver";
+import { EworksInternalNavBar } from "@/components/eworks/eworks-internal-nav-bar";
 import { EworksEstimationFormStep } from "@/components/eworks-estimation-form-step";
 import { EworksQuestionnaireStep } from "@/components/eworks-questionnaire-step";
 import {
@@ -547,9 +548,9 @@ function EworksCalculateContent() {
 
   if (loadError || !session || !step1) {
     return (
-      <div className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6">
+      <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6">
         <div className="mx-auto max-w-lg animate-fade-in">
-          <div className="rounded-lg border border-red-300 bg-red-50 p-6">
+          <div className="rounded-xl border border-red-300 bg-red-50 p-6 shadow-sm">
             <EworksSectionTitle title={loadErrorTitle(loadErrorCode)} />
             <p className="mt-3 text-sm leading-relaxed text-red-800">{loadError ?? "This link could not be opened."}</p>
             {loadErrorHint(loadErrorCode) && (
@@ -613,7 +614,7 @@ function EworksCalculateContent() {
       footer={
         <div className="space-y-3">
           {(validationError || calcError) && (
-            <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-800 animate-fade-in">
+            <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-800 shadow-sm animate-fade-in">
               {validationError ?? calcError}
             </div>
           )}
@@ -680,14 +681,17 @@ function EworksCalculateContent() {
 
 export default function EworksCalculatePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-gray-50">
-          <EworksLoadingScreen />
-        </div>
-      }
-    >
-      <EworksCalculateContent />
-    </Suspense>
+    <>
+      <EworksInternalNavBar />
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-gray-50">
+            <EworksLoadingScreen />
+          </div>
+        }
+      >
+        <EworksCalculateContent />
+      </Suspense>
+    </>
   );
 }

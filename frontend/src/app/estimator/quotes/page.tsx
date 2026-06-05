@@ -3,7 +3,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { EstimatorQuotesTable } from "@/components/estimator/estimator-quotes-table";
-import { EworksButton, EworksInput, EworksLabel, EworksLoadingScreen } from "@/components/eworks-ui";
+import {
+  ErrorState,
+  FilterBar,
+  FilterField,
+  filterInputClass,
+  filterSelectClass,
+  LoadingState,
+  PageHeader,
+  PaginationBar,
+  PrimaryButton,
+  SecondaryButton,
+  SectionCard,
+} from "@/components/ui";
+
 import { listEstimatorQuotes, type EstimatorQuoteRow } from "@/lib/estimator";
 
 const PAGE_SIZE = 25;
@@ -55,85 +68,79 @@ export default function EstimatorQuotesPage() {
 
   return (
     <div className="space-y-6" data-testid="estimator-quotes-page">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Quotes</h1>
-        <p className="mt-2 text-sm text-gray-600">Browse and continue in-progress or submitted estimates</p>
-      </div>
+      <PageHeader
+        title="Quotes"
+        description="Browse and continue in-progress or submitted estimates"
+      />
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div>
-            <EworksLabel htmlFor="quotes-search">Search</EworksLabel>
-            <EworksInput
-              id="quotes-search"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Quote ref, client, trade…"
-            />
-          </div>
-          <div>
-            <EworksLabel htmlFor="quotes-status">Status</EworksLabel>
-            <select
-              id="quotes-status"
-              value={status}
-              onChange={(e) => {
-                setOffset(0);
-                setStatus(e.target.value);
-              }}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm"
-            >
-              <option value="all">All</option>
-              <option value="in_progress">In progress</option>
-              <option value="submitted">Submitted</option>
-              <option value="reopened">Needs changes</option>
-            </select>
-          </div>
-          <div>
-            <EworksLabel htmlFor="quotes-date-from">Date from</EworksLabel>
-            <EworksInput id="quotes-date-from" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </div>
-          <div>
-            <EworksLabel htmlFor="quotes-date-to">Date to</EworksLabel>
-            <EworksInput id="quotes-date-to" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </div>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <EworksButton
-            type="button"
+      <FilterBar>
+        <FilterField label="Search">
+          <input
+            id="quotes-search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Quote ref, client, trade…"
+            className={filterInputClass}
+          />
+        </FilterField>
+        <FilterField label="Status">
+          <select
+            id="quotes-status"
+            value={status}
+            onChange={(e) => {
+              setOffset(0);
+              setStatus(e.target.value);
+            }}
+            className={filterSelectClass}
+          >
+            <option value="all">All</option>
+            <option value="in_progress">In progress</option>
+            <option value="submitted">Submitted</option>
+            <option value="reopened">Needs changes</option>
+          </select>
+        </FilterField>
+        <FilterField label="Date from">
+          <input
+            id="quotes-date-from"
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className={filterInputClass}
+          />
+        </FilterField>
+        <FilterField label="Date to">
+          <input
+            id="quotes-date-to"
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className={filterInputClass}
+          />
+        </FilterField>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:pb-0.5">
+          <PrimaryButton
             onClick={() => {
               setOffset(0);
               setSearch(searchInput.trim());
             }}
           >
             Apply
-          </EworksButton>
-          <EworksButton type="button" onClick={() => void loadQuotes()} disabled={loading}>
+          </PrimaryButton>
+          <SecondaryButton onClick={() => void loadQuotes()} disabled={loading}>
             Refresh
-          </EworksButton>
+          </SecondaryButton>
         </div>
-      </div>
+      </FilterBar>
 
       {loading ? (
-        <EworksLoadingScreen message="Loading quotes…" />
+        <LoadingState message="Loading quotes…" />
       ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <ErrorState message={error} onRetry={() => void loadQuotes()} />
       ) : (
-        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <SectionCard padding="none">
           <EstimatorQuotesTable quotes={quotes} showWorks showSubmitted />
-          <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
-            <span>
-              Showing {quotes.length} of {total}
-            </span>
-            <div className="flex gap-2">
-              <EworksButton type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-                Previous
-              </EworksButton>
-              <EworksButton type="button" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
-                Next
-              </EworksButton>
-            </div>
-          </div>
-        </div>
+          <PaginationBar total={total} offset={offset} limit={PAGE_SIZE} onPageChange={setOffset} />
+        </SectionCard>
       )}
     </div>
   );

@@ -5,7 +5,14 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { SiteVisitForm } from "@/components/engineer/site-visit-form";
-import { EworksButton, EworksInput, EworksLabel, EworksLoadingScreen } from "@/components/eworks-ui";
+import { EworksInput, EworksLabel } from "@/components/eworks-ui";
+import {
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  PrimaryButton,
+  SectionCard,
+} from "@/components/ui";
 import {
   fetchEngineerSession,
   readEngineerSessionCredentials,
@@ -68,50 +75,52 @@ export default function EngineerSiteVisitPage() {
 
   if (!sessionToken && !isLoading) {
     return (
-      <div className="mx-auto max-w-lg space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold text-gray-900">Connect to site visit</h1>
-        <p className="text-sm text-gray-600">
-          Enter the session token for job <span className="font-mono text-xs">{sessionId}</span>.
-        </p>
-        <EworksLabel>
-          Session token
-          <EworksInput
-            value={tokenInput}
-            onChange={(event) => setTokenInput(event.target.value)}
-            data-testid="engineer-detail-token-input"
-          />
-        </EworksLabel>
-        {loadError && <p className="text-sm text-red-600">{loadError}</p>}
-        <div className="flex gap-3">
-          <EworksButton type="button" onClick={handleConnect} data-testid="engineer-detail-connect-button">
-            Load session
-          </EworksButton>
-          <Link href="/engineer/jobs" className="text-sm text-gray-600 underline underline-offset-2">
-            Back to jobs
-          </Link>
-        </div>
+      <div className="mx-auto max-w-lg space-y-6">
+        <PageHeader
+          title="Connect to site visit"
+          description={`Enter the session token for job ${sessionId}.`}
+        />
+        <SectionCard>
+          <div className="space-y-4">
+            <EworksLabel>
+              Session token
+              <EworksInput
+                value={tokenInput}
+                onChange={(event) => setTokenInput(event.target.value)}
+                data-testid="engineer-detail-token-input"
+              />
+            </EworksLabel>
+            {loadError ? <ErrorState title="Connection failed" message={loadError} className="py-3" /> : null}
+            <div className="flex flex-wrap items-center gap-3">
+              <PrimaryButton type="button" onClick={handleConnect} data-testid="engineer-detail-connect-button">
+                Load session
+              </PrimaryButton>
+              <Link href="/engineer/jobs" className="text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900">
+                Back to jobs
+              </Link>
+            </div>
+          </div>
+        </SectionCard>
       </div>
     );
   }
 
   if (isLoading || !session || !sessionToken) {
-    return <EworksLoadingScreen message="Loading site visit…" />;
+    return <LoadingState message="Loading site visit…" className="min-h-[50vh]" />;
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Site visit</h1>
-          <p className="text-sm text-gray-600">
-            {session.job.quote_number} · {session.job.client_name}
-          </p>
-        </div>
-        <Link href="/engineer/jobs" className="text-sm text-gray-600 underline underline-offset-2">
-          All jobs
-        </Link>
-      </div>
-      {loadError && <p className="text-sm text-red-600">{loadError}</p>}
+    <div className="mx-auto max-w-3xl space-y-6">
+      <PageHeader
+        title="Site visit"
+        description={`${session.job.quote_number} · ${session.job.client_name}`}
+        actions={
+          <Link href="/engineer/jobs" className="text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900">
+            All jobs
+          </Link>
+        }
+      />
+      {loadError ? <ErrorState message={loadError} onRetry={() => void loadSession(sessionToken)} /> : null}
       <SiteVisitForm
         session={session}
         sessionToken={sessionToken}

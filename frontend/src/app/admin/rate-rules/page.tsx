@@ -2,7 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { EworksButton, EworksInput, EworksLabel, EworksLoadingScreen } from "@/components/eworks-ui";
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DateText,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FilterField,
+  LoadingState,
+  PageHeader,
+  PrimaryButton,
+  SecondaryButton,
+  SectionCard,
+  StatusBadge,
+  activeStatusTone,
+  filterInputClass,
+  filterSelectClass,
+} from "@/components/ui";
 import {
   formatDate,
   formatFractionAsPercent,
@@ -19,25 +39,11 @@ import {
 const FORMULA_SOURCES = ["", "simplified", "xlsx"] as const;
 const PAGE_SIZE = 25;
 
-function StatusBadge({ active }: { active: boolean }) {
-  return (
-    <span
-      className={
-        active
-          ? "inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800"
-          : "inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700"
-      }
-    >
-      {active ? "Active" : "Inactive"}
-    </span>
-  );
-}
-
 function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</dt>
-      <dd className="mt-1 text-sm text-gray-900 whitespace-pre-wrap break-words">{value?.trim() ? value : "—"}</dd>
+      <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
+      <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-900">{value?.trim() ? value : "—"}</dd>
     </div>
   );
 }
@@ -61,13 +67,13 @@ function RateRuleDetailPanel({
       aria-labelledby="rate-rule-detail-title"
       data-testid="rate-rule-detail-modal"
     >
-      <div className="w-full max-w-4xl rounded-lg border border-gray-200 bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-4">
+      <div className="w-full max-w-4xl rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
           <div>
-            <h2 id="rate-rule-detail-title" className="text-lg font-semibold text-gray-900">
+            <h2 id="rate-rule-detail-title" className="text-lg font-semibold text-slate-900">
               Rate Rule Details
             </h2>
-            <p className="mt-1 text-sm text-gray-600">
+            <p className="mt-1 text-sm text-slate-600">
               {rule.client_name ?? rule.xlsx_client_name ?? "Default client"} ·{" "}
               {rule.trade_name ?? rule.xlsx_trade_name ?? "Default trade"} · v{rule.version}
             </p>
@@ -75,13 +81,13 @@ function RateRuleDetailPanel({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+            className="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
           >
             Close
           </button>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+        <div className="max-h-[70vh] overflow-y-auto px-6 py-6">
           <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <DetailField label="Client" value={rule.client_name} />
             <DetailField label="Trade" value={rule.trade_name} />
@@ -126,28 +132,27 @@ function RateRuleDetailPanel({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-6 py-4">
-          <StatusBadge active={rule.is_active} />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-6 py-5">
+          <StatusBadge tone={activeStatusTone(rule.is_active)}>
+            {rule.is_active ? "Active" : "Inactive"}
+          </StatusBadge>
           <div className="flex gap-2">
             {rule.is_active ? (
-              <EworksButton
-                type="button"
-                variant="secondary"
+              <SecondaryButton
                 disabled={statusUpdating}
                 onClick={() => onStatusChange(false)}
                 data-testid="rate-rule-deactivate"
               >
                 {statusUpdating ? "Updating…" : "Deactivate"}
-              </EworksButton>
+              </SecondaryButton>
             ) : (
-              <EworksButton
-                type="button"
+              <PrimaryButton
                 disabled={statusUpdating}
                 onClick={() => onStatusChange(true)}
                 data-testid="rate-rule-activate"
               >
                 {statusUpdating ? "Updating…" : "Activate"}
-              </EworksButton>
+              </PrimaryButton>
             )}
           </div>
         </div>
@@ -243,184 +248,171 @@ export default function AdminRateRulesPage() {
 
   return (
     <div className="space-y-6" data-testid="admin-rate-rules-page">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Rate Rules</h1>
-          <p className="mt-2 text-sm text-gray-600">
-            View labour rates, markups, and pricing rules used across estimates.
-          </p>
-        </div>
-        <EworksButton type="button" variant="secondary" onClick={() => void loadRules()} disabled={loading}>
-          Refresh
-        </EworksButton>
-      </div>
+      <PageHeader
+        title="Rate Rules"
+        description="View labour rates, markups, and pricing rules used across estimates."
+        actions={
+          <SecondaryButton onClick={() => void loadRules()} disabled={loading}>
+            Refresh
+          </SecondaryButton>
+        }
+      />
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <EworksLabel>
-            Search client
-            <EworksInput
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Client or XLSX name"
-              data-testid="rate-rules-client-search"
-            />
-          </EworksLabel>
-          <EworksLabel>
-            Trade filter
-            <EworksInput
-              value={tradeName}
+      <FilterBar>
+        <FilterField label="Search client">
+          <input
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Client or XLSX name"
+            className={filterInputClass}
+            data-testid="rate-rules-client-search"
+          />
+        </FilterField>
+        <FilterField label="Trade filter">
+          <input
+            value={tradeName}
+            onChange={(event) => {
+              setTradeName(event.target.value);
+              setOffset(0);
+            }}
+            placeholder="Trade or XLSX name"
+            className={filterInputClass}
+            data-testid="rate-rules-trade-filter"
+          />
+        </FilterField>
+        <FilterField label="Formula source">
+          <select
+            value={formulaSource}
+            onChange={(event) => {
+              setFormulaSource(event.target.value);
+              setOffset(0);
+            }}
+            className={filterSelectClass}
+            data-testid="rate-rules-formula-filter"
+          >
+            {FORMULA_SOURCES.map((source) => (
+              <option key={source || "all"} value={source}>
+                {source ? source : "All sources"}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Filters" className="sm:min-w-[160px]">
+          <label className="flex min-h-[40px] items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={activeOnly}
               onChange={(event) => {
-                setTradeName(event.target.value);
+                setActiveOnly(event.target.checked);
                 setOffset(0);
               }}
-              placeholder="Trade or XLSX name"
-              data-testid="rate-rules-trade-filter"
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              data-testid="rate-rules-active-only"
             />
-          </EworksLabel>
-          <EworksLabel>
-            Formula source
-            <select
-              value={formulaSource}
-              onChange={(event) => {
-                setFormulaSource(event.target.value);
-                setOffset(0);
-              }}
-              className="w-full min-h-[44px] rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm focus:border-optimal-orange focus:outline-none focus:ring-2 focus:ring-optimal-orange/30"
-              data-testid="rate-rules-formula-filter"
-            >
-              {FORMULA_SOURCES.map((source) => (
-                <option key={source || "all"} value={source}>
-                  {source ? source : "All sources"}
-                </option>
-              ))}
-            </select>
-          </EworksLabel>
-          <div className="flex flex-col justify-end gap-3">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={activeOnly}
-                onChange={(event) => {
-                  setActiveOnly(event.target.checked);
-                  setOffset(0);
-                }}
-                className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-optimal-orange"
-                data-testid="rate-rules-active-only"
-              />
-              Active only
-            </label>
-            <EworksButton type="button" onClick={applySearch}>
-              Apply search
-            </EworksButton>
-          </div>
+            Active only
+          </label>
+        </FilterField>
+        <div className="flex shrink-0 items-end">
+          <PrimaryButton onClick={applySearch}>Apply search</PrimaryButton>
         </div>
-      </div>
+      </FilterBar>
 
       {loading ? (
-        <EworksLoadingScreen message="Loading rate rules…" />
+        <LoadingState message="Loading rate rules…" />
       ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-          <p className="text-sm text-red-600">{error}</p>
-        </div>
+        <ErrorState message={error} />
       ) : rules.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-6 text-center">
-          <p className="text-sm text-gray-600">No rate rules match your filters.</p>
-        </div>
+        <EmptyState title="No rate rules found" description="No rate rules match your filters." />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm" data-testid="rate-rules-table">
-              <thead className="bg-gray-50">
-                <tr>
-                  {[
-                    "Client",
-                    "Trade",
-                    "Formula Source",
-                    "Status",
-                    "Hourly",
-                    "Half Day",
-                    "Day",
-                    "Material Markup",
-                    "VAT",
-                    "Active From",
-                    "Active To",
-                    "Actions",
-                  ].map((heading) => (
-                    <th
-                      key={heading}
-                      scope="col"
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+        <SectionCard padding="none">
+          <DataTable testId="rate-rules-table" className="rounded-none border-0 shadow-none">
+            <DataTableHead>
+              {[
+                "Client",
+                "Trade",
+                "Formula Source",
+                "Status",
+                "Hourly",
+                "Half Day",
+                "Day",
+                "Material Markup",
+                "VAT",
+                "Active From",
+                "Active To",
+                "Actions",
+              ].map((heading) => (
+                <DataTableCell key={heading} header>
+                  {heading}
+                </DataTableCell>
+              ))}
+            </DataTableHead>
+            <DataTableBody>
+              {rules.map((rule) => (
+                <DataTableRow key={rule.id} data-testid={`rate-rule-row-${rule.id}`}>
+                  <DataTableCell className="text-slate-900">
+                    {rule.client_name ?? rule.xlsx_client_name ?? "—"}
+                  </DataTableCell>
+                  <DataTableCell className="text-slate-900">
+                    {rule.trade_name ?? rule.xlsx_trade_name ?? "—"}
+                  </DataTableCell>
+                  <DataTableCell>{rule.formula_source}</DataTableCell>
+                  <DataTableCell>
+                    <StatusBadge tone={activeStatusTone(rule.is_active)}>
+                      {rule.is_active ? "Active" : "Inactive"}
+                    </StatusBadge>
+                  </DataTableCell>
+                  <DataTableCell>{formatRate(rule.hourly_rate)}</DataTableCell>
+                  <DataTableCell>{formatRate(rule.half_day_rate)}</DataTableCell>
+                  <DataTableCell>{formatRate(rule.day_rate)}</DataTableCell>
+                  <DataTableCell>{formatMarkup(rule)}</DataTableCell>
+                  <DataTableCell>{formatPercent(rule.vat_rate)}</DataTableCell>
+                  <DataTableCell>
+                    <DateText value={rule.active_from} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <DateText value={rule.active_to} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <button
+                      type="button"
+                      onClick={() => void openDetail(rule.id)}
+                      className="text-sm font-medium text-blue-600 underline-offset-2 hover:text-blue-700 hover:underline"
+                      data-testid={`rate-rule-view-${rule.id}`}
                     >
-                      {heading}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 bg-white">
-                {rules.map((rule) => (
-                  <tr key={rule.id} data-testid={`rate-rule-row-${rule.id}`}>
-                    <td className="px-4 py-3 text-gray-900">
-                      {rule.client_name ?? rule.xlsx_client_name ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-gray-900">{rule.trade_name ?? rule.xlsx_trade_name ?? "—"}</td>
-                    <td className="px-4 py-3 text-gray-700">{rule.formula_source}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge active={rule.is_active} />
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{formatRate(rule.hourly_rate)}</td>
-                    <td className="px-4 py-3 text-gray-700">{formatRate(rule.half_day_rate)}</td>
-                    <td className="px-4 py-3 text-gray-700">{formatRate(rule.day_rate)}</td>
-                    <td className="px-4 py-3 text-gray-700">{formatMarkup(rule)}</td>
-                    <td className="px-4 py-3 text-gray-700">{formatPercent(rule.vat_rate)}</td>
-                    <td className="px-4 py-3 text-gray-700">{formatDate(rule.active_from)}</td>
-                    <td className="px-4 py-3 text-gray-700">{formatDate(rule.active_to)}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => void openDetail(rule.id)}
-                        className="text-sm font-medium text-gray-900 underline-offset-2 hover:underline"
-                        data-testid={`rate-rule-view-${rule.id}`}
-                      >
-                        View Details
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      View Details
+                    </button>
+                  </DataTableCell>
+                </DataTableRow>
+              ))}
+            </DataTableBody>
+          </DataTable>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-sm text-gray-600">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
             <p>
               Showing {offset + 1}–{Math.min(offset + rules.length, total)} of {total}
             </p>
             <div className="flex gap-2">
-              <EworksButton
-                type="button"
-                variant="secondary"
+              <SecondaryButton
                 disabled={!canLoadPrevious || loading}
                 onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}
               >
                 Previous
-              </EworksButton>
-              <EworksButton
-                type="button"
-                variant="secondary"
+              </SecondaryButton>
+              <SecondaryButton
                 disabled={!canLoadMore || loading}
                 onClick={() => setOffset((current) => current + PAGE_SIZE)}
                 data-testid="rate-rules-load-more"
               >
                 Next
-              </EworksButton>
+              </SecondaryButton>
             </div>
           </div>
-        </div>
+        </SectionCard>
       )}
 
       {detailLoading && !selectedRule ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20">
-          <EworksLoadingScreen message="Loading details…" />
+          <LoadingState message="Loading details…" />
         </div>
       ) : null}
 

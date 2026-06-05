@@ -2,7 +2,23 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { EworksButton, EworksInput, EworksLabel, EworksLoadingScreen } from "@/components/eworks-ui";
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FilterField,
+  filterInputClass,
+  LoadingState,
+  PageHeader,
+  PrimaryButton,
+  SecondaryButton,
+  SectionCard,
+} from "@/components/ui";
 import { listEstimatorProducts, type EstimatorProduct } from "@/lib/estimator";
 
 export default function EstimatorProductsPage() {
@@ -32,61 +48,58 @@ export default function EstimatorProductsPage() {
 
   return (
     <div className="space-y-6" data-testid="estimator-products-page">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Products / Scope</h1>
-          <p className="mt-2 text-sm text-gray-600">Read-only catalogue of active products and scope templates</p>
-        </div>
-        <EworksButton type="button" onClick={() => void loadProducts()} disabled={loading}>
-          Refresh
-        </EworksButton>
-      </div>
+      <PageHeader
+        title="Products / Scope"
+        description="Read-only catalogue of active products and scope templates"
+        actions={
+          <SecondaryButton onClick={() => void loadProducts()} disabled={loading}>
+            Refresh
+          </SecondaryButton>
+        }
+      />
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <EworksLabel htmlFor="products-search">Search</EworksLabel>
-        <div className="mt-1 flex gap-2">
-          <EworksInput
+      <FilterBar>
+        <FilterField label="Search" className="min-w-[200px] flex-[2]">
+          <input
             id="products-search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Product name, code, category…"
+            className={filterInputClass}
           />
-          <EworksButton type="button" onClick={() => setSearch(searchInput.trim())}>
-            Search
-          </EworksButton>
+        </FilterField>
+        <div className="flex gap-2 sm:pb-0.5">
+          <PrimaryButton onClick={() => setSearch(searchInput.trim())}>Search</PrimaryButton>
         </div>
-      </div>
+      </FilterBar>
 
       {loading ? (
-        <EworksLoadingScreen message="Loading products…" />
+        <LoadingState message="Loading products…" />
       ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <ErrorState message={error} onRetry={() => void loadProducts()} />
       ) : products.length === 0 ? (
-        <p className="text-sm text-gray-500">No active products found.</p>
+        <EmptyState title="No products" description="No active products found." />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200 text-sm" data-testid="estimator-products-table">
-            <thead className="bg-gray-50">
-              <tr>
-                {["Product", "Code", "Category", "Scope"].map((header) => (
-                  <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
-                    {header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+        <SectionCard padding="none">
+          <DataTable testId="estimator-products-table">
+            <DataTableHead>
+              <DataTableCell header>Product</DataTableCell>
+              <DataTableCell header>Code</DataTableCell>
+              <DataTableCell header>Category</DataTableCell>
+              <DataTableCell header>Scope</DataTableCell>
+            </DataTableHead>
+            <DataTableBody>
               {products.map((product) => (
-                <tr key={product.id}>
-                  <td className="px-4 py-3 font-medium text-gray-900">{product.product_name}</td>
-                  <td className="px-4 py-3 text-gray-700">{product.product_code || "—"}</td>
-                  <td className="px-4 py-3 text-gray-700">{product.category || "—"}</td>
-                  <td className="px-4 py-3 text-gray-700">{product.scope_of_work || "—"}</td>
-                </tr>
+                <DataTableRow key={product.id}>
+                  <DataTableCell className="font-medium text-slate-900">{product.product_name}</DataTableCell>
+                  <DataTableCell>{product.product_code || "—"}</DataTableCell>
+                  <DataTableCell>{product.category || "—"}</DataTableCell>
+                  <DataTableCell>{product.scope_of_work || "—"}</DataTableCell>
+                </DataTableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </DataTableBody>
+          </DataTable>
+        </SectionCard>
       )}
     </div>
   );

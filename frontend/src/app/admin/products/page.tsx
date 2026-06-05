@@ -2,7 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { EworksButton, EworksInput, EworksLabel, EworksLoadingScreen } from "@/components/eworks-ui";
+import { EworksInput, EworksLabel } from "@/components/eworks-ui";
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DateText,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FilterField,
+  LoadingState,
+  PageHeader,
+  PrimaryButton,
+  SecondaryButton,
+  SectionCard,
+  StatusBadge,
+  activeStatusTone,
+  filterInputClass,
+} from "@/components/ui";
 import {
   formatDate,
   getProduct,
@@ -15,31 +35,9 @@ import {
 
 const PAGE_SIZE = 25;
 
-function StatusBadge({ active }: { active: boolean }) {
-  return (
-    <span
-      className={
-        active
-          ? "inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800"
-          : "inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700"
-      }
-    >
-      {active ? "Active" : "Inactive"}
-    </span>
-  );
-}
-
 function ScopeBadge({ available }: { available: boolean }) {
   return (
-    <span
-      className={
-        available
-          ? "inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800"
-          : "inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
-      }
-    >
-      {available ? "Yes" : "Missing"}
-    </span>
+    <StatusBadge tone={available ? "info" : "warning"}>{available ? "Yes" : "Missing"}</StatusBadge>
   );
 }
 
@@ -95,25 +93,25 @@ function ProductEditPanel({
       aria-labelledby="product-edit-title"
       data-testid="product-edit-modal"
     >
-      <div className="w-full max-w-3xl rounded-lg border border-gray-200 bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-4">
+      <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
           <div>
-            <h2 id="product-edit-title" className="text-lg font-semibold text-gray-900">
+            <h2 id="product-edit-title" className="text-lg font-semibold text-slate-900">
               Edit Product / Scope
             </h2>
-            <p className="mt-1 text-sm text-gray-600">eWorks ID: {product.eworks_item_id}</p>
+            <p className="mt-1 text-sm text-slate-600">eWorks ID: {product.eworks_item_id}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+            className="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
           >
             Close
           </button>
         </div>
 
-        <div className="space-y-4 px-6 py-5">
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="space-y-5 px-6 py-6">
+          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
           <EworksLabel>
             Product Name *
@@ -140,7 +138,7 @@ function ProductEditPanel({
               value={scopeOfWork}
               onChange={(event) => setScopeOfWork(event.target.value)}
               rows={5}
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm focus:border-optimal-orange focus:outline-none focus:ring-2 focus:ring-optimal-orange/30"
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               data-testid="product-scope-input"
             />
             {!scopeOfWork.trim() ? (
@@ -156,47 +154,47 @@ function ProductEditPanel({
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               rows={3}
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm focus:border-optimal-orange focus:outline-none focus:ring-2 focus:ring-optimal-orange/30"
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </EworksLabel>
 
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
             <input
               type="checkbox"
               checked={isActive}
               onChange={(event) => setIsActive(event.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-optimal-orange"
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
             />
             Active (visible in estimate product dropdown)
           </label>
 
-          <dl className="grid gap-3 rounded-lg bg-gray-50 p-4 text-sm sm:grid-cols-2">
+          <dl className="grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Source</dt>
-              <dd className="mt-1 text-gray-900">eWorks sync</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Source</dt>
+              <dd className="mt-1 text-slate-900">eWorks sync</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Type</dt>
-              <dd className="mt-1 text-gray-900">{product.type ?? "—"}</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Type</dt>
+              <dd className="mt-1 text-slate-900">{product.type ?? "—"}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Created</dt>
-              <dd className="mt-1 text-gray-900">{formatDate(product.created_at)}</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Created</dt>
+              <dd className="mt-1 text-slate-900">{formatDate(product.created_at)}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Updated</dt>
-              <dd className="mt-1 text-gray-900">{formatDate(product.updated_at)}</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Updated</dt>
+              <dd className="mt-1 text-slate-900">{formatDate(product.updated_at)}</dd>
             </div>
           </dl>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-gray-200 px-6 py-4">
-          <EworksButton type="button" variant="secondary" onClick={onClose} disabled={saving}>
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-100 px-6 py-5">
+          <SecondaryButton onClick={onClose} disabled={saving}>
             Cancel
-          </EworksButton>
-          <EworksButton type="button" onClick={() => void handleSave()} disabled={saving} data-testid="product-save">
+          </SecondaryButton>
+          <PrimaryButton onClick={() => void handleSave()} disabled={saving} data-testid="product-save">
             {saving ? "Saving…" : "Save Changes"}
-          </EworksButton>
+          </PrimaryButton>
         </div>
       </div>
     </div>
@@ -275,158 +273,142 @@ export default function AdminProductsPage() {
 
   return (
     <div className="space-y-6" data-testid="admin-products-page">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Products / Scope</h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Manage product catalogue and scope-of-work templates used in the estimate form.
-          </p>
-        </div>
-        <EworksButton type="button" variant="secondary" onClick={() => void loadProducts()} disabled={loading}>
-          Refresh
-        </EworksButton>
-      </div>
+      <PageHeader
+        title="Products / Scope"
+        description="Manage product catalogue and scope-of-work templates used in the estimate form."
+        actions={
+          <SecondaryButton onClick={() => void loadProducts()} disabled={loading}>
+            Refresh
+          </SecondaryButton>
+        }
+      />
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <EworksLabel>
-            Search
-            <EworksInput
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Name, code, or scope"
-              data-testid="products-search"
-            />
-          </EworksLabel>
-          <EworksLabel>
-            Category / Trade
-            <EworksInput
-              value={categoryFilter}
+      <FilterBar>
+        <FilterField label="Search">
+          <input
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Name, code, or scope"
+            className={filterInputClass}
+            data-testid="products-search"
+          />
+        </FilterField>
+        <FilterField label="Category / Trade">
+          <input
+            value={categoryFilter}
+            onChange={(event) => {
+              setCategoryFilter(event.target.value);
+              setPage(1);
+            }}
+            placeholder="e.g. Plumber"
+            className={filterInputClass}
+            data-testid="products-category-filter"
+          />
+        </FilterField>
+        <FilterField label="Filters" className="sm:min-w-[200px]">
+          <label className="flex min-h-[40px] items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={activeOnly}
               onChange={(event) => {
-                setCategoryFilter(event.target.value);
+                setActiveOnly(event.target.checked);
                 setPage(1);
               }}
-              placeholder="e.g. Plumber"
-              data-testid="products-category-filter"
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              data-testid="products-active-only"
             />
-          </EworksLabel>
-          <div className="flex flex-col justify-end gap-3 lg:col-span-2">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={activeOnly}
-                onChange={(event) => {
-                  setActiveOnly(event.target.checked);
-                  setPage(1);
-                }}
-                className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-optimal-orange"
-                data-testid="products-active-only"
-              />
-              Active only
-            </label>
-            <EworksButton type="button" onClick={applySearch}>
-              Apply search
-            </EworksButton>
-          </div>
+            Active only
+          </label>
+        </FilterField>
+        <div className="flex shrink-0 items-end">
+          <PrimaryButton onClick={applySearch}>Apply search</PrimaryButton>
         </div>
-      </div>
+      </FilterBar>
 
       {loading ? (
-        <EworksLoadingScreen message="Loading products…" />
+        <LoadingState message="Loading products…" />
       ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-          <p className="text-sm text-red-600">{error}</p>
-        </div>
+        <ErrorState message={error} />
       ) : products.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-6 text-center">
-          <p className="text-sm text-gray-600">No products match your filters.</p>
-        </div>
+        <EmptyState title="No products found" description="No products match your filters." />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm" data-testid="products-table">
-              <thead className="bg-gray-50">
-                <tr>
-                  {[
-                    "Product Name",
-                    "Product Code",
-                    "Category",
-                    "Scope Available",
-                    "Active",
-                    "eWorks ID",
-                    "Updated At",
-                    "Actions",
-                  ].map((heading) => (
-                    <th
-                      key={heading}
-                      scope="col"
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+        <SectionCard padding="none">
+          <DataTable testId="products-table" className="rounded-none border-0 shadow-none">
+            <DataTableHead>
+              {[
+                "Product Name",
+                "Product Code",
+                "Category",
+                "Scope Available",
+                "Active",
+                "eWorks ID",
+                "Updated At",
+                "Actions",
+              ].map((heading) => (
+                <DataTableCell key={heading} header>
+                  {heading}
+                </DataTableCell>
+              ))}
+            </DataTableHead>
+            <DataTableBody>
+              {products.map((product) => (
+                <DataTableRow key={product.id} data-testid={`product-row-${product.id}`}>
+                  <DataTableCell className="font-medium text-slate-900">{product.product_name}</DataTableCell>
+                  <DataTableCell>{product.product_code ?? "—"}</DataTableCell>
+                  <DataTableCell>{product.category ?? "—"}</DataTableCell>
+                  <DataTableCell>
+                    <ScopeBadge available={hasScope(product)} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <StatusBadge tone={activeStatusTone(product.is_active)}>
+                      {product.is_active ? "Active" : "Inactive"}
+                    </StatusBadge>
+                  </DataTableCell>
+                  <DataTableCell>{product.eworks_item_id}</DataTableCell>
+                  <DataTableCell>
+                    <DateText value={product.updated_at} includeTime />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <button
+                      type="button"
+                      onClick={() => void openEdit(product.id)}
+                      className="text-sm font-medium text-blue-600 underline-offset-2 hover:text-blue-700 hover:underline"
+                      data-testid={`product-edit-${product.id}`}
                     >
-                      {heading}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 bg-white">
-                {products.map((product) => (
-                  <tr key={product.id} data-testid={`product-row-${product.id}`}>
-                    <td className="px-4 py-3 font-medium text-gray-900">{product.product_name}</td>
-                    <td className="px-4 py-3 text-gray-700">{product.product_code ?? "—"}</td>
-                    <td className="px-4 py-3 text-gray-700">{product.category ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      <ScopeBadge available={hasScope(product)} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge active={product.is_active} />
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{product.eworks_item_id}</td>
-                    <td className="px-4 py-3 text-gray-700">{formatDate(product.updated_at)}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => void openEdit(product.id)}
-                        className="text-sm font-medium text-gray-900 underline-offset-2 hover:underline"
-                        data-testid={`product-edit-${product.id}`}
-                      >
-                        View / Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      View / Edit
+                    </button>
+                  </DataTableCell>
+                </DataTableRow>
+              ))}
+            </DataTableBody>
+          </DataTable>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-sm text-gray-600">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
             <p>
               Page {page} of {lastPage} · {total} total
             </p>
             <div className="flex gap-2">
-              <EworksButton
-                type="button"
-                variant="secondary"
+              <SecondaryButton
                 disabled={page <= 1 || loading}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
                 Previous
-              </EworksButton>
-              <EworksButton
-                type="button"
-                variant="secondary"
+              </SecondaryButton>
+              <SecondaryButton
                 disabled={page >= lastPage || loading}
                 onClick={() => setPage((current) => current + 1)}
                 data-testid="products-load-more"
               >
                 Next
-              </EworksButton>
+              </SecondaryButton>
             </div>
           </div>
-        </div>
+        </SectionCard>
       )}
 
       {detailLoading && !selectedProduct ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20">
-          <EworksLoadingScreen message="Loading product…" />
+          <LoadingState message="Loading product…" />
         </div>
       ) : null}
 
