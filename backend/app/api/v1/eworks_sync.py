@@ -1,54 +1,236 @@
 """Admin-only endpoints for triggering and viewing eWorks Quote/Job sync.
 
 Read-only from eWorks: no records are written back to eWorks.
+Sync jobs run in background threads so they continue if the client navigates away.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import cast, or_, String, and_
 
 from app.auth.dependencies import CurrentUser, require_roles
 from app.core.exceptions import AppError, success_response
 from app.core.security import UserRole
 from app.db.session import DbSession
-from app.models.eworks_sync import EworksJob, EworksQuote, EworksSyncRun
+from app.models.eworks_sync import EworksAttachment, EworksJob, EworksQuote, EworksSyncRun
+from app.schemas.quote_assignment import AssignmentCreate, AssignmentRead
 from app.schemas.eworks_sync_api import (
+    EworksActiveSyncRun,
+    EworksAttachmentDetailRead,
+    EworksAttachmentSafeRead,
     EworksJobRead,
+    EworksJobSafeDetailRead,
     EworksQuoteDetailRead,
     EworksQuoteRead,
+    EworksQuoteSafeDetailRead,
     EworksSyncRequest,
     EworksSyncRunRead,
+    EworksSyncStartResponse,
     EworksSyncStatusResponse,
 )
-from app.services.audit_helpers import record_audit
-from app.services.eworks_sync_service import (
-    sync_all_eworks,
-    sync_jobs_from_eworks,
-    sync_quotes_from_eworks,
+from app.services.eworks_sync_runner import get_running_sync_run, schedule_eworks_sync
+from app.services.eworks_attachment_sync_service import (
+    list_attachments_for_parent,
+    serialize_attachment_admin,
+    serialize_attachment_safe,
 )
+from app.services.eworks_safe_detail_service import build_job_safe_detail, build_quote_safe_detail
+from app.services.quote_assignment_service import create_assignment, list_assignments_for_quote
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/eworks-sync", tags=["eworks-sync"])
 
 AdminOnly = Annotated[CurrentUser, Depends(require_roles(UserRole.ADMIN))]
+ManagerWrite = Annotated[CurrentUser, Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER))]
 StaffRead = Annotated[CurrentUser, Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.ESTIMATOR))]
 
 
 def _build_filters(req: EworksSyncRequest) -> dict:
-    return {
+    from app.services.eworks_sync_service import resolve_sync_filters
+
+    base = {
         "date_from": req.date_from,
         "date_to": req.date_to,
         "status": req.status,
         "page_limit": req.page_limit,
     }
+    return resolve_sync_filters(base, full=req.full)
+
+
+def _parse_optional_int(value: str | None) -> int | None:
+    if not value or not str(value).strip():
+        return None
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return None
+
+
+def _apply_quote_search(q, search: str | None):
+    if not search:
+        return q
+    pattern = f"%{search.strip()}%"
+    numeric = _parse_optional_int(search)
+    clauses = [
+        EworksQuote.quote_ref.ilike(pattern),
+        EworksQuote.customer_name.ilike(pattern),
+        EworksQuote.description.ilike(pattern),
+        EworksQuote.status_name.ilike(pattern),
+    ]
+    if numeric is not None:
+        clauses.append(EworksQuote.eworks_quote_id == numeric)
+    clauses.append(EworksQuote.status.ilike(pattern))
+    clauses.append(cast(EworksQuote.tags, String).ilike(pattern))
+    return q.filter(or_(*clauses))
+
+
+def _apply_job_search(q, search: str | None):
+    if not search:
+        return q
+    pattern = f"%{search.strip()}%"
+    numeric = _parse_optional_int(search)
+    clauses = [
+        EworksJob.job_ref.ilike(pattern),
+        EworksJob.customer_name.ilike(pattern),
+        EworksJob.description.ilike(pattern),
+        EworksJob.status_name.ilike(pattern),
+    ]
+    if numeric is not None:
+        clauses.append(EworksJob.eworks_job_id == numeric)
+        clauses.append(EworksJob.eworks_quote_id == numeric)
+    clauses.append(EworksJob.status.ilike(pattern))
+    clauses.append(cast(EworksJob.tags, String).ilike(pattern))
+    return q.filter(or_(*clauses))
+
+
+def _apply_status_filter(q, status: str | None, status_col, status_name_col, raw_payload_col=None):
+    if not status or not str(status).strip():
+        return q
+    value = str(status).strip()
+    pattern = f"%{value}%"
+    clauses = [
+        status_col == value,
+        status_col.ilike(pattern),
+        status_name_col == value,
+        status_name_col.ilike(pattern),
+    ]
+    if raw_payload_col is not None:
+        raw = cast(raw_payload_col, String)
+        clauses.extend(
+            [
+                raw.ilike(f'%"status": {value}%'),
+                raw.ilike(f'%"status": "{value}"%'),
+                raw.ilike(f'%"Status": {value}%'),
+                raw.ilike(f'%"Status": "{value}"%'),
+                raw.ilike(f'%"id": {value}%'),
+                raw.ilike(f'%"id": "{value}"%'),
+            ]
+        )
+    return q.filter(or_(*clauses))
+
+
+def _serialize_tags(tags: list | None) -> list[str]:
+    from app.services.manager_dashboard_service import _parse_tags_value
+
+    return _parse_tags_value(tags)
+
+
+def _apply_tag_filter(q, tag: str | None, tags_col, raw_payload_col=None):
+    from app.services.manager_dashboard_service import is_awaiting_supplier_tag, is_ready_to_send_tag
+
+    if not tag or not str(tag).strip():
+        return q
+    tag_text = str(tag).strip()
+    pattern = f"%{tag_text}%"
+    clauses: list = [cast(tags_col, String).ilike(pattern)]
+
+    if is_awaiting_supplier_tag(tag_text):
+        clauses.append(cast(tags_col, String).ilike("%awaiting supplier%"))
+    elif is_ready_to_send_tag(tag_text):
+        clauses.append(
+            and_(
+                cast(tags_col, String).ilike("%ready to send%"),
+                or_(cast(tags_col, String).ilike("%quote%"), cast(tags_col, String).ilike("%quotes%")),
+            )
+        )
+
+    if raw_payload_col is not None:
+        raw = cast(raw_payload_col, String)
+        if is_awaiting_supplier_tag(tag_text):
+            clauses.append(raw.ilike("%awaiting supplier%"))
+        elif is_ready_to_send_tag(tag_text):
+            clauses.append(
+                and_(
+                    raw.ilike("%ready to send%"),
+                    or_(raw.ilike("%quote%"), raw.ilike("%quotes%")),
+                )
+            )
+        else:
+            for key in ("tags", "tag_names", "labels", "categories"):
+                clauses.append(raw.ilike(f'%"{key}"%{pattern[1:-1]}%'))
+            clauses.append(raw.ilike(pattern))
+    return q.filter(or_(*clauses))
+
+
+def _serialize_run(run: EworksSyncRun) -> dict:
+    metadata = run.metadata_ or {}
+    return EworksSyncRunRead(
+        id=str(run.id),
+        sync_type=run.sync_type,
+        status=run.status,
+        started_at=str(run.started_at) if run.started_at else None,
+        finished_at=str(run.finished_at) if run.finished_at else None,
+        fetched_count=run.fetched_count,
+        created_count=run.created_count,
+        updated_count=run.updated_count,
+        failed_count=run.failed_count,
+        error_message=run.error_message,
+        metadata=metadata,
+    ).model_dump()
+
+
+def _serialize_active_run(run: EworksSyncRun | None) -> EworksActiveSyncRun | None:
+    if run is None:
+        return None
+    metadata = run.metadata_ or {}
+    return EworksActiveSyncRun(
+        run_id=str(run.id),
+        sync_type=run.sync_type,
+        started_at=str(run.started_at) if run.started_at else None,
+        phase=metadata.get("phase"),
+    )
+
+
+def _start_background_sync(db: DbSession, actor: AdminOnly, sync_type: str, req: EworksSyncRequest) -> dict:
+    try:
+        run = schedule_eworks_sync(
+            db,
+            sync_type=sync_type,
+            filters=_build_filters(req),
+            user_id=actor.id,
+            actor_email=actor.email,
+        )
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    return success_response(
+        EworksSyncStartResponse(
+            run_id=str(run.id),
+            sync_type=sync_type,
+            status="running",
+            message="Sync started in background. Poll /eworks-sync/runs/{run_id} for progress.",
+        ).model_dump()
+    )
 
 
 # ---------------------------------------------------------------------------
-# Sync trigger endpoints (admin only)
+# Sync trigger endpoints (admin only, background)
 # ---------------------------------------------------------------------------
 
 @router.post("/quotes")
@@ -57,44 +239,8 @@ def trigger_quotes_sync(
     actor: AdminOnly,
     req: EworksSyncRequest = EworksSyncRequest(),
 ):
-    """Fetch all eWorks Quotes and upsert into local DB (admin only, read-only from eWorks)."""
-    record_audit(
-        db,
-        actor=actor,
-        action="eworks_quotes_sync_started",
-        entity_type="eworks_sync",
-        entity_id=None,
-        metadata={"filters": req.model_dump(exclude_none=True)},
-    )
-    try:
-        summary, run = sync_quotes_from_eworks(db, filters=_build_filters(req), user_id=actor.id)
-        db.commit()
-    except AppError as exc:
-        db.rollback()
-        record_audit(db, actor=actor, action="eworks_quotes_sync_failed", entity_type="eworks_sync", entity_id=None, metadata={"error": exc.message})
-        db.commit()
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    except Exception as exc:
-        db.rollback()
-        record_audit(db, actor=actor, action="eworks_quotes_sync_failed", entity_type="eworks_sync", entity_id=None, metadata={"error": str(exc)})
-        db.commit()
-        raise HTTPException(status_code=500, detail="Quotes sync failed") from exc
-
-    record_audit(
-        db,
-        actor=actor,
-        action="eworks_quotes_sync_completed",
-        entity_type="eworks_sync",
-        entity_id=str(run.id),
-        metadata={
-            "fetched": summary.fetched,
-            "created": summary.created,
-            "updated": summary.updated,
-            "failed": summary.failed,
-        },
-    )
-    db.commit()
-    return success_response({"summary": summary.model_dump(), "run_id": str(run.id)})
+    """Start background sync of eWorks Quotes into local DB (admin only, read-only from eWorks)."""
+    return _start_background_sync(db, actor, "quotes", req)
 
 
 @router.post("/jobs")
@@ -103,44 +249,8 @@ def trigger_jobs_sync(
     actor: AdminOnly,
     req: EworksSyncRequest = EworksSyncRequest(),
 ):
-    """Fetch all eWorks Jobs and upsert into local DB (admin only, read-only from eWorks)."""
-    record_audit(
-        db,
-        actor=actor,
-        action="eworks_jobs_sync_started",
-        entity_type="eworks_sync",
-        entity_id=None,
-        metadata={"filters": req.model_dump(exclude_none=True)},
-    )
-    try:
-        summary, run = sync_jobs_from_eworks(db, filters=_build_filters(req), user_id=actor.id)
-        db.commit()
-    except AppError as exc:
-        db.rollback()
-        record_audit(db, actor=actor, action="eworks_jobs_sync_failed", entity_type="eworks_sync", entity_id=None, metadata={"error": exc.message})
-        db.commit()
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    except Exception as exc:
-        db.rollback()
-        record_audit(db, actor=actor, action="eworks_jobs_sync_failed", entity_type="eworks_sync", entity_id=None, metadata={"error": str(exc)})
-        db.commit()
-        raise HTTPException(status_code=500, detail="Jobs sync failed") from exc
-
-    record_audit(
-        db,
-        actor=actor,
-        action="eworks_jobs_sync_completed",
-        entity_type="eworks_sync",
-        entity_id=str(run.id),
-        metadata={
-            "fetched": summary.fetched,
-            "created": summary.created,
-            "updated": summary.updated,
-            "failed": summary.failed,
-        },
-    )
-    db.commit()
-    return success_response({"summary": summary.model_dump(), "run_id": str(run.id)})
+    """Start background sync of eWorks Jobs into local DB (admin only, read-only from eWorks)."""
+    return _start_background_sync(db, actor, "jobs", req)
 
 
 @router.post("/all")
@@ -149,36 +259,8 @@ def trigger_all_sync(
     actor: AdminOnly,
     req: EworksSyncRequest = EworksSyncRequest(),
 ):
-    """Fetch all eWorks Quotes and Jobs and upsert both (admin only, read-only from eWorks)."""
-    record_audit(
-        db,
-        actor=actor,
-        action="eworks_all_sync_started",
-        entity_type="eworks_sync",
-        entity_id=None,
-        metadata={"filters": req.model_dump(exclude_none=True)},
-    )
-    try:
-        result = sync_all_eworks(db, filters=_build_filters(req), user_id=actor.id)
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Sync all failed") from exc
-
-    record_audit(
-        db,
-        actor=actor,
-        action="eworks_all_sync_completed",
-        entity_type="eworks_sync",
-        entity_id=None,
-        metadata={
-            "quotes_fetched": result.quotes.fetched,
-            "jobs_fetched": result.jobs.fetched,
-            "errors": result.errors,
-        },
-    )
-    db.commit()
-    return success_response(result.model_dump())
+    """Start background sync of eWorks Quotes and Jobs (admin only, read-only from eWorks)."""
+    return _start_background_sync(db, actor, "all", req)
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +269,7 @@ def trigger_all_sync(
 
 @router.get("/status")
 def get_sync_status(db: DbSession, actor: AdminOnly):
-    """Return counts and last sync timestamps for local eWorks data (admin only)."""
+    """Return counts, last sync timestamps, and any active background sync."""
     from app.core.config import settings as cfg
 
     quotes_count = db.query(EworksQuote).count()
@@ -203,6 +285,7 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
         .order_by(EworksJob.synced_at.desc())
         .first()
     )
+    active = get_running_sync_run(db)
 
     return success_response(
         EworksSyncStatusResponse(
@@ -211,6 +294,7 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
             last_quotes_sync=str(last_q[0]) if last_q else None,
             last_jobs_sync=str(last_j[0]) if last_j else None,
             eworks_api_enabled=bool(cfg.eworks_api_enabled),
+            active_sync=_serialize_active_run(active),
         ).model_dump()
     )
 
@@ -236,25 +320,20 @@ def list_sync_runs(
     )
     total = db.query(EworksSyncRun).count()
     return success_response({
-        "items": [
-            EworksSyncRunRead(
-                id=str(r.id),
-                sync_type=r.sync_type,
-                status=r.status,
-                started_at=str(r.started_at) if r.started_at else None,
-                finished_at=str(r.finished_at) if r.finished_at else None,
-                fetched_count=r.fetched_count,
-                created_count=r.created_count,
-                updated_count=r.updated_count,
-                failed_count=r.failed_count,
-                error_message=r.error_message,
-            ).model_dump()
-            for r in runs
-        ],
+        "items": [_serialize_run(r) for r in runs],
         "total": total,
         "limit": limit,
         "offset": offset,
     })
+
+
+@router.get("/runs/{run_id}")
+def get_sync_run(db: DbSession, run_id: UUID, actor: AdminOnly):
+    """Return a single sync run for progress polling (admin only)."""
+    run = db.query(EworksSyncRun).filter(EworksSyncRun.id == run_id).one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Sync run not found")
+    return success_response(_serialize_run(run))
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +348,7 @@ def list_quotes(
     customer_id: int | None = Query(default=None),
     customer_name: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
@@ -277,19 +357,13 @@ def list_quotes(
     """List locally-synced eWorks Quotes with pagination and filtering."""
     q = db.query(EworksQuote)
 
-    if search:
-        pattern = f"%{search}%"
-        q = q.filter(
-            EworksQuote.quote_ref.ilike(pattern)
-            | EworksQuote.customer_name.ilike(pattern)
-            | EworksQuote.description.ilike(pattern)
-        )
+    q = _apply_quote_search(q, search)
     if customer_id is not None:
         q = q.filter(EworksQuote.customer_id == customer_id)
     if customer_name:
-        q = q.filter(EworksQuote.customer_name.ilike(f"%{customer_name}%"))
-    if status:
-        q = q.filter(EworksQuote.status == status)
+        q = q.filter(EworksQuote.customer_name.ilike(f"%{customer_name.strip()}%"))
+    q = _apply_status_filter(q, status, EworksQuote.status, EworksQuote.status_name, EworksQuote.raw_payload)
+    q = _apply_tag_filter(q, tag, EworksQuote.tags, EworksQuote.raw_payload)
     if date_from:
         q = q.filter(EworksQuote.quote_date >= date_from)
     if date_to:
@@ -317,6 +391,7 @@ def list_quotes(
                 subtotal=float(r.subtotal) if r.subtotal is not None else None,
                 vat=float(r.vat) if r.vat is not None else None,
                 total=float(r.total) if r.total is not None else None,
+                tags=_serialize_tags(r.tags),
                 synced_at=str(r.synced_at) if r.synced_at else None,
             ).model_dump()
             for r in rows
@@ -325,6 +400,17 @@ def list_quotes(
         "limit": limit,
         "offset": offset,
     })
+
+
+@router.get("/quotes/{quote_id}/safe")
+def get_quote_safe_detail(db: DbSession, quote_id: int, actor: StaffRead):
+    """Return grouped manager-safe quote detail without raw_payload (admin/manager/estimator)."""
+    row = db.query(EworksQuote).filter(EworksQuote.id == quote_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    return success_response(
+        EworksQuoteSafeDetailRead.model_validate(build_quote_safe_detail(db, row)).model_dump()
+    )
 
 
 @router.get("/quotes/{quote_id}")
@@ -351,6 +437,7 @@ def get_quote_detail(db: DbSession, quote_id: int, actor: AdminOnly):
             subtotal=float(row.subtotal) if row.subtotal is not None else None,
             vat=float(row.vat) if row.vat is not None else None,
             total=float(row.total) if row.total is not None else None,
+            tags=_serialize_tags(row.tags),
             synced_at=str(row.synced_at) if row.synced_at else None,
             notes=row.notes,
             customer_notes=row.customer_notes,
@@ -369,6 +456,7 @@ def list_jobs(
     customer_id: int | None = Query(default=None),
     customer_name: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
@@ -377,19 +465,13 @@ def list_jobs(
     """List locally-synced eWorks Jobs with pagination and filtering."""
     q = db.query(EworksJob)
 
-    if search:
-        pattern = f"%{search}%"
-        q = q.filter(
-            EworksJob.job_ref.ilike(pattern)
-            | EworksJob.customer_name.ilike(pattern)
-            | EworksJob.description.ilike(pattern)
-        )
+    q = _apply_job_search(q, search)
     if customer_id is not None:
         q = q.filter(EworksJob.customer_id == customer_id)
     if customer_name:
-        q = q.filter(EworksJob.customer_name.ilike(f"%{customer_name}%"))
-    if status:
-        q = q.filter(EworksJob.status == status)
+        q = q.filter(EworksJob.customer_name.ilike(f"%{customer_name.strip()}%"))
+    q = _apply_status_filter(q, status, EworksJob.status, EworksJob.status_name, EworksJob.raw_payload)
+    q = _apply_tag_filter(q, tag, EworksJob.tags, EworksJob.raw_payload)
     if date_from:
         q = q.filter(EworksJob.job_date >= date_from)
     if date_to:
@@ -415,6 +497,7 @@ def list_jobs(
                 subtotal=float(r.subtotal) if r.subtotal is not None else None,
                 vat=float(r.vat) if r.vat is not None else None,
                 total=float(r.total) if r.total is not None else None,
+                tags=_serialize_tags(r.tags),
                 synced_at=str(r.synced_at) if r.synced_at else None,
             ).model_dump()
             for r in rows
@@ -423,6 +506,17 @@ def list_jobs(
         "limit": limit,
         "offset": offset,
     })
+
+
+@router.get("/jobs/{job_id}/safe")
+def get_job_safe_detail(db: DbSession, job_id: int, actor: StaffRead):
+    """Return grouped manager-safe job detail without raw_payload (admin/manager/estimator)."""
+    row = db.query(EworksJob).filter(EworksJob.id == job_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return success_response(
+        EworksJobSafeDetailRead.model_validate(build_job_safe_detail(db, row)).model_dump()
+    )
 
 
 @router.get("/jobs/{job_id}")
@@ -450,3 +544,90 @@ def get_job_detail(db: DbSession, job_id: int, actor: AdminOnly):
         "synced_at": str(row.synced_at) if row.synced_at else None,
         "raw_payload": row.raw_payload,
     })
+
+
+@router.get("/quotes/{quote_id}/attachments")
+def list_quote_attachments(db: DbSession, quote_id: int, actor: StaffRead):
+    """List safe attachment metadata for a locally-synced quote."""
+    row = db.query(EworksQuote).filter(EworksQuote.id == quote_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    attachments = list_attachments_for_parent(db, parent_type="quote", parent_local_id=row.id)
+    return success_response(
+        {
+            "items": [
+                EworksAttachmentSafeRead.model_validate(serialize_attachment_safe(item)).model_dump()
+                for item in attachments
+            ],
+            "total": len(attachments),
+        }
+    )
+
+
+@router.get("/jobs/{job_id}/attachments")
+def list_job_attachments(db: DbSession, job_id: int, actor: StaffRead):
+    """List safe attachment metadata for a locally-synced job."""
+    row = db.query(EworksJob).filter(EworksJob.id == job_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    attachments = list_attachments_for_parent(db, parent_type="job", parent_local_id=row.id)
+    return success_response(
+        {
+            "items": [
+                EworksAttachmentSafeRead.model_validate(serialize_attachment_safe(item)).model_dump()
+                for item in attachments
+            ],
+            "total": len(attachments),
+        }
+    )
+
+
+@router.get("/attachments/{attachment_id}")
+def get_attachment_detail(db: DbSession, attachment_id: int, actor: AdminOnly):
+    """Return attachment detail including raw_payload (admin only)."""
+    row = db.query(EworksAttachment).filter(EworksAttachment.id == attachment_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return success_response(
+        EworksAttachmentDetailRead.model_validate(serialize_attachment_admin(row)).model_dump()
+    )
+
+
+@router.get("/attachments/{attachment_id}/download")
+def download_attachment(db: DbSession, attachment_id: int, actor: StaffRead):
+    """On-demand attachment download (disabled by default until eWorks endpoint is confirmed)."""
+    from app.core.config import settings
+
+    row = db.query(EworksAttachment).filter(EworksAttachment.id == attachment_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if not settings.eworks_sync_attachment_files_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Attachment file download is disabled (EWORKS_SYNC_ATTACHMENT_FILES_ENABLED=false)",
+        )
+    raise HTTPException(status_code=501, detail="Attachment download endpoint not configured")
+
+
+@router.get("/quotes/{quote_id}/assignments")
+def list_quote_assignments(db: DbSession, quote_id: int, actor: ManagerWrite):
+    """List assignments for a locally-synced quote (admin/manager)."""
+    items = list_assignments_for_quote(db, quote_id)
+    return success_response(
+        {
+            "items": [AssignmentRead.model_validate(item).model_dump() for item in items],
+            "total": len(items),
+        }
+    )
+
+
+@router.post("/quotes/{quote_id}/assignments")
+def create_quote_assignment(db: DbSession, quote_id: int, body: AssignmentCreate, actor: ManagerWrite):
+    """Assign a synced quote to a registered or external estimator/engineer."""
+    data = create_assignment(
+        db,
+        quote_id=quote_id,
+        payload=body.model_dump(mode="json"),
+        current_user=actor,
+    )
+    return success_response(AssignmentRead.model_validate(data).model_dump())

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { EstimatorQuotesTable } from "@/components/estimator/estimator-quotes-table";
+import { AssignmentEstimateButton } from "@/components/quote-assignment-estimate-button";
 import {
+  EmptyState,
   ErrorState,
   FilterBar,
   FilterField,
@@ -18,11 +20,13 @@ import {
 } from "@/components/ui";
 
 import { listEstimatorQuotes, type EstimatorQuoteRow } from "@/lib/estimator";
+import { listMyQuoteAssignments, type QuoteAssignment } from "@/lib/quote-assignments";
 
 const PAGE_SIZE = 25;
 
 export default function EstimatorQuotesPage() {
   const [quotes, setQuotes] = useState<EstimatorQuoteRow[]>([]);
+  const [assignedQuotes, setAssignedQuotes] = useState<QuoteAssignment[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -50,9 +54,13 @@ export default function EstimatorQuotesPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await listEstimatorQuotes(filters);
+      const [result, assignments] = await Promise.all([
+        listEstimatorQuotes(filters),
+        listMyQuoteAssignments(),
+      ]);
       setQuotes(result.items);
       setTotal(result.total);
+      setAssignedQuotes(assignments.filter((item) => item.assignment_type === "estimator"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load quotes");
       setQuotes([]);
@@ -131,6 +139,38 @@ export default function EstimatorQuotesPage() {
           </SecondaryButton>
         </div>
       </FilterBar>
+
+      <SectionCard title="Assigned Quotes" testId="estimator-quotes-assigned">
+        {assignedQuotes.length === 0 ? (
+          <EmptyState
+            title="No assigned quotes"
+            description="Quotes assigned to you by a manager will appear here."
+            className="border-0 bg-transparent py-4"
+          />
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {assignedQuotes.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center justify-between gap-4 py-3 text-sm first:pt-0 last:pb-0"
+                data-testid={`estimator-quotes-assignment-${item.id}`}
+              >
+                <div>
+                  <span className="font-medium text-slate-900">{item.quote_ref ?? item.eworks_quote_id}</span>
+                  <span className="ml-2 text-slate-600">
+                    {item.quote_summary?.customer_name ?? "Customer not available"}
+                  </span>
+                </div>
+                <AssignmentEstimateButton
+                  assignment={item}
+                  variant="link"
+                  testId={`estimator-quotes-start-${item.id}`}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
 
       {loading ? (
         <LoadingState message="Loading quotes…" />

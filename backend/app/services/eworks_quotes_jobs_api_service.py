@@ -180,3 +180,29 @@ def fetch_all_jobs(
     if status:
         extra["status"] = status
     return _fetch_all(resource_path="Job", extra_params=extra or None, page_limit=page_limit)
+
+
+def fetch_quote_attachments(
+    eworks_quote_id: int,
+) -> list[dict[str, Any]]:
+    """Optional: fetch attachments from eWorks Quote detail endpoint if supported."""
+    if not settings.eworks_api_enabled:
+        raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
+    base_url, api_key = _require_eworks_credentials()
+    url = f"{base_url}/Quote/{eworks_quote_id}/Attachments"
+    with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
+        result = _fetch_page(client, url=url, api_key=api_key, page=1, per_page=100)
+    return result.records
+
+
+def fetch_job_attachments(
+    eworks_job_id: int,
+) -> list[dict[str, Any]]:
+    """Optional: fetch attachments from eWorks Job detail endpoint if supported."""
+    if not settings.eworks_api_enabled:
+        raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
+    base_url, api_key = _require_eworks_credentials()
+    url = f"{base_url}/Job/{eworks_job_id}/Attachments"
+    with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
+        result = _fetch_page(client, url=url, api_key=api_key, page=1, per_page=100)
+    return result.records

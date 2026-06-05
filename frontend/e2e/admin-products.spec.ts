@@ -118,4 +118,100 @@ test.describe("Admin products page", () => {
     await page.getByTestId("product-save").click();
     await expect(page.getByTestId("product-edit-modal")).not.toBeVisible();
   });
+
+  test("admin sees Sync from eWorks button and can run mocked sync", async ({ page }) => {
+    let listCalls = 0;
+    await mockAuthMe(page, "admin");
+    await page.route("**/api/v1/products**", async (route) => {
+      const url = new URL(route.request().url());
+      if (route.request().method() === "GET" && url.pathname.endsWith("/products")) {
+        listCalls += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            data: mockProducts,
+            meta: { total: 1, page: 1, per_page: 25, last_page: 1 },
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await page.route("**/api/v1/integrations/eworks/products/sync", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            message: "eWorks products synced successfully",
+            summary: {
+              fetched: 12,
+              created: 3,
+              updated: 4,
+              skipped: 5,
+              failed: 0,
+              errors: [],
+            },
+          },
+        }),
+      });
+    });
+
+    await page.goto("/admin/products");
+    await expect(page.getByTestId("products-sync-eworks")).toBeVisible();
+    await expect(page.getByTestId("products-sync-helper")).toContainText("does not write to eWorks");
+    await page.getByTestId("products-sync-eworks").click();
+    await expect(page.getByTestId("products-sync-summary")).toContainText("Product sync completed");
+    await expect(page.getByTestId("products-table")).toBeVisible();
+    expect(listCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  test("admin sees warning when sync completes with failed items", async ({ page }) => {
+    await mockAuthMe(page, "admin");
+    await page.route("**/api/v1/products**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: mockProducts,
+          meta: { total: 1, page: 1, per_page: 25, last_page: 1 },
+        }),
+      });
+    });
+    await page.route("**/api/v1/integrations/eworks/products/sync", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            message: "eWorks products synced successfully",
+            summary: {
+              fetched: 12,
+              created: 3,
+              updated: 4,
+              skipped: 4,
+              failed: 1,
+              errors: [
+                {
+                  eworks_item_id: "1404",
+                  item_name: "Bad Item",
+                  error: "missing item_name",
+                },
+              ],
+            },
+          },
+        }),
+      });
+    });
+
+    await page.goto("/admin/products");
+    await page.getByTestId("products-sync-eworks").click();
+    await expect(page.getByTestId("products-sync-summary")).toContainText("Sync completed with 1 failed item");
+    await expect(page.getByTestId("products-sync-error-list")).toContainText("missing item_name");
+  });
 });

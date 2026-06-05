@@ -12,9 +12,10 @@ from app.models.product import Product
 from app.schemas.eworks_item_api import (
     EworksItemApiResponse,
     is_products_item,
-    map_item_to_product_fields,
+    prepare_product_sync_fields,
+    sanitize_sync_error,
 )
-from app.schemas.product import ProductSyncSummary
+from app.schemas.product import ProductSyncItemError, ProductSyncSummary
 
 logger = logging.getLogger(__name__)
 
@@ -96,46 +97,105 @@ def fetch_all_eworks_items() -> list:
                 break
             page = result.current_page + 1
 
+    logger.info("eWorks product sync fetched %s total records", len(all_records))
     return all_records
+
+
+def _item_display_name(record) -> str:
+    name = (getattr(record, "item_name", None) or "").strip()
+    if name:
+        return name[:200]
+    item_id = getattr(record, "id", None)
+    return str(item_id) if item_id is not None else "unknown"
+
+
+def _log_failed_item(record, error: str) -> None:
+    logger.warning(
+        "eWorks product sync failed item id=%s name=%s reason=%s",
+        getattr(record, "id", None),
+        _item_display_name(record),
+        error,
+    )
+
+
+def _append_sync_error(
+    errors: list[ProductSyncItemError],
+    record,
+    error: str,
+) -> None:
+    safe_error = sanitize_sync_error(error)
+    errors.append(
+        ProductSyncItemError(
+            eworks_item_id=str(getattr(record, "id", "") or ""),
+            item_name=_item_display_name(record),
+            error=safe_error,
+        )
+    )
+    _log_failed_item(record, safe_error)
 
 
 def sync_products_from_eworks(db: Session) -> ProductSyncSummary:
     records = fetch_all_eworks_items()
-    inserted = 0
+    created = 0
     updated = 0
     skipped = 0
+    failed = 0
+    errors: list[ProductSyncItemError] = []
+    seen_item_ids: set[int] = set()
+    product_candidates = 0
 
     for record in records:
         if not is_products_item(record):
             skipped += 1
             continue
 
-        fields = map_item_to_product_fields(record)
-        eworks_item_id = fields["eworks_item_id"]
-        existing = db.query(Product).filter(Product.eworks_item_id == eworks_item_id).one_or_none()
+        product_candidates += 1
+        item_id = record.id
 
-        if existing is None:
-            db.add(Product(**fields))
-            inserted += 1
-        else:
-            for key, value in fields.items():
-                if key == "eworks_item_id":
-                    continue
-                setattr(existing, key, value)
-            updated += 1
+        if item_id in seen_item_ids:
+            failed += 1
+            _append_sync_error(errors, record, "duplicate eworks_item_id in sync batch")
+            continue
+        seen_item_ids.add(item_id)
 
-    db.flush()
+        fields, prep_error = prepare_product_sync_fields(record)
+        if prep_error or fields is None:
+            failed += 1
+            _append_sync_error(errors, record, prep_error or "invalid item data")
+            continue
+
+        try:
+            with db.begin_nested():
+                existing = db.query(Product).filter(Product.eworks_item_id == item_id).one_or_none()
+                if existing is None:
+                    db.add(Product(**fields))
+                    created += 1
+                else:
+                    for key, value in fields.items():
+                        if key == "eworks_item_id":
+                            continue
+                        setattr(existing, key, value)
+                    updated += 1
+                db.flush()
+        except Exception as exc:
+            failed += 1
+            _append_sync_error(errors, record, str(exc))
+
     summary = ProductSyncSummary(
-        total_fetched=len(records),
-        inserted=inserted,
+        fetched=len(records),
+        created=created,
         updated=updated,
         skipped=skipped,
+        failed=failed,
+        errors=errors,
     )
     logger.info(
-        "eWorks product sync completed: fetched=%s inserted=%s updated=%s skipped=%s",
-        summary.total_fetched,
-        summary.inserted,
+        "eWorks product sync completed: fetched=%s candidates=%s created=%s updated=%s skipped=%s failed=%s",
+        summary.fetched,
+        product_candidates,
+        summary.created,
         summary.updated,
         summary.skipped,
+        summary.failed,
     )
     return summary

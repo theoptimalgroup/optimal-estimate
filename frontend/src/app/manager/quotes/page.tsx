@@ -1,0 +1,557 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FilterField,
+  LoadingState,
+  PageHeader,
+  PaginationBar,
+  SecondaryButton,
+  StatusBadge,
+  filterInputClass,
+} from "@/components/ui";
+import { JobDetailModal, QuoteDetailModal } from "@/components/manager/sync-detail-modals";
+import {
+  getSafeJobDetail,
+  getSafeQuoteDetail,
+  listJobAttachments,
+  listQuoteAttachments,
+  listSyncedJobs,
+  listSyncedQuotes,
+  type EworksAttachmentSafe,
+  type EworksJobRecord,
+  type EworksJobSafeDetail,
+  type EworksQuoteRecord,
+  type EworksQuoteSafeDetail,
+} from "@/lib/eworks-sync";
+
+type TabId = "quotes" | "jobs";
+
+const PAGE_SIZE = 50;
+
+function fmtDate(val: string | null | undefined): string {
+  if (!val) return "—";
+  try {
+    return new Date(val).toLocaleString();
+  } catch {
+    return val;
+  }
+}
+
+function fmtMoney(val: number | null | undefined): string {
+  if (val === null || val === undefined) return "—";
+  return `£${val.toFixed(2)}`;
+}
+
+function TagBadges({ tags }: { tags?: string[] }) {
+  if (!tags?.length) {
+    return <span className="text-slate-400">—</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tags.map((tag) => (
+        <StatusBadge key={tag} tone="info">
+          {tag}
+        </StatusBadge>
+      ))}
+    </div>
+  );
+}
+
+function SharedFilters({
+  search,
+  customerName,
+  status,
+  tag,
+  dateFrom,
+  dateTo,
+  onSearchChange,
+  onCustomerNameChange,
+  onStatusChange,
+  onTagChange,
+  onDateFromChange,
+  onDateToChange,
+  onRefresh,
+  loading,
+  searchTestId,
+}: {
+  search: string;
+  customerName: string;
+  status: string;
+  tag: string;
+  dateFrom: string;
+  dateTo: string;
+  onSearchChange: (value: string) => void;
+  onCustomerNameChange: (value: string) => void;
+  onStatusChange: (value: string) => void;
+  onTagChange: (value: string) => void;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
+  onRefresh: () => void;
+  loading: boolean;
+  searchTestId: string;
+}) {
+  return (
+    <FilterBar>
+      <FilterField label="Search">
+        <input
+          className={filterInputClass}
+          placeholder="Ref, ID, customer, description…"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          data-testid={searchTestId}
+        />
+      </FilterField>
+      <FilterField label="Customer">
+        <input
+          className={filterInputClass}
+          placeholder="Customer name"
+          value={customerName}
+          onChange={(e) => onCustomerNameChange(e.target.value)}
+        />
+      </FilterField>
+      <FilterField label="Status">
+        <input
+          className={filterInputClass}
+          placeholder="Status"
+          value={status}
+          onChange={(e) => onStatusChange(e.target.value)}
+        />
+      </FilterField>
+      <FilterField label="Tag">
+        <input
+          className={filterInputClass}
+          placeholder="Tag"
+          value={tag}
+          onChange={(e) => onTagChange(e.target.value)}
+          data-testid="tag-filter"
+        />
+      </FilterField>
+      <FilterField label="Date from">
+        <input
+          type="date"
+          className={filterInputClass}
+          value={dateFrom}
+          onChange={(e) => onDateFromChange(e.target.value)}
+        />
+      </FilterField>
+      <FilterField label="Date to">
+        <input
+          type="date"
+          className={filterInputClass}
+          value={dateTo}
+          onChange={(e) => onDateToChange(e.target.value)}
+        />
+      </FilterField>
+      <FilterField label=" ">
+        <SecondaryButton onClick={onRefresh} disabled={loading} data-testid="quotes-refresh">
+          Refresh
+        </SecondaryButton>
+      </FilterField>
+    </FilterBar>
+  );
+}
+
+export default function ManagerQuotesPage() {
+  const searchParams = useSearchParams();
+
+  const initialType = searchParams.get("type") === "jobs" ? "jobs" : "quotes";
+  const initialStatus = searchParams.get("status") ?? "";
+  const initialTag = searchParams.get("tag") ?? "";
+
+  const [activeTab, setActiveTab] = useState<TabId>(initialType);
+
+  const [search, setSearch] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const [tag, setTag] = useState(initialTag);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [offset, setOffset] = useState(0);
+
+  const [quoteItems, setQuoteItems] = useState<EworksQuoteRecord[]>([]);
+  const [quoteTotal, setQuoteTotal] = useState(0);
+  const [jobItems, setJobItems] = useState<EworksJobRecord[]>([]);
+  const [jobTotal, setJobTotal] = useState(0);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selectedQuoteId, setSelectedQuoteId] = useState<number | null>(null);
+  const [quoteDetail, setQuoteDetail] = useState<EworksQuoteSafeDetail | null>(null);
+  const [quoteDetailLoading, setQuoteDetailLoading] = useState(false);
+  const [quoteDetailError, setQuoteDetailError] = useState<string | null>(null);
+  const [quoteAttachments, setQuoteAttachments] = useState<EworksAttachmentSafe[]>([]);
+  const [quoteAttachmentsLoading, setQuoteAttachmentsLoading] = useState(false);
+
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
+  const [jobDetail, setJobDetail] = useState<EworksJobSafeDetail | null>(null);
+  const [jobDetailLoading, setJobDetailLoading] = useState(false);
+  const [jobDetailError, setJobDetailError] = useState<string | null>(null);
+  const [jobAttachments, setJobAttachments] = useState<EworksAttachmentSafe[]>([]);
+  const [jobAttachmentsLoading, setJobAttachmentsLoading] = useState(false);
+
+  const resetOffset = useCallback(() => setOffset(0), []);
+
+  useEffect(() => {
+    const typeParam = searchParams.get("type") === "jobs" ? "jobs" : "quotes";
+    setActiveTab(typeParam);
+    setStatus(searchParams.get("status") ?? "");
+    setTag(searchParams.get("tag") ?? "");
+    setOffset(0);
+  }, [searchParams]);
+
+  const loadQuotes = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await listSyncedQuotes({
+        search: search || undefined,
+        customer_name: customerName || undefined,
+        status: status || undefined,
+        tag: tag || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        limit: PAGE_SIZE,
+        offset,
+      });
+      setQuoteItems(result.items);
+      setQuoteTotal(result.total);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load quotes");
+      setQuoteItems([]);
+      setQuoteTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [search, customerName, status, tag, dateFrom, dateTo, offset]);
+
+  const loadJobs = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await listSyncedJobs({
+        search: search || undefined,
+        customer_name: customerName || undefined,
+        status: status || undefined,
+        tag: tag || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        limit: PAGE_SIZE,
+        offset,
+      });
+      setJobItems(result.items);
+      setJobTotal(result.total);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load jobs");
+      setJobItems([]);
+      setJobTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [search, customerName, status, tag, dateFrom, dateTo, offset]);
+
+  const refresh = useCallback(() => {
+    if (activeTab === "quotes") {
+      void loadQuotes();
+    } else {
+      void loadJobs();
+    }
+  }, [activeTab, loadQuotes, loadJobs]);
+
+  useEffect(() => {
+    if (activeTab === "quotes") {
+      void loadQuotes();
+    } else {
+      void loadJobs();
+    }
+  }, [activeTab, loadQuotes, loadJobs]);
+
+  const openQuoteDetail = useCallback(async (id: number) => {
+    setSelectedQuoteId(id);
+    setQuoteDetail(null);
+    setQuoteAttachments([]);
+    setQuoteDetailError(null);
+    setQuoteDetailLoading(true);
+    setQuoteAttachmentsLoading(true);
+    try {
+      const [detail, attachments] = await Promise.all([
+        getSafeQuoteDetail(id),
+        listQuoteAttachments(id),
+      ]);
+      setQuoteDetail(detail);
+      setQuoteAttachments(attachments);
+    } catch (e: unknown) {
+      setQuoteDetailError(e instanceof Error ? e.message : "Failed to load quote details");
+    } finally {
+      setQuoteDetailLoading(false);
+      setQuoteAttachmentsLoading(false);
+    }
+  }, []);
+
+  const openJobDetail = useCallback(async (id: number) => {
+    setSelectedJobId(id);
+    setJobDetail(null);
+    setJobAttachments([]);
+    setJobDetailError(null);
+    setJobDetailLoading(true);
+    setJobAttachmentsLoading(true);
+    try {
+      const [detail, attachments] = await Promise.all([
+        getSafeJobDetail(id),
+        listJobAttachments(id),
+      ]);
+      setJobDetail(detail);
+      setJobAttachments(attachments);
+    } catch (e: unknown) {
+      setJobDetailError(e instanceof Error ? e.message : "Failed to load job details");
+    } finally {
+      setJobDetailLoading(false);
+      setJobAttachmentsLoading(false);
+    }
+  }, []);
+
+  return (
+    <div className="space-y-6" data-testid="manager-quotes-page">
+      <PageHeader
+        title="Quotes"
+        description="Search quotes and jobs synced from eWorks."
+      />
+
+      <div className="flex gap-1 border-b border-slate-200">
+        {(
+          [
+            { id: "quotes" as const, label: "Quotes" },
+            { id: "jobs" as const, label: "Jobs" },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => {
+              setActiveTab(tab.id);
+              resetOffset();
+            }}
+            data-testid={`tab-${tab.id}`}
+            className={[
+              "px-4 py-2 text-sm font-medium transition-colors",
+              activeTab === tab.id
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-slate-500 hover:text-slate-700",
+            ].join(" ")}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <SharedFilters
+        search={search}
+        customerName={customerName}
+        status={status}
+        tag={tag}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onSearchChange={(value) => {
+          setSearch(value);
+          resetOffset();
+        }}
+        onCustomerNameChange={(value) => {
+          setCustomerName(value);
+          resetOffset();
+        }}
+        onStatusChange={(value) => {
+          setStatus(value);
+          resetOffset();
+        }}
+        onTagChange={(value) => {
+          setTag(value);
+          resetOffset();
+        }}
+        onDateFromChange={(value) => {
+          setDateFrom(value);
+          resetOffset();
+        }}
+        onDateToChange={(value) => {
+          setDateTo(value);
+          resetOffset();
+        }}
+        onRefresh={refresh}
+        loading={loading}
+        searchTestId={activeTab === "quotes" ? "quotes-search" : "jobs-search"}
+      />
+
+      {error ? (
+        <ErrorState message={error} onRetry={refresh} />
+      ) : loading ? (
+        <LoadingState message={activeTab === "quotes" ? "Loading quotes…" : "Loading jobs…"} />
+      ) : activeTab === "quotes" ? (
+        quoteItems.length === 0 ? (
+          <EmptyState
+            title="No synced quotes found."
+            description="Ask an admin to run eWorks Sync."
+          />
+        ) : (
+          <>
+            <DataTable testId="quotes-table">
+              <DataTableHead>
+                <DataTableRow>
+                  <DataTableCell header>Quote Ref</DataTableCell>
+                  <DataTableCell header>eWorks Quote ID</DataTableCell>
+                  <DataTableCell header>Customer</DataTableCell>
+                  <DataTableCell header>Status</DataTableCell>
+                  <DataTableCell header>Tags</DataTableCell>
+                  <DataTableCell header>Quote Date</DataTableCell>
+                  <DataTableCell header numeric>Total</DataTableCell>
+                  <DataTableCell header>Synced At</DataTableCell>
+                  <DataTableCell header>Action</DataTableCell>
+                </DataTableRow>
+              </DataTableHead>
+              <DataTableBody>
+                {quoteItems.map((q) => (
+                  <DataTableRow key={q.id}>
+                    <DataTableCell>{q.quote_ref ?? "—"}</DataTableCell>
+                    <DataTableCell>
+                      <span className="font-mono text-xs">{q.eworks_quote_id}</span>
+                    </DataTableCell>
+                    <DataTableCell>{q.customer_name ?? "—"}</DataTableCell>
+                    <DataTableCell>
+                      {q.status_name ? <StatusBadge tone="neutral">{q.status_name}</StatusBadge> : "—"}
+                    </DataTableCell>
+                    <DataTableCell>
+                      <TagBadges tags={q.tags} />
+                    </DataTableCell>
+                    <DataTableCell>{q.quote_date ?? "—"}</DataTableCell>
+                    <DataTableCell numeric>{fmtMoney(q.total)}</DataTableCell>
+                    <DataTableCell>{fmtDate(q.synced_at)}</DataTableCell>
+                    <DataTableCell>
+                      <button
+                        type="button"
+                        className="text-sm font-medium text-blue-600 hover:text-blue-800"
+                        onClick={() => void openQuoteDetail(q.id)}
+                        data-testid={`quote-view-${q.id}`}
+                      >
+                        View Details
+                      </button>
+                    </DataTableCell>
+                  </DataTableRow>
+                ))}
+              </DataTableBody>
+            </DataTable>
+            <PaginationBar
+              total={quoteTotal}
+              limit={PAGE_SIZE}
+              offset={offset}
+              onOffsetChange={setOffset}
+            />
+          </>
+        )
+      ) : jobItems.length === 0 ? (
+        <EmptyState
+          title="No synced jobs found."
+          description="Ask an admin to run eWorks Sync."
+        />
+      ) : (
+        <>
+          <DataTable testId="jobs-table">
+            <DataTableHead>
+              <DataTableRow>
+                <DataTableCell header>Job Ref</DataTableCell>
+                <DataTableCell header>eWorks Job ID</DataTableCell>
+                <DataTableCell header>Related Quote</DataTableCell>
+                <DataTableCell header>Customer</DataTableCell>
+                <DataTableCell header>Status</DataTableCell>
+                <DataTableCell header>Tags</DataTableCell>
+                <DataTableCell header>Job Date</DataTableCell>
+                <DataTableCell header numeric>Total</DataTableCell>
+                <DataTableCell header>Synced At</DataTableCell>
+                <DataTableCell header>Action</DataTableCell>
+              </DataTableRow>
+            </DataTableHead>
+            <DataTableBody>
+              {jobItems.map((j) => (
+                <DataTableRow key={j.id}>
+                  <DataTableCell>{j.job_ref ?? "—"}</DataTableCell>
+                  <DataTableCell>
+                    <span className="font-mono text-xs">{j.eworks_job_id}</span>
+                  </DataTableCell>
+                  <DataTableCell>
+                    {j.eworks_quote_id != null ? (
+                      <span className="font-mono text-xs">{j.eworks_quote_id}</span>
+                    ) : (
+                      "—"
+                    )}
+                  </DataTableCell>
+                  <DataTableCell>{j.customer_name ?? "—"}</DataTableCell>
+                  <DataTableCell>
+                    {j.status_name ? <StatusBadge tone="neutral">{j.status_name}</StatusBadge> : "—"}
+                  </DataTableCell>
+                  <DataTableCell>
+                    <TagBadges tags={j.tags} />
+                  </DataTableCell>
+                  <DataTableCell>{j.job_date ?? "—"}</DataTableCell>
+                  <DataTableCell numeric>{fmtMoney(j.total)}</DataTableCell>
+                  <DataTableCell>{fmtDate(j.synced_at)}</DataTableCell>
+                  <DataTableCell>
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-blue-600 hover:text-blue-800"
+                      onClick={() => void openJobDetail(j.id)}
+                      data-testid={`job-view-${j.id}`}
+                    >
+                      View Details
+                    </button>
+                  </DataTableCell>
+                </DataTableRow>
+              ))}
+            </DataTableBody>
+          </DataTable>
+          <PaginationBar total={jobTotal} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
+        </>
+      )}
+
+      {selectedQuoteId !== null ? (
+        <QuoteDetailModal
+          detail={quoteDetail}
+          quoteId={selectedQuoteId}
+          attachments={quoteAttachments}
+          attachmentsLoading={quoteAttachmentsLoading}
+          loading={quoteDetailLoading}
+          error={quoteDetailError}
+          onClose={() => {
+            setSelectedQuoteId(null);
+            setQuoteDetail(null);
+            setQuoteAttachments([]);
+            setQuoteDetailError(null);
+          }}
+        />
+      ) : null}
+
+      {selectedJobId !== null ? (
+        <JobDetailModal
+          detail={jobDetail}
+          attachments={jobAttachments}
+          attachmentsLoading={jobAttachmentsLoading}
+          loading={jobDetailLoading}
+          error={jobDetailError}
+          onClose={() => {
+            setSelectedJobId(null);
+            setJobDetail(null);
+            setJobAttachments([]);
+            setJobDetailError(null);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}

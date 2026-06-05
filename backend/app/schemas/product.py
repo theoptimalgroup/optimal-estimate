@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class ProductRead(BaseModel):
@@ -39,11 +39,29 @@ class ProductUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class ProductSyncItemError(BaseModel):
+    eworks_item_id: str
+    item_name: str
+    error: str
+
+
 class ProductSyncSummary(BaseModel):
-    total_fetched: int = 0
-    inserted: int = 0
+    fetched: int = 0
+    created: int = 0
     updated: int = 0
     skipped: int = 0
+    failed: int = 0
+    errors: list[ProductSyncItemError] = Field(default_factory=list)
+
+    @computed_field
+    @property
+    def total_fetched(self) -> int:
+        return self.fetched
+
+    @computed_field
+    @property
+    def inserted(self) -> int:
+        return self.created
 
 
 class ProductSyncResponse(BaseModel):

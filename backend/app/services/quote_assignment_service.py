@@ -1,0 +1,623 @@
+"""Create and manage local eWorks quote assignments (no eWorks writes)."""
+
+from __future__ import annotations
+
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from uuid import UUID
+
+from urllib.parse import urlencode
+
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.auth.types import AuthenticatedUser
+from app.core.security import UserRole
+from app.models.calculation_session import CalculationSession
+from app.models.eworks_sync import EworksQuote
+from app.models.quote_assignment import EworksQuoteAssignment
+from app.models.trade import Trade
+from app.models.user import User
+from app.schemas.eworks_link import EworksLinkPayload, SessionUiState, Step2Snapshot
+from app.services.audit_helpers import record_audit
+from app.services.client_service import get_or_create_client_for_import
+from app.services.eworks_link_service import payload_to_step1, try_resolve_rate_rule
+from app.services.eworks_questionnaire_service import apply_questionnaire_defaults
+from app.services.manager_dashboard_service import extract_all_tags
+
+ASSIGNMENT_STATUSES = frozenset({"assigned", "in_progress", "submitted", "cancelled"})
+DEFAULT_TOKEN_DAYS = 30
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _quote_summary(quote: EworksQuote) -> dict[str, Any]:
+    address = None
+    if isinstance(quote.raw_payload, dict):
+        address = quote.raw_payload.get("site_address") or quote.raw_payload.get("address")
+    return {
+        "synced_quote_id": quote.id,
+        "eworks_quote_id": quote.eworks_quote_id,
+        "quote_ref": quote.quote_ref,
+        "customer_name": quote.customer_name,
+        "site_address": address if isinstance(address, str) else None,
+        "quote_date": quote.quote_date,
+        "expiry_date": quote.expiry_date,
+        "description": quote.description,
+        "tags": extract_all_tags(quote),
+    }
+
+
+def _assignment_link(token: str | None) -> str | None:
+    if not token:
+        return None
+    return f"/assignment/{token}"
+
+
+def _serialize_assignment(
+    row: EworksQuoteAssignment,
+    *,
+    quote: EworksQuote | None = None,
+    include_token: bool = False,
+    current_user: AuthenticatedUser | None = None,
+) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": row.id,
+        "synced_quote_id": row.synced_quote_id,
+        "eworks_quote_id": row.eworks_quote_id,
+        "quote_ref": row.quote_ref,
+        "assigned_user_id": str(row.assigned_user_id) if row.assigned_user_id else None,
+        "assigned_user_email": row.assigned_user_email,
+        "assigned_user_name": row.assigned_user_name,
+        "assignment_type": row.assignment_type,
+        "assignee_kind": row.assignee_kind,
+        "status": row.status,
+        "assignment_token_created_at": str(row.assignment_token_created_at)
+        if row.assignment_token_created_at
+        else None,
+        "assignment_token_expires_at": str(row.assignment_token_expires_at)
+        if row.assignment_token_expires_at
+        else None,
+        "assignment_token_revoked_at": str(row.assignment_token_revoked_at)
+        if row.assignment_token_revoked_at
+        else None,
+        "assigned_by_user_id": str(row.assigned_by_user_id) if row.assigned_by_user_id else None,
+        "assigned_by_email": row.assigned_by_email,
+        "assigned_at": str(row.assigned_at) if row.assigned_at else None,
+        "notes": row.notes,
+    }
+    if include_token:
+        data["assignment_token"] = row.assignment_token
+    data["assignment_link"] = _assignment_link(row.assignment_token)
+    data["has_calculation_session"] = row.calculation_session_id is not None
+    data["calculation_session_id"] = str(row.calculation_session_id) if row.calculation_session_id else None
+    data["can_start_estimate"] = _can_user_start_assignment(current_user, row) if current_user else False
+    if quote is not None:
+        data["quote_summary"] = _quote_summary(quote)
+    return data
+
+
+def _get_quote_or_404(db: Session, quote_id: int) -> EworksQuote:
+    quote = db.query(EworksQuote).filter(EworksQuote.id == quote_id).one_or_none()
+    if quote is None:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    return quote
+
+
+def _as_uuid(value: UUID | str | None) -> UUID | None:
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return value
+    return UUID(str(value))
+
+
+def _validate_assignee_user(db: Session, user_id: UUID | str, assignment_type: str) -> User:
+    user_uuid = _as_uuid(user_id)
+    user = db.query(User).filter(User.id == user_uuid, User.is_active.is_(True)).one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Assigned user not found")
+    expected_role = UserRole.ESTIMATOR.value if assignment_type == "estimator" else UserRole.ENGINEER.value
+    if user.role != expected_role:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Assigned user must have role {expected_role} for assignment_type={assignment_type}",
+        )
+    return user
+
+
+def list_assignable_users(db: Session) -> list[dict[str, Any]]:
+    rows = (
+        db.query(User)
+        .filter(
+            User.is_active.is_(True),
+            User.role.in_([UserRole.ESTIMATOR.value, UserRole.ENGINEER.value]),
+        )
+        .order_by(User.full_name.asc(), User.email.asc())
+        .all()
+    )
+    return [
+        {
+            "id": str(row.id),
+            "name": row.full_name,
+            "email": row.email,
+            "role": row.role,
+            "is_active": row.is_active,
+        }
+        for row in rows
+    ]
+
+
+def list_assignments_for_quote(db: Session, quote_id: int) -> list[dict[str, Any]]:
+    quote = _get_quote_or_404(db, quote_id)
+    rows = (
+        db.query(EworksQuoteAssignment)
+        .filter(EworksQuoteAssignment.synced_quote_id == quote.id)
+        .order_by(EworksQuoteAssignment.assigned_at.desc(), EworksQuoteAssignment.id.desc())
+        .all()
+    )
+    return [_serialize_assignment(row, quote=quote, include_token=True) for row in rows]
+
+
+def create_assignment(
+    db: Session,
+    *,
+    quote_id: int,
+    payload: dict[str, Any],
+    current_user: AuthenticatedUser,
+) -> dict[str, Any]:
+    quote = _get_quote_or_404(db, quote_id)
+    assignment_type = payload["assignment_type"]
+    assignee_kind = payload["assignee_kind"]
+
+    assigned_user_id = payload.get("assigned_user_id")
+    assigned_user_email = payload.get("assigned_user_email")
+    assigned_user_name = payload.get("assigned_user_name")
+    notes = payload.get("notes")
+    expires_at = payload.get("expires_at")
+
+    token: str | None = None
+    token_created_at: datetime | None = None
+    token_expires_at: datetime | None = None
+
+    if assignee_kind == "registered":
+        user = _validate_assignee_user(db, assigned_user_id, assignment_type)
+        assigned_user_id = user.id
+        assigned_user_email = user.email
+        assigned_user_name = user.full_name
+    else:
+        assigned_user_id = None
+        token = secrets.token_urlsafe(32)
+        token_created_at = _now()
+        token_expires_at = expires_at or (token_created_at + timedelta(days=DEFAULT_TOKEN_DAYS))
+
+    row = EworksQuoteAssignment(
+        synced_quote_id=quote.id,
+        eworks_quote_id=quote.eworks_quote_id,
+        quote_ref=quote.quote_ref,
+        assigned_user_id=assigned_user_id,
+        assigned_user_email=str(assigned_user_email) if assigned_user_email else None,
+        assigned_user_name=assigned_user_name,
+        assignment_type=assignment_type,
+        assignee_kind=assignee_kind,
+        status="assigned",
+        assignment_token=token,
+        assignment_token_created_at=token_created_at,
+        assignment_token_expires_at=token_expires_at,
+        assigned_by_user_id=_as_uuid(current_user.id),
+        assigned_by_email=current_user.email,
+        assigned_at=_now(),
+        notes=notes,
+    )
+    db.add(row)
+    db.flush()
+
+    audit_after = _serialize_assignment(row, quote=quote)
+    audit_after.pop("assignment_token", None)
+    audit_after.pop("assignment_link", None)
+
+    record_audit(
+        db,
+        actor=current_user,
+        action="quote_assignment_created",
+        entity_type="quote_assignment",
+        entity_id=row.id,
+        after=audit_after,
+        metadata={
+            "quote_ref": quote.quote_ref,
+            "eworks_quote_id": quote.eworks_quote_id,
+            "assignment_type": assignment_type,
+            "assignee_kind": assignee_kind,
+            "assigned_user_email": row.assigned_user_email,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _serialize_assignment(row, quote=quote, include_token=True)
+
+
+def list_assignments_for_user(db: Session, user: AuthenticatedUser) -> list[dict[str, Any]]:
+    q = db.query(EworksQuoteAssignment, EworksQuote).join(
+        EworksQuote, EworksQuote.id == EworksQuoteAssignment.synced_quote_id
+    )
+    if user.role == UserRole.ADMIN:
+        rows = q.order_by(EworksQuoteAssignment.assigned_at.desc()).all()
+    elif user.role == UserRole.ESTIMATOR:
+        rows = (
+            q.filter(
+                EworksQuoteAssignment.assigned_user_id == _as_uuid(user.id),
+                EworksQuoteAssignment.assignment_type == "estimator",
+                EworksQuoteAssignment.status != "cancelled",
+            )
+            .order_by(EworksQuoteAssignment.assigned_at.desc())
+            .all()
+        )
+    elif user.role == UserRole.ENGINEER:
+        rows = (
+            q.filter(
+                EworksQuoteAssignment.assigned_user_id == _as_uuid(user.id),
+                EworksQuoteAssignment.assignment_type == "engineer",
+                EworksQuoteAssignment.status != "cancelled",
+            )
+            .order_by(EworksQuoteAssignment.assigned_at.desc())
+            .all()
+        )
+    else:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    return [_serialize_assignment(assignment, quote=quote, current_user=user) for assignment, quote in rows]
+
+
+def get_assignment_by_token(db: Session, token: str) -> EworksQuoteAssignment:
+    row = (
+        db.query(EworksQuoteAssignment)
+        .filter(EworksQuoteAssignment.assignment_token == token)
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if row.assignment_token_revoked_at is not None:
+        raise HTTPException(status_code=410, detail="Assignment link has been revoked")
+    expires_at = _as_utc(row.assignment_token_expires_at)
+    if expires_at and expires_at < _now():
+        raise HTTPException(status_code=410, detail="Assignment link has expired")
+    if row.status == "cancelled":
+        raise HTTPException(status_code=410, detail="Assignment has been cancelled")
+    return row
+
+
+def build_public_assignment_read(db: Session, row: EworksQuoteAssignment) -> dict[str, Any]:
+    quote = _get_quote_or_404(db, row.synced_quote_id)
+    summary = _quote_summary(quote)
+    assigned_by_name = row.assigned_by_email
+    if row.assigned_by_user_id:
+        assigner = db.query(User).filter(User.id == row.assigned_by_user_id).one_or_none()
+        if assigner:
+            assigned_by_name = assigner.full_name or assigner.email
+    return {
+        "assignment_id": row.id,
+        "assignment_type": row.assignment_type,
+        "assignee_kind": row.assignee_kind,
+        "status": row.status,
+        "assigned_user_name": row.assigned_user_name,
+        "assigned_user_email": row.assigned_user_email,
+        "assigned_by_name": assigned_by_name,
+        "assigned_at": str(row.assigned_at) if row.assigned_at else None,
+        "notes": row.notes,
+        "quote_ref": summary["quote_ref"],
+        "customer_name": summary["customer_name"],
+        "site_address": summary["site_address"],
+        "quote_date": summary["quote_date"],
+        "expiry_date": summary["expiry_date"],
+        "description": summary["description"],
+        "tags": summary["tags"],
+    }
+
+
+def revoke_assignment(db: Session, assignment_id: int, current_user: AuthenticatedUser) -> dict[str, Any]:
+    row = db.query(EworksQuoteAssignment).filter(EworksQuoteAssignment.id == assignment_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    before = _serialize_assignment(row)
+    row.status = "cancelled"
+    row.assignment_token_revoked_at = _now()
+    db.flush()
+    record_audit(
+        db,
+        actor=current_user,
+        action="quote_assignment_revoked",
+        entity_type="quote_assignment",
+        entity_id=row.id,
+        before=before,
+        after=_serialize_assignment(row),
+        metadata={
+            "quote_ref": row.quote_ref,
+            "eworks_quote_id": row.eworks_quote_id,
+            "assignment_type": row.assignment_type,
+            "assignee_kind": row.assignee_kind,
+            "assigned_user_email": row.assigned_user_email,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _serialize_assignment(row, include_token=True)
+
+
+def update_assignment_status(
+    db: Session,
+    assignment_id: int,
+    status: str,
+    current_user: AuthenticatedUser,
+) -> dict[str, Any]:
+    if status not in ASSIGNMENT_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid assignment status")
+    row = db.query(EworksQuoteAssignment).filter(EworksQuoteAssignment.id == assignment_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    if current_user.role not in {UserRole.ADMIN, UserRole.MANAGER}:
+        if row.assigned_user_id != _as_uuid(current_user.id):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if current_user.role == UserRole.ESTIMATOR and row.assignment_type != "estimator":
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if current_user.role == UserRole.ENGINEER and row.assignment_type != "engineer":
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    before = _serialize_assignment(row)
+    row.status = status
+    db.flush()
+    record_audit(
+        db,
+        actor=current_user,
+        action="quote_assignment_status_updated",
+        entity_type="quote_assignment",
+        entity_id=row.id,
+        before=before,
+        after=_serialize_assignment(row),
+        metadata={
+            "quote_ref": row.quote_ref,
+            "eworks_quote_id": row.eworks_quote_id,
+            "assignment_type": row.assignment_type,
+            "status": status,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    quote = _get_quote_or_404(db, row.synced_quote_id)
+    return _serialize_assignment(row, quote=quote)
+
+
+def submit_public_assignment(db: Session, token: str, notes: str | None) -> dict[str, Any]:
+    row = get_assignment_by_token(db, token)
+    before = _serialize_assignment(row)
+    row.status = "submitted"
+    if notes:
+        existing = row.notes or ""
+        row.notes = f"{existing}\nExternal note: {notes}".strip()
+    db.flush()
+    record_audit(
+        db,
+        actor=None,
+        action="quote_assignment_status_updated",
+        entity_type="quote_assignment",
+        entity_id=row.id,
+        before=before,
+        after=_serialize_assignment(row),
+        metadata={
+            "quote_ref": row.quote_ref,
+            "eworks_quote_id": row.eworks_quote_id,
+            "assignment_type": row.assignment_type,
+            "status": "submitted",
+            "source": "public_submit",
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return build_public_assignment_read(db, row)
+
+
+def _build_resume_url(session_id: UUID, session_token: str) -> str:
+    params = urlencode({"session_id": str(session_id), "token": session_token})
+    return f"/eworks/calculate?{params}"
+
+
+def _can_user_start_assignment(user: AuthenticatedUser | None, row: EworksQuoteAssignment) -> bool:
+    if user is None:
+        return False
+    if row.status == "cancelled" or row.assignee_kind != "registered":
+        return False
+    if user.role == UserRole.ADMIN:
+        return True
+    if row.assigned_user_id != _as_uuid(user.id):
+        return False
+    if user.role == UserRole.ESTIMATOR and row.assignment_type == "estimator":
+        return True
+    if user.role == UserRole.ENGINEER and row.assignment_type == "engineer":
+        return True
+    return False
+
+
+def _assert_user_can_start_assignment(user: AuthenticatedUser, row: EworksQuoteAssignment) -> None:
+    if row.status == "cancelled":
+        raise HTTPException(status_code=410, detail="Assignment has been cancelled")
+    if row.assignee_kind != "registered":
+        raise HTTPException(status_code=403, detail="Only registered assignments can start an estimate")
+    if user.role == UserRole.MANAGER:
+        raise HTTPException(status_code=403, detail="Managers cannot start assignments")
+    if user.role == UserRole.CLIENT:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if not _can_user_start_assignment(user, row):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+def _quote_site_address(quote: EworksQuote) -> str:
+    summary = _quote_summary(quote)
+    address = summary.get("site_address")
+    if isinstance(address, str) and address.strip():
+        return address.strip()
+    return "Address not specified"
+
+
+def _quote_expires_at(quote: EworksQuote) -> datetime:
+    default = _now() + timedelta(days=DEFAULT_TOKEN_DAYS)
+    raw = quote.expiry_date
+    if raw:
+        text = str(raw).strip()
+        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                parsed = datetime.strptime(text.replace("Z", ""), fmt.replace("Z", ""))
+                candidate = parsed.replace(tzinfo=timezone.utc) + timedelta(hours=23, minutes=59)
+                if candidate > _now():
+                    return candidate
+            except ValueError:
+                continue
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if parsed > _now():
+                return parsed
+        except ValueError:
+            pass
+    return default
+
+
+def _default_trade(db: Session) -> Trade:
+    trade = db.scalar(select(Trade).where(Trade.is_active.is_(True)).order_by(Trade.name).limit(1))
+    if trade is None:
+        trade = db.scalar(select(Trade).order_by(Trade.name).limit(1))
+    if trade is None:
+        raise HTTPException(status_code=400, detail="No trade configured for estimate session")
+    return trade
+
+
+def _create_calculation_session_for_assignment(
+    db: Session,
+    *,
+    assignment: EworksQuoteAssignment,
+    quote: EworksQuote,
+) -> CalculationSession:
+    customer_name = (quote.customer_name or "Unknown Customer").strip()
+    client, _, _ = get_or_create_client_for_import(db, customer_name)
+    trade = _default_trade(db)
+    rule = try_resolve_rate_rule(db, client.id, trade.id)
+
+    quote_ref = quote.quote_ref or f"Q{quote.eworks_quote_id}"
+    job_number = str(quote.eworks_quote_id)
+    property_address = _quote_site_address(quote)
+    description = (quote.description or "").strip() or None
+    notes = (assignment.notes or "").strip() or None
+
+    payload = EworksLinkPayload(
+        source="assignment",
+        quote_number=quote_ref,
+        job_number=job_number,
+        external_job_id=str(quote.eworks_quote_id),
+        client=customer_name,
+        trade=trade.name,
+        property_address=property_address,
+        original_job_description=description,
+        quote_description=description,
+        scope=description,
+        other_notes=notes,
+        expires_at=_quote_expires_at(quote),
+    )
+    step1 = payload_to_step1(payload, client, trade, client_display_name=customer_name)
+    payload_dict = payload.model_dump(mode="json")
+    payload_dict["eworks_quote_id"] = quote.eworks_quote_id
+    payload_dict["assignment_id"] = assignment.id
+    payload_dict["synced_quote_id"] = quote.id
+
+    initial_step2 = Step2Snapshot(scope=description) if description else Step2Snapshot()
+    initial_step2 = apply_questionnaire_defaults(initial_step2, trade_name=trade.name, default_skill=True)
+
+    session = CalculationSession(
+        session_token=secrets.token_hex(32),
+        idempotency_key=f"assignment.session.{assignment.id}",
+        source="assignment",
+        payload_snapshot=payload_dict,
+        step1_snapshot=step1.model_dump(mode="json"),
+        step2_snapshot=initial_step2.model_dump(mode="json"),
+        ui_state=SessionUiState().model_dump(mode="json"),
+        client_id=client.id,
+        trade_id=trade.id,
+        rate_rule_id=rule.id if rule else None,
+        eworks_customer_snapshot=None,
+        expires_at=_as_utc(payload.expires_at) or _now() + timedelta(days=DEFAULT_TOKEN_DAYS),
+    )
+    db.add(session)
+    db.flush()
+    return session
+
+
+def _get_linked_session(db: Session, row: EworksQuoteAssignment) -> CalculationSession | None:
+    if row.calculation_session_id is None:
+        return None
+    return db.get(CalculationSession, row.calculation_session_id)
+
+
+def start_assignment_estimate(
+    db: Session,
+    assignment_id: int,
+    current_user: AuthenticatedUser,
+) -> dict[str, Any]:
+    row = db.query(EworksQuoteAssignment).filter(EworksQuoteAssignment.id == assignment_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    _assert_user_can_start_assignment(current_user, row)
+    quote = _get_quote_or_404(db, row.synced_quote_id)
+
+    existing = _get_linked_session(db, row)
+    created = False
+    if existing is None:
+        existing = _create_calculation_session_for_assignment(db, assignment=row, quote=quote)
+        row.calculation_session_id = existing.id
+        if row.status == "assigned":
+            row.status = "in_progress"
+        created = True
+        record_audit(
+            db,
+            actor=current_user,
+            action="quote_assignment_started",
+            entity_type="quote_assignment",
+            entity_id=row.id,
+            after={
+                "assignment_id": row.id,
+                "calculation_session_id": str(existing.id),
+                "quote_ref": row.quote_ref,
+                "status": row.status,
+            },
+            metadata={
+                "assignment_id": row.id,
+                "quote_ref": row.quote_ref,
+                "eworks_quote_id": row.eworks_quote_id,
+                "assignment_type": row.assignment_type,
+                "assigned_user_email": row.assigned_user_email,
+            },
+        )
+
+    db.commit()
+    db.refresh(row)
+    db.refresh(existing)
+
+    return {
+        "session_id": str(existing.id),
+        "session_token": existing.session_token,
+        "resume_url": _build_resume_url(existing.id, existing.session_token),
+        "assignment_id": row.id,
+        "quote_ref": row.quote_ref,
+        "created": created,
+    }

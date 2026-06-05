@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { EstimatorQuotesTable } from "@/components/estimator/estimator-quotes-table";
+import { AssignmentEstimateButton } from "@/components/quote-assignment-estimate-button";
 import {
   EmptyState,
   ErrorState,
@@ -16,9 +17,11 @@ import {
   StatCard,
 } from "@/components/ui";
 import { formatMoney, getEstimatorDashboard, type EstimatorDashboard } from "@/lib/estimator";
+import { listMyQuoteAssignments, type QuoteAssignment } from "@/lib/quote-assignments";
 
 export default function EstimatorDashboardPage() {
   const [dashboard, setDashboard] = useState<EstimatorDashboard | null>(null);
+  const [assignedQuotes, setAssignedQuotes] = useState<QuoteAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,7 +29,12 @@ export default function EstimatorDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      setDashboard(await getEstimatorDashboard());
+      const [dashboardData, assignments] = await Promise.all([
+        getEstimatorDashboard(),
+        listMyQuoteAssignments(),
+      ]);
+      setDashboard(dashboardData);
+      setAssignedQuotes(assignments.filter((item) => item.assignment_type === "estimator"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard");
       setDashboard(null);
@@ -88,6 +96,38 @@ export default function EstimatorDashboardPage() {
               />
             </div>
           </div>
+
+          <SectionCard title="Assigned Quotes" testId="estimator-assigned-quotes">
+            {assignedQuotes.length === 0 ? (
+              <EmptyState
+                title="No assigned quotes"
+                description="Quotes assigned to you by a manager will appear here."
+                className="border-0 bg-transparent py-6"
+              />
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {assignedQuotes.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex items-center justify-between gap-4 py-3 text-sm first:pt-0 last:pb-0"
+                    data-testid={`assigned-quote-${item.id}`}
+                  >
+                    <div>
+                      <span className="font-medium text-slate-900">{item.quote_ref ?? item.eworks_quote_id}</span>
+                      <span className="ml-2 text-slate-600">
+                        {item.quote_summary?.customer_name ?? "Customer not available"}
+                      </span>
+                    </div>
+                    <AssignmentEstimateButton
+                      assignment={item}
+                      variant="link"
+                      testId={`start-assignment-${item.id}`}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
 
           <SectionCard title="Recent Quotes">
             <EstimatorQuotesTable quotes={dashboard.recent_quotes} testId="estimator-recent-quotes" />

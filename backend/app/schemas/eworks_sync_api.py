@@ -84,6 +84,7 @@ class EworksQuoteRead(BaseModel):
     subtotal: float | None
     vat: float | None
     total: float | None
+    tags: list[str] = Field(default_factory=list)
     synced_at: str | None
 
     model_config = {"from_attributes": True}
@@ -104,6 +105,7 @@ class EworksJobRead(BaseModel):
     subtotal: float | None
     vat: float | None
     total: float | None
+    tags: list[str] = Field(default_factory=list)
     synced_at: str | None
 
     model_config = {"from_attributes": True}
@@ -120,8 +122,23 @@ class EworksSyncRunRead(BaseModel):
     updated_count: int
     failed_count: int
     error_message: str | None
+    metadata: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
+
+
+class EworksSyncStartResponse(BaseModel):
+    run_id: str
+    sync_type: str
+    status: str = "running"
+    message: str = "Sync started in background"
+
+
+class EworksActiveSyncRun(BaseModel):
+    run_id: str
+    sync_type: str
+    started_at: str | None
+    phase: str | None = None
 
 
 class EworksSyncStatusResponse(BaseModel):
@@ -130,6 +147,7 @@ class EworksSyncStatusResponse(BaseModel):
     last_quotes_sync: str | None
     last_jobs_sync: str | None
     eworks_api_enabled: bool
+    active_sync: EworksActiveSyncRun | None = None
 
 
 class EworksQuoteDetailRead(EworksQuoteRead):
@@ -138,3 +156,159 @@ class EworksQuoteDetailRead(EworksQuoteRead):
     terms: str | None
     project_id: int | None
     raw_payload: dict | None
+
+
+class EworksSafeLineItem(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    quantity: str | None = None
+    unit_price: str | None = None
+    total: str | None = None
+
+
+class EworksSafeCustomField(BaseModel):
+    label: str
+    field_key: str
+    value: str
+
+
+class EworksLinkedEstimate(BaseModel):
+    has_estimate_session: bool = False
+    session_id: str | None = None
+    status: str | None = None
+    client_accepted_at: str | None = None
+
+
+class EworksQuoteSafeIdentity(BaseModel):
+    id: int
+    eworks_quote_id: int
+    quote_ref: str | None = None
+    status: str | None = None
+    status_name: str | None = None
+    synced_at: str | None = None
+
+
+class EworksQuoteSafeCustomer(BaseModel):
+    customer_id: int | str | None = None
+    customer_name: str | None = None
+    customer_contact_id: int | str | None = None
+    customer_contact_name: str | None = None
+    customer_site_id: int | str | None = None
+    site_name: str | None = None
+    site_address: str | None = None
+    customer_ref: str | None = None
+    po_ref: str | None = None
+    wo_ref: str | None = None
+
+
+class EworksQuoteSafeDetails(BaseModel):
+    quote_type_id: int | str | None = None
+    quote_source_id: int | str | None = None
+    project_id: int | str | None = None
+    quote_date: str | None = None
+    expiry_date: str | None = None
+    preferred_date: str | None = None
+    preferred_time: str | None = None
+    description: str | None = None
+    notes: str | None = None
+    customer_notes: str | None = None
+    terms: str | None = None
+
+
+class EworksSafeFinancials(BaseModel):
+    subtotal: float | None = None
+    vat: float | None = None
+    total: float | None = None
+    discount_type: str | None = None
+    discount_value: str | None = None
+    currency: str | None = None
+
+
+class EworksSafeDates(BaseModel):
+    created_on: str | None = None
+    updated_on: str | None = None
+    converted_date: str | None = None
+    accepted_date: str | None = None
+
+
+class EworksQuoteSafeDetailRead(BaseModel):
+    identity: EworksQuoteSafeIdentity
+    customer: EworksQuoteSafeCustomer
+    quote_details: EworksQuoteSafeDetails
+    financials: EworksSafeFinancials
+    tags: list[str] = Field(default_factory=list)
+    items: list[EworksSafeLineItem] = Field(default_factory=list)
+    custom_fields: list[EworksSafeCustomField] = Field(default_factory=list)
+    dates: EworksSafeDates
+    linked_estimate: EworksLinkedEstimate
+
+
+class EworksJobSafeIdentity(BaseModel):
+    id: int
+    eworks_job_id: int
+    job_ref: str | None = None
+    status: str | None = None
+    status_name: str | None = None
+    synced_at: str | None = None
+
+
+class EworksJobSafeCustomer(BaseModel):
+    customer_id: int | str | None = None
+    customer_name: str | None = None
+    customer_contact_id: int | str | None = None
+    customer_contact_name: str | None = None
+    customer_site_id: int | str | None = None
+    site_name: str | None = None
+    site_address: str | None = None
+
+
+class EworksJobSafeRelatedQuote(BaseModel):
+    eworks_quote_id: int | str | None = None
+    quote_ref: str | None = None
+
+
+class EworksJobSafeDetails(BaseModel):
+    job_date: str | None = None
+    description: str | None = None
+    notes: str | None = None
+
+
+class EworksJobSafeDates(BaseModel):
+    created_on: str | None = None
+    updated_on: str | None = None
+    completed_date: str | None = None
+
+
+class EworksJobSafeDetailRead(BaseModel):
+    identity: EworksJobSafeIdentity
+    customer: EworksJobSafeCustomer
+    related_quote: EworksJobSafeRelatedQuote
+    job_details: EworksJobSafeDetails
+    financials: EworksSafeFinancials
+    tags: list[str] = Field(default_factory=list)
+    items: list[EworksSafeLineItem] = Field(default_factory=list)
+    custom_fields: list[EworksSafeCustomField] = Field(default_factory=list)
+    dates: EworksJobSafeDates
+    linked_estimate: EworksLinkedEstimate
+
+
+class EworksAttachmentSafeRead(BaseModel):
+    id: int
+    filename: str | None = None
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    description: str | None = None
+    uploaded_by: str | None = None
+    created_on: str | None = None
+    synced_at: str | None = None
+
+
+class EworksAttachmentDetailRead(EworksAttachmentSafeRead):
+    eworks_attachment_id: str | None = None
+    parent_type: str
+    parent_eworks_id: int
+    parent_local_id: int | None = None
+    download_endpoint: str | None = None
+    local_storage_path: str | None = None
+    downloaded_at: str | None = None
+    raw_payload: dict | None = None

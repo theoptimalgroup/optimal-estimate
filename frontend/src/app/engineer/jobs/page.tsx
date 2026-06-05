@@ -2,18 +2,22 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { EworksInput, EworksLabel } from "@/components/eworks-ui";
 import {
   ErrorState,
+  LoadingState,
   PageHeader,
   PrimaryButton,
   SecondaryButton,
   SectionCard,
+  StatusBadge,
 } from "@/components/ui";
 import { buildEngineerJobDetailPath, storeEngineerSessionCredentials } from "@/lib/engineer-session";
 import { createDevTestSession } from "@/lib/eworks-session";
+import { AssignmentEstimateButton } from "@/components/quote-assignment-estimate-button";
+import { listMyQuoteAssignments, type QuoteAssignment } from "@/lib/quote-assignments";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -23,6 +27,24 @@ export default function EngineerJobsPage() {
   const [sessionToken, setSessionToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isCreatingDev, setIsCreatingDev] = useState(false);
+  const [assignedJobs, setAssignedJobs] = useState<QuoteAssignment[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(true);
+
+  const loadAssignments = useCallback(async () => {
+    setAssignmentsLoading(true);
+    try {
+      const items = await listMyQuoteAssignments();
+      setAssignedJobs(items.filter((item) => item.assignment_type === "engineer"));
+    } catch {
+      setAssignedJobs([]);
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAssignments();
+  }, [loadAssignments]);
 
   const openSession = () => {
     const id = sessionId.trim();
@@ -56,6 +78,45 @@ export default function EngineerJobsPage() {
         title="My Jobs"
         description="Open a site visit session using the session ID and token from your eWorks estimate link."
       />
+
+      <SectionCard title="Assigned Quotes" testId="engineer-assigned-quotes">
+        {assignmentsLoading ? (
+          <LoadingState message="Loading assigned quotes…" />
+        ) : assignedJobs.length === 0 ? (
+          <p className="text-sm text-slate-600">No engineer assignments yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {assignedJobs.map((item) => (
+              <div
+                key={item.id}
+                className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+                data-testid={`engineer-assignment-${item.id}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-slate-900">{item.quote_ref ?? item.eworks_quote_id}</p>
+                    <p className="text-sm text-slate-600">
+                      {item.quote_summary?.customer_name ?? "Customer not available"}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {item.quote_summary?.site_address ?? "Address not available"}
+                    </p>
+                  </div>
+                  <StatusBadge tone="neutral">{item.status}</StatusBadge>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">Assigned {item.assigned_at ?? "—"}</p>
+                <AssignmentEstimateButton
+                  assignment={item}
+                  label="Open Assignment"
+                  variant="link"
+                  className="mt-3"
+                  testId={`engineer-start-assignment-${item.id}`}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
 
       <div data-testid="engineer-open-session-card">
         <SectionCard

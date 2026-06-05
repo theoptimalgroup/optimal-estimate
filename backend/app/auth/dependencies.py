@@ -73,6 +73,12 @@ class DashboardAccess:
     user: AuthenticatedUser | None = None
 
 
+@dataclass(frozen=True)
+class ProductSyncAccess:
+    method: Literal["user", "password"]
+    user: AuthenticatedUser | None = None
+
+
 def require_dashboard_access(
     user: Annotated[AuthenticatedUser | None, Depends(try_get_optional_current_user)],
     x_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
@@ -86,6 +92,22 @@ def require_dashboard_access(
 
     if _is_valid_dashboard_password(x_dashboard_password):
         return DashboardAccess(method="password")
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid dashboard password")
+
+
+def require_product_sync_access(
+    user: Annotated[AuthenticatedUser | None, Depends(try_get_optional_current_user)],
+    x_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> ProductSyncAccess:
+    """Allow admin via dev/Bearer auth, or legacy X-Dashboard-Password fallback."""
+    if user is not None:
+        if user.role == UserRole.ADMIN:
+            return ProductSyncAccess(method="user", user=user)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+
+    if _is_valid_dashboard_password(x_dashboard_password):
+        return ProductSyncAccess(method="password")
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid dashboard password")
 

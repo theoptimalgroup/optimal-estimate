@@ -8,6 +8,7 @@ export type NavItem = {
 const ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/admin/dashboard" },
   { label: "New Estimate", href: "/eworks/calculate" },
+  { label: "Quotes", href: "/manager/quotes" },
   { label: "Quote Review", href: "/manager/review" },
   { label: "Reports", href: "/manager/reports" },
   { label: "Users & Roles", href: "/admin/users" },
@@ -31,6 +32,7 @@ const ESTIMATOR_NAV: NavItem[] = [
 
 const MANAGER_NAV: NavItem[] = [
   { label: "Dashboard", href: "/manager/dashboard" },
+  { label: "Quotes", href: "/manager/quotes" },
   { label: "Quote Review", href: "/manager/review" },
   { label: "Reports", href: "/manager/reports" },
   { label: "Clients", href: "/manager/clients" },

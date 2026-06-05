@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     eworks_api_key: str | None = None
     eworks_api_enabled: bool = False
     eworks_api_timeout_seconds: float = 10.0
+    eworks_sync_attachments_enabled: bool = False
+    eworks_sync_attachment_files_enabled: bool = False
 
     # eWorks acceptance sync (client quote acceptance → eWorks custom field)
     eworks_acceptance_sync_enabled: bool = False

@@ -60,6 +60,7 @@ class EworksQuote(Base):
     subtotal: Mapped[float | None] = mapped_column(Numeric(14, 2))
     vat: Mapped[float | None] = mapped_column(Numeric(14, 2))
     total: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    tags: Mapped[list | None] = mapped_column(_json_col())
     raw_payload: Mapped[dict | None] = mapped_column(_json_col())
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -96,6 +97,7 @@ class EworksJob(Base):
     subtotal: Mapped[float | None] = mapped_column(Numeric(14, 2))
     vat: Mapped[float | None] = mapped_column(Numeric(14, 2))
     total: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    tags: Mapped[list | None] = mapped_column(_json_col())
     raw_payload: Mapped[dict | None] = mapped_column(_json_col())
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -125,3 +127,35 @@ class EworksSyncRun(Base):
     failed_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict | None] = mapped_column("metadata", _json_col())
+
+
+class EworksAttachment(Base):
+    """Metadata mirror of eWorks quote/job attachments (read-only sync; files not downloaded by default)."""
+
+    __tablename__ = "eworks_attachments"
+    __table_args__ = (
+        Index("ix_eworks_attachments_parent", "parent_type", "parent_eworks_id"),
+        Index("ix_eworks_attachments_eworks_attachment_id", "eworks_attachment_id"),
+        Index("ix_eworks_attachments_filename", "filename"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    eworks_attachment_id: Mapped[str | None] = mapped_column(String(100))
+    parent_type: Mapped[str] = mapped_column(String(10), nullable=False)  # quote | job
+    parent_eworks_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_local_id: Mapped[int | None] = mapped_column(Integer)
+    filename: Mapped[str | None] = mapped_column(String(500))
+    mime_type: Mapped[str | None] = mapped_column(String(200))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_on: Mapped[str | None] = mapped_column(String(30))
+    uploaded_by: Mapped[str | None] = mapped_column(String(200))
+    download_endpoint: Mapped[str | None] = mapped_column(String(1000))
+    local_storage_path: Mapped[str | None] = mapped_column(String(1000))
+    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    raw_payload: Mapped[dict | None] = mapped_column(_json_col())
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

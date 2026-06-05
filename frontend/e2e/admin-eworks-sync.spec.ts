@@ -103,7 +103,28 @@ const MOCK_JOBS = {
   offset: 0,
 };
 
+const MOCK_RUN_SUCCESS = {
+  id: "aaaa-1111",
+  sync_type: "all",
+  status: "success",
+  started_at: "2026-06-01T10:00:00Z",
+  finished_at: "2026-06-01T10:00:10Z",
+  fetched_count: 59,
+  created_count: 20,
+  updated_count: 39,
+  failed_count: 0,
+  error_message: null,
+  metadata: {
+    phase: "completed",
+    quotes: { fetched: 42, created: 5, updated: 37, failed: 0 },
+    jobs: { fetched: 17, created: 2, updated: 15, failed: 0 },
+    errors: [],
+  },
+};
+
 async function mockEworksSyncApis(page: Page) {
+  let pollCount = 0;
+
   await page.route("**/api/v1/eworks-sync/status**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -112,7 +133,31 @@ async function mockEworksSyncApis(page: Page) {
     });
   });
 
+  await page.route("**/api/v1/eworks-sync/runs/aaaa-1111", async (route) => {
+    pollCount += 1;
+    const isRunning = pollCount < 3;
+    const run = isRunning
+      ? {
+          ...MOCK_RUN_SUCCESS,
+          status: "running",
+          finished_at: null,
+          fetched_count: 0,
+          metadata: { phase: pollCount === 1 ? "quotes" : "jobs" },
+        }
+      : MOCK_RUN_SUCCESS;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: run }),
+    });
+  });
+
   await page.route("**/api/v1/eworks-sync/runs**", async (route) => {
+    const url = route.request().url();
+    if (url.includes("/runs/aaaa-1111")) {
+      await route.fallback();
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -133,7 +178,12 @@ async function mockEworksSyncApis(page: Page) {
         contentType: "application/json",
         body: JSON.stringify({
           success: true,
-          data: { summary: { fetched: 42, created: 5, updated: 37, failed: 0 }, run_id: "aaaa" },
+          data: {
+            run_id: "aaaa-1111",
+            sync_type: "quotes",
+            status: "running",
+            message: "Sync started in background",
+          },
         }),
       });
     }
@@ -152,7 +202,12 @@ async function mockEworksSyncApis(page: Page) {
         contentType: "application/json",
         body: JSON.stringify({
           success: true,
-          data: { summary: { fetched: 17, created: 2, updated: 15, failed: 0 }, run_id: "bbbb" },
+          data: {
+            run_id: "aaaa-1111",
+            sync_type: "jobs",
+            status: "running",
+            message: "Sync started in background",
+          },
         }),
       });
     }
@@ -165,9 +220,10 @@ async function mockEworksSyncApis(page: Page) {
       body: JSON.stringify({
         success: true,
         data: {
-          quotes: { fetched: 42, created: 5, updated: 37, failed: 0 },
-          jobs: { fetched: 17, created: 2, updated: 15, failed: 0 },
-          errors: [],
+          run_id: "aaaa-1111",
+          sync_type: "all",
+          status: "running",
+          message: "Sync started in background",
         },
       }),
     });
@@ -223,8 +279,21 @@ test.describe("Admin: /admin/eworks-sync", () => {
     await page.goto("/admin/eworks-sync");
     await page.getByTestId("btn-sync-all").click();
 
+    await expect(page.getByTestId("sync-active-banner")).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("sync-result")).toBeVisible({ timeout: 10000 });
     await expect(page.getByText("Sync completed")).toBeVisible();
+  });
+
+  test("sync banner stays visible when switching tabs", async ({ page }) => {
+    await mockAuthMe(page, "admin");
+    await mockEworksSyncApis(page);
+
+    await page.goto("/admin/eworks-sync");
+    await page.getByTestId("btn-sync-all").click();
+    await expect(page.getByTestId("sync-active-banner")).toBeVisible({ timeout: 10000 });
+
+    await page.getByTestId("tab-quotes").click();
+    await expect(page.getByTestId("sync-active-banner")).toBeVisible({ timeout: 5000 });
   });
 
   test("admin sees recent sync runs table", async ({ page }) => {

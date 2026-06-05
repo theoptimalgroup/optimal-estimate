@@ -25,11 +25,14 @@ import {
 } from "@/components/ui";
 import {
   formatDate,
+  formatProductSyncError,
   getProduct,
   hasScope,
   listProducts,
+  syncProductsFromEworks,
   updateProduct,
   type Product,
+  type ProductSyncSummary,
   type ProductUpdatePayload,
 } from "@/lib/products";
 
@@ -201,6 +204,46 @@ function ProductEditPanel({
   );
 }
 
+function SyncSummaryBanner({ summary }: { summary: ProductSyncSummary }) {
+  const hasFailures = summary.failed > 0;
+  const previewErrors = summary.errors.slice(0, 3);
+
+  return (
+    <div
+      className={
+        hasFailures
+          ? "rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          : "rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+      }
+      data-testid="products-sync-summary"
+    >
+      <p className="font-medium">
+        {hasFailures
+          ? `Sync completed with ${summary.failed} failed item${summary.failed === 1 ? "" : "s"}`
+          : "Product sync completed"}
+      </p>
+      <p className="mt-1">
+        Fetched {summary.fetched} · Created {summary.created} · Updated {summary.updated} · Skipped{" "}
+        {summary.skipped}
+        {summary.failed > 0 ? ` · Failed ${summary.failed}` : ""}
+      </p>
+      {previewErrors.length > 0 ? (
+        <ul className="mt-2 space-y-1 text-xs" data-testid="products-sync-error-list">
+          {previewErrors.map((item) => (
+            <li key={`${item.eworks_item_id}-${item.error}`}>
+              Item {item.eworks_item_id || "unknown"}
+              {item.item_name ? ` (${item.item_name})` : ""}: {item.error}
+            </li>
+          ))}
+          {summary.errors.length > previewErrors.length ? (
+            <li>…and {summary.errors.length - previewErrors.length} more</li>
+          ) : null}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
@@ -216,6 +259,9 @@ export default function AdminProductsPage() {
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<ProductSyncSummary | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const filters = useMemo(
     () => ({
@@ -271,17 +317,55 @@ export default function AdminProductsPage() {
     setProducts((current) => current.map((item) => (item.id === updated.id ? updated : item)));
   };
 
+  const handleSyncFromEworks = async () => {
+    setSyncing(true);
+    setSyncError(null);
+    setSyncSummary(null);
+    try {
+      const result = await syncProductsFromEworks();
+      setSyncSummary(result.summary);
+      await loadProducts();
+    } catch (err) {
+      setSyncError(formatProductSyncError(err));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div className="space-y-6" data-testid="admin-products-page">
       <PageHeader
         title="Products / Scope"
         description="Manage product catalogue and scope-of-work templates used in the estimate form."
         actions={
-          <SecondaryButton onClick={() => void loadProducts()} disabled={loading}>
-            Refresh
-          </SecondaryButton>
+          <div className="flex flex-wrap gap-2">
+            <PrimaryButton
+              onClick={() => void handleSyncFromEworks()}
+              disabled={loading || syncing}
+              data-testid="products-sync-eworks"
+            >
+              {syncing ? "Syncing…" : "Sync from eWorks"}
+            </PrimaryButton>
+            <SecondaryButton onClick={() => void loadProducts()} disabled={loading || syncing}>
+              Refresh
+            </SecondaryButton>
+          </div>
         }
       />
+
+      <p className="text-sm text-slate-600" data-testid="products-sync-helper">
+        Reads product names, codes, descriptions, and pricing from eWorks. This does not write to eWorks.
+      </p>
+
+      {syncSummary ? <SyncSummaryBanner summary={syncSummary} /> : null}
+      {syncError ? (
+        <div
+          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+          data-testid="products-sync-error"
+        >
+          {syncError}
+        </div>
+      ) : null}
 
       <FilterBar>
         <FilterField label="Search">

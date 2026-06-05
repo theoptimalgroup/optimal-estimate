@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-react";
 
@@ -25,10 +25,15 @@ import {
   filterInputClass,
 } from "@/components/ui";
 import {
+  EWORKS_ACTIVE_SYNC_RUN_KEY,
+  EWORKS_SYNC_DEFAULT_DAYS,
+  buildDefaultSyncRequest,
   getEworksSyncStatus,
+  getSyncRun,
   getSyncRuns,
   listSyncedJobs,
   listSyncedQuotes,
+  runToSyncResult,
   triggerAllSync,
   triggerJobsSync,
   triggerQuotesSync,
@@ -41,11 +46,10 @@ import {
 } from "@/lib/eworks-sync";
 
 type TabId = "sync" | "quotes" | "jobs";
-const PAGE_SIZE = 50;
+type SyncType = "quotes" | "jobs" | "all";
 
-// ---------------------------------------------------------------------------
-// Small helpers
-// ---------------------------------------------------------------------------
+const PAGE_SIZE = 50;
+const POLL_INTERVAL_MS = 2500;
 
 function syncStatusTone(status: string): "success" | "warning" | "danger" | "info" | "neutral" {
   if (status === "success") return "success";
@@ -69,17 +73,7 @@ function fmtMoney(val: number | null | undefined): string {
   return `£${val.toFixed(2)}`;
 }
 
-// ---------------------------------------------------------------------------
-// Sync summary panel
-// ---------------------------------------------------------------------------
-
-function SyncSummaryPanel({
-  label,
-  summary,
-}: {
-  label: string;
-  summary: EworksSyncBucketSummary;
-}) {
+function SyncSummaryPanel({ label, summary }: { label: string; summary: EworksSyncBucketSummary }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
       <p className="mb-2 text-sm font-semibold text-slate-700">{label}</p>
@@ -91,10 +85,10 @@ function SyncSummaryPanel({
             ["Updated", summary.updated, "text-blue-600"],
             ["Failed", summary.failed, summary.failed > 0 ? "text-red-600" : "text-slate-400"],
           ] as const
-        ).map(([label, val, cls]) => (
-          <div key={label}>
+        ).map(([lbl, val, cls]) => (
+          <div key={lbl}>
             <div className={`text-lg font-bold ${cls}`}>{val}</div>
-            <div className="text-slate-500">{label}</div>
+            <div className="text-slate-500">{lbl}</div>
           </div>
         ))}
       </div>
@@ -102,89 +96,81 @@ function SyncSummaryPanel({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Sync tab
-// ---------------------------------------------------------------------------
-
-function SyncTab() {
-  const [status, setStatus] = useState<EworksSyncStatus | null>(null);
-  const [runs, setRuns] = useState<EworksSyncRunRecord[]>([]);
-  const [statusError, setStatusError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState<"quotes" | "jobs" | "all" | null>(null);
-  const [lastResult, setLastResult] = useState<EworksSyncResult | EworksSyncBucketSummary | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-
-  const loadStatus = useCallback(async () => {
-    try {
-      const [s, r] = await Promise.all([getEworksSyncStatus(), getSyncRuns({ limit: 10 })]);
-      setStatus(s);
-      setRuns(r.items);
-      setStatusError(null);
-    } catch (e: unknown) {
-      setStatusError(e instanceof Error ? e.message : "Failed to load sync status");
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
-
-  const handleSync = useCallback(
-    async (type: "quotes" | "jobs" | "all") => {
-      setSyncing(type);
-      setSyncError(null);
-      setLastResult(null);
-      try {
-        if (type === "quotes") {
-          const r = await triggerQuotesSync();
-          setLastResult(r.summary);
-        } else if (type === "jobs") {
-          const r = await triggerJobsSync();
-          setLastResult(r.summary);
-        } else {
-          const r = await triggerAllSync();
-          setLastResult(r);
-        }
-        await loadStatus();
-      } catch (e: unknown) {
-        setSyncError(e instanceof Error ? e.message : "Sync failed");
-      } finally {
-        setSyncing(null);
-      }
-    },
-    [loadStatus]
-  );
+function ActiveSyncBanner({
+  syncType,
+  phase,
+}: {
+  syncType: SyncType;
+  phase?: string | null;
+}) {
+  const label =
+    syncType === "all"
+      ? "Syncing quotes and jobs in the background"
+      : syncType === "quotes"
+        ? "Syncing quotes in the background"
+        : "Syncing jobs in the background";
 
   return (
+    <div
+      className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4"
+      data-testid="sync-active-banner"
+    >
+      <RefreshCw className="mt-0.5 h-5 w-5 flex-shrink-0 animate-spin text-blue-600" />
+      <div>
+        <p className="text-sm font-semibold text-blue-800">{label}</p>
+        <p className="mt-0.5 text-xs text-blue-700">
+          You can switch tabs or navigate away — sync continues on the server.
+          {phase ? ` Current phase: ${phase}.` : ""}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+type SyncTabProps = {
+  status: EworksSyncStatus | null;
+  statusError: string | null;
+  runs: EworksSyncRunRecord[];
+  syncing: SyncType | null;
+  lastResult: EworksSyncResult | EworksSyncBucketSummary | null;
+  syncError: string | null;
+  fullSync: boolean;
+  onFullSyncChange: (value: boolean) => void;
+  onSync: (type: SyncType) => void;
+};
+
+function SyncTab({
+  status,
+  statusError,
+  runs,
+  syncing,
+  lastResult,
+  syncError,
+  fullSync,
+  onFullSyncChange,
+  onSync,
+}: SyncTabProps) {
+  return (
     <div className="space-y-6">
-      {/* Read-only warning */}
       <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
         <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
         <div>
           <p className="text-sm font-semibold text-amber-800">Read-only from eWorks</p>
           <p className="mt-0.5 text-xs text-amber-700">
             This sync fetches eWorks data into the local database only. No records are modified in eWorks.
+            By default, only the last {EWORKS_SYNC_DEFAULT_DAYS} days are synced.
           </p>
         </div>
       </div>
 
-      {/* Status cards */}
       {statusError ? (
         <ErrorState message={statusError} />
       ) : !status ? (
         <LoadingState />
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatCard
-            label="Local Quotes"
-            value={String(status.quotes_count)}
-            data-testid="stat-quotes-count"
-          />
-          <StatCard
-            label="Local Jobs"
-            value={String(status.jobs_count)}
-            data-testid="stat-jobs-count"
-          />
+          <StatCard label="Local Quotes" value={String(status.quotes_count)} data-testid="stat-quotes-count" />
+          <StatCard label="Local Jobs" value={String(status.jobs_count)} data-testid="stat-jobs-count" />
           <StatCard
             label="Last Quotes Sync"
             value={status.last_quotes_sync ? fmtDate(status.last_quotes_sync) : "Never"}
@@ -202,45 +188,46 @@ function SyncTab() {
         </div>
       )}
 
-      {/* Sync buttons */}
       <SectionCard>
         <div className="space-y-4">
           <h2 className="text-sm font-semibold text-slate-700">Trigger Sync</h2>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={fullSync}
+              onChange={(e) => onFullSyncChange(e.target.checked)}
+              data-testid="sync-full-toggle"
+            />
+            Full sync (all dates — slower; use for initial load)
+          </label>
+          {!fullSync ? (
+            <p className="text-xs text-slate-500" data-testid="sync-date-window-note">
+              Sync window: last {EWORKS_SYNC_DEFAULT_DAYS} days only.
+            </p>
+          ) : null}
           <div className="flex flex-wrap gap-3">
-            <PrimaryButton
-              onClick={() => handleSync("all")}
-              disabled={!!syncing}
-              data-testid="btn-sync-all"
-            >
+            <PrimaryButton onClick={() => onSync("all")} disabled={!!syncing} data-testid="btn-sync-all">
               {syncing === "all" ? (
                 <span className="flex items-center gap-2">
-                  <RefreshCw className="h-4 w-4 animate-spin" /> Syncing All…
+                  <RefreshCw className="h-4 w-4 animate-spin" /> Starting…
                 </span>
               ) : (
                 "Sync All"
               )}
             </PrimaryButton>
-            <SecondaryButton
-              onClick={() => handleSync("quotes")}
-              disabled={!!syncing}
-              data-testid="btn-sync-quotes"
-            >
+            <SecondaryButton onClick={() => onSync("quotes")} disabled={!!syncing} data-testid="btn-sync-quotes">
               {syncing === "quotes" ? (
                 <span className="flex items-center gap-2">
-                  <RefreshCw className="h-4 w-4 animate-spin" /> Syncing…
+                  <RefreshCw className="h-4 w-4 animate-spin" /> Starting…
                 </span>
               ) : (
                 "Sync Quotes"
               )}
             </SecondaryButton>
-            <SecondaryButton
-              onClick={() => handleSync("jobs")}
-              disabled={!!syncing}
-              data-testid="btn-sync-jobs"
-            >
+            <SecondaryButton onClick={() => onSync("jobs")} disabled={!!syncing} data-testid="btn-sync-jobs">
               {syncing === "jobs" ? (
                 <span className="flex items-center gap-2">
-                  <RefreshCw className="h-4 w-4 animate-spin" /> Syncing…
+                  <RefreshCw className="h-4 w-4 animate-spin" /> Starting…
                 </span>
               ) : (
                 "Sync Jobs"
@@ -250,22 +237,15 @@ function SyncTab() {
         </div>
       </SectionCard>
 
-      {/* Sync result */}
       {syncError && (
-        <div
-          className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4"
-          data-testid="sync-error"
-        >
+        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4" data-testid="sync-error">
           <XCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600" />
           <p className="text-sm text-red-700">{syncError}</p>
         </div>
       )}
 
       {lastResult && !syncError && (
-        <div
-          className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4"
-          data-testid="sync-result"
-        >
+        <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4" data-testid="sync-result">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-5 w-5 text-emerald-600" />
             <p className="text-sm font-semibold text-emerald-800">Sync completed</p>
@@ -286,7 +266,6 @@ function SyncTab() {
         </div>
       )}
 
-      {/* Recent runs */}
       <SectionCard>
         <h2 className="mb-3 text-sm font-semibold text-slate-700">Recent Sync Runs</h2>
         {runs.length === 0 ? (
@@ -320,7 +299,7 @@ function SyncTab() {
                   <DataTableCell numeric>{run.created_count}</DataTableCell>
                   <DataTableCell numeric>{run.updated_count}</DataTableCell>
                   <DataTableCell numeric>
-                    <span className={run.failed_count > 0 ? "text-red-600 font-semibold" : ""}>
+                    <span className={run.failed_count > 0 ? "font-semibold text-red-600" : ""}>
                       {run.failed_count}
                     </span>
                   </DataTableCell>
@@ -334,11 +313,7 @@ function SyncTab() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Quotes tab
-// ---------------------------------------------------------------------------
-
-function QuotesTab() {
+function QuotesTab({ refreshKey }: { refreshKey: number }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
@@ -370,7 +345,7 @@ function QuotesTab() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   return (
     <div className="space-y-4">
@@ -380,7 +355,10 @@ function QuotesTab() {
             className={filterInputClass}
             placeholder="Ref, customer, description…"
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setOffset(0);
+            }}
             data-testid="quotes-search"
           />
         </FilterField>
@@ -389,7 +367,10 @@ function QuotesTab() {
             className={filterInputClass}
             placeholder="Customer name"
             value={customerFilter}
-            onChange={(e) => { setCustomerFilter(e.target.value); setOffset(0); }}
+            onChange={(e) => {
+              setCustomerFilter(e.target.value);
+              setOffset(0);
+            }}
           />
         </FilterField>
         <FilterField label="Status">
@@ -397,7 +378,10 @@ function QuotesTab() {
             className={filterInputClass}
             placeholder="Status"
             value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setOffset(0); }}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setOffset(0);
+            }}
           />
         </FilterField>
       </FilterBar>
@@ -431,11 +415,7 @@ function QuotesTab() {
                   <DataTableCell>{q.quote_ref ?? "—"}</DataTableCell>
                   <DataTableCell>{q.customer_name ?? "—"}</DataTableCell>
                   <DataTableCell>
-                    {q.status_name ? (
-                      <StatusBadge tone="neutral">{q.status_name}</StatusBadge>
-                    ) : (
-                      "—"
-                    )}
+                    {q.status_name ? <StatusBadge tone="neutral">{q.status_name}</StatusBadge> : "—"}
                   </DataTableCell>
                   <DataTableCell>{q.quote_date ?? "—"}</DataTableCell>
                   <DataTableCell numeric>{fmtMoney(q.total)}</DataTableCell>
@@ -444,23 +424,14 @@ function QuotesTab() {
               ))}
             </DataTableBody>
           </DataTable>
-          <PaginationBar
-            total={total}
-            limit={PAGE_SIZE}
-            offset={offset}
-            onOffsetChange={setOffset}
-          />
+          <PaginationBar total={total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
         </>
       )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Jobs tab
-// ---------------------------------------------------------------------------
-
-function JobsTab() {
+function JobsTab({ refreshKey }: { refreshKey: number }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
@@ -492,7 +463,7 @@ function JobsTab() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   return (
     <div className="space-y-4">
@@ -502,7 +473,10 @@ function JobsTab() {
             className={filterInputClass}
             placeholder="Ref, customer, description…"
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setOffset(0);
+            }}
             data-testid="jobs-search"
           />
         </FilterField>
@@ -511,7 +485,10 @@ function JobsTab() {
             className={filterInputClass}
             placeholder="Customer name"
             value={customerFilter}
-            onChange={(e) => { setCustomerFilter(e.target.value); setOffset(0); }}
+            onChange={(e) => {
+              setCustomerFilter(e.target.value);
+              setOffset(0);
+            }}
           />
         </FilterField>
         <FilterField label="Status">
@@ -519,7 +496,10 @@ function JobsTab() {
             className={filterInputClass}
             placeholder="Status"
             value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setOffset(0); }}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setOffset(0);
+            }}
           />
         </FilterField>
       </FilterBar>
@@ -553,11 +533,7 @@ function JobsTab() {
                   <DataTableCell>{j.job_ref ?? "—"}</DataTableCell>
                   <DataTableCell>{j.customer_name ?? "—"}</DataTableCell>
                   <DataTableCell>
-                    {j.status_name ? (
-                      <StatusBadge tone="neutral">{j.status_name}</StatusBadge>
-                    ) : (
-                      "—"
-                    )}
+                    {j.status_name ? <StatusBadge tone="neutral">{j.status_name}</StatusBadge> : "—"}
                   </DataTableCell>
                   <DataTableCell>{j.job_date ?? "—"}</DataTableCell>
                   <DataTableCell numeric>{fmtMoney(j.total)}</DataTableCell>
@@ -566,21 +542,12 @@ function JobsTab() {
               ))}
             </DataTableBody>
           </DataTable>
-          <PaginationBar
-            total={total}
-            limit={PAGE_SIZE}
-            offset={offset}
-            onOffsetChange={setOffset}
-          />
+          <PaginationBar total={total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
         </>
       )}
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "sync", label: "Sync" },
@@ -590,6 +557,137 @@ const TABS: { id: TabId; label: string }[] = [
 
 export default function EworksSyncPage() {
   const [activeTab, setActiveTab] = useState<TabId>("sync");
+  const [status, setStatus] = useState<EworksSyncStatus | null>(null);
+  const [runs, setRuns] = useState<EworksSyncRunRecord[]>([]);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [activeRun, setActiveRun] = useState<EworksSyncRunRecord | null>(null);
+  const [syncing, setSyncing] = useState<SyncType | null>(null);
+  const [lastResult, setLastResult] = useState<EworksSyncResult | EworksSyncBucketSummary | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [fullSync, setFullSync] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearPollTimer = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  const loadOverview = useCallback(async () => {
+    try {
+      const [s, r] = await Promise.all([getEworksSyncStatus(), getSyncRuns({ limit: 10 })]);
+      setStatus(s);
+      setRuns(r.items);
+      setStatusError(null);
+      return s;
+    } catch (e: unknown) {
+      setStatusError(e instanceof Error ? e.message : "Failed to load sync status");
+      return null;
+    }
+  }, []);
+
+  const finishTracking = useCallback(
+    (run: EworksSyncRunRecord) => {
+      clearPollTimer();
+      sessionStorage.removeItem(EWORKS_ACTIVE_SYNC_RUN_KEY);
+      setActiveRunId(null);
+      setActiveRun(null);
+      setSyncing(null);
+
+      const result = runToSyncResult(run);
+      if (run.status === "failed") {
+        setSyncError(run.error_message ?? "Sync failed");
+        setLastResult(null);
+      } else if (result) {
+        setSyncError(null);
+        setLastResult(result);
+      }
+      setRefreshKey((k) => k + 1);
+      void loadOverview();
+    },
+    [clearPollTimer, loadOverview]
+  );
+
+  const pollRun = useCallback(
+    async (runId: string) => {
+      try {
+        const run = await getSyncRun(runId);
+        setActiveRun(run);
+        if (run.status !== "running") {
+          finishTracking(run);
+        }
+      } catch {
+        // Keep polling — transient network errors should not stop tracking
+      }
+    },
+    [finishTracking]
+  );
+
+  const startTracking = useCallback(
+    (runId: string, syncType: SyncType) => {
+      sessionStorage.setItem(EWORKS_ACTIVE_SYNC_RUN_KEY, runId);
+      setActiveRunId(runId);
+      setSyncing(syncType);
+      setSyncError(null);
+      setLastResult(null);
+      clearPollTimer();
+      void pollRun(runId);
+      pollTimerRef.current = setInterval(() => {
+        void pollRun(runId);
+      }, POLL_INTERVAL_MS);
+    },
+    [clearPollTimer, pollRun]
+  );
+
+  useEffect(() => {
+    void (async () => {
+      const s = await loadOverview();
+      const storedRunId = sessionStorage.getItem(EWORKS_ACTIVE_SYNC_RUN_KEY);
+      const runId = s?.active_sync?.run_id ?? storedRunId;
+      if (runId) {
+        try {
+          const run = await getSyncRun(runId);
+          if (run.status === "running") {
+            startTracking(runId, run.sync_type as SyncType);
+          } else {
+            sessionStorage.removeItem(EWORKS_ACTIVE_SYNC_RUN_KEY);
+          }
+        } catch {
+          sessionStorage.removeItem(EWORKS_ACTIVE_SYNC_RUN_KEY);
+        }
+      }
+    })();
+
+    return () => clearPollTimer();
+  }, [clearPollTimer, loadOverview, startTracking]);
+
+  const handleSync = useCallback(
+    async (type: SyncType) => {
+      setSyncing(type);
+      setSyncError(null);
+      setLastResult(null);
+      const req = buildDefaultSyncRequest(fullSync);
+      try {
+        const started =
+          type === "quotes"
+            ? await triggerQuotesSync(req)
+            : type === "jobs"
+              ? await triggerJobsSync(req)
+              : await triggerAllSync(req);
+        startTracking(started.run_id, type);
+        void loadOverview();
+      } catch (e: unknown) {
+        setSyncError(e instanceof Error ? e.message : "Sync failed");
+        setSyncing(null);
+      }
+    },
+    [fullSync, loadOverview, startTracking]
+  );
+
+  const isRunning = !!activeRunId && activeRun?.status === "running";
 
   return (
     <div className="space-y-6" data-testid="eworks-sync-page">
@@ -598,7 +696,13 @@ export default function EworksSyncPage() {
         description="Sync Quotes and Jobs from eWorks Manager into the local database (read-only from eWorks)."
       />
 
-      {/* Tab bar */}
+      {isRunning && (
+        <ActiveSyncBanner
+          syncType={(activeRun?.sync_type as SyncType) ?? syncing ?? "all"}
+          phase={activeRun?.metadata?.phase}
+        />
+      )}
+
       <div className="flex gap-1 border-b border-slate-200">
         {TABS.map((tab) => (
           <button
@@ -617,10 +721,25 @@ export default function EworksSyncPage() {
         ))}
       </div>
 
-      {/* Tab content */}
-      {activeTab === "sync" && <SyncTab />}
-      {activeTab === "quotes" && <QuotesTab />}
-      {activeTab === "jobs" && <JobsTab />}
+      <div className={activeTab === "sync" ? "block" : "hidden"}>
+        <SyncTab
+          status={status}
+          statusError={statusError}
+          runs={runs}
+          syncing={syncing}
+          lastResult={lastResult}
+          syncError={syncError}
+          fullSync={fullSync}
+          onFullSyncChange={setFullSync}
+          onSync={handleSync}
+        />
+      </div>
+      <div className={activeTab === "quotes" ? "block" : "hidden"}>
+        <QuotesTab refreshKey={refreshKey} />
+      </div>
+      <div className={activeTab === "jobs" ? "block" : "hidden"}>
+        <JobsTab refreshKey={refreshKey} />
+      </div>
     </div>
   );
 }

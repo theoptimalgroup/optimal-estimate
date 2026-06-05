@@ -93,6 +93,7 @@ test.describe("role-based navigation and access", () => {
     await expect(page.getByTestId("nav-item-dashboard")).toBeVisible();
     await expect(page.getByTestId("nav-item-users-roles")).toBeVisible();
     await expect(page.getByTestId("nav-item-quote-review")).toBeVisible();
+    await expect(page.getByTestId("nav-item-quotes")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Admin Dashboard" })).toBeVisible();
   });
 
@@ -190,6 +191,7 @@ test.describe("navigation UX", () => {
     const hrefs = await getSidebarNavHrefs(page);
     expect(hrefs.length).toBeGreaterThan(0);
     expect(new Set(hrefs).size).toBe(hrefs.length);
+    await expect(page.getByTestId("nav-item-quotes")).toBeVisible();
     await expect(page.getByTestId("nav-item-quote-review")).toBeVisible();
     await expect(page.getByTestId("nav-item-clients")).toBeVisible();
   });

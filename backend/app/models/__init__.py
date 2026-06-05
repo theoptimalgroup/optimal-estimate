@@ -1,7 +1,8 @@
 from app.models.calculation_session import CalculationSession
 from app.models.client import Client
 from app.models.client_alias import ClientAlias
-from app.models.eworks_sync import EworksJob, EworksQuote, EworksSyncRun
+from app.models.eworks_sync import EworksAttachment, EworksJob, EworksQuote, EworksSyncRun
+from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.job import Job, JobFinding
 from app.models.quote import Quote, QuoteCharge, QuoteLabour, QuoteMaterial, QuoteScopeItem
 from app.models.product import Product
@@ -34,4 +35,6 @@ __all__ = [
     "EworksQuote",
     "EworksJob",
     "EworksSyncRun",
+    "EworksAttachment",
+    "EworksQuoteAssignment",
 ]

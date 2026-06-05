@@ -4,12 +4,29 @@ import { apiFetch } from "@/lib/api";
 // Types
 // ---------------------------------------------------------------------------
 
+export const EWORKS_ACTIVE_SYNC_RUN_KEY = "eworks-active-sync-run";
+
+export type EworksActiveSync = {
+  run_id: string;
+  sync_type: string;
+  started_at: string | null;
+  phase?: string | null;
+};
+
 export type EworksSyncStatus = {
   quotes_count: number;
   jobs_count: number;
   last_quotes_sync: string | null;
   last_jobs_sync: string | null;
   eworks_api_enabled: boolean;
+  active_sync?: EworksActiveSync | null;
+};
+
+export type EworksSyncStartResponse = {
+  run_id: string;
+  sync_type: string;
+  status: string;
+  message: string;
 };
 
 export type EworksSyncBucketSummary = {
@@ -44,6 +61,13 @@ export type EworksSyncRunRecord = {
   updated_count: number;
   failed_count: number;
   error_message: string | null;
+  metadata?: {
+    phase?: string;
+    quotes?: EworksSyncBucketSummary;
+    jobs?: EworksSyncBucketSummary;
+    summary?: EworksSyncBucketSummary;
+    errors?: string[];
+  } | null;
 };
 
 export type EworksQuoteRecord = {
@@ -63,6 +87,7 @@ export type EworksQuoteRecord = {
   subtotal: number | null;
   vat: number | null;
   total: number | null;
+  tags?: string[];
   synced_at: string | null;
 };
 
@@ -81,6 +106,7 @@ export type EworksJobRecord = {
   subtotal: number | null;
   vat: number | null;
   total: number | null;
+  tags?: string[];
   synced_at: string | null;
 };
 
@@ -95,6 +121,7 @@ export type QuoteFilters = {
   search?: string;
   customer_name?: string;
   status?: string;
+  tag?: string;
   date_from?: string;
   date_to?: string;
   limit?: number;
@@ -105,49 +132,83 @@ export type JobFilters = {
   search?: string;
   customer_name?: string;
   status?: string;
+  tag?: string;
   date_from?: string;
   date_to?: string;
   limit?: number;
   offset?: number;
 };
 
-// ---------------------------------------------------------------------------
-// API functions
-// ---------------------------------------------------------------------------
+export const EWORKS_SYNC_DEFAULT_DAYS = 7;
+
+export function buildDefaultSyncRequest(full = false): EworksSyncRequest {
+  if (full) {
+    return { full: true };
+  }
+  const today = new Date();
+  const from = new Date(today);
+  from.setDate(from.getDate() - EWORKS_SYNC_DEFAULT_DAYS);
+  return {
+    full: false,
+    date_from: from.toISOString().slice(0, 10),
+    date_to: today.toISOString().slice(0, 10),
+  };
+}
 
 export async function getEworksSyncStatus(): Promise<EworksSyncStatus> {
   const resp = await apiFetch<EworksSyncStatus>("/api/v1/eworks-sync/status");
   return resp.data;
 }
 
-export async function triggerQuotesSync(req: EworksSyncRequest = {}): Promise<{
-  summary: EworksSyncBucketSummary;
-  run_id: string;
-}> {
-  const resp = await apiFetch<{ summary: EworksSyncBucketSummary; run_id: string }>(
+export async function triggerQuotesSync(req: EworksSyncRequest = {}): Promise<EworksSyncStartResponse> {
+  const resp = await apiFetch<EworksSyncStartResponse>(
     "/api/v1/eworks-sync/quotes",
     { method: "POST", body: JSON.stringify(req) }
   );
   return resp.data;
 }
 
-export async function triggerJobsSync(req: EworksSyncRequest = {}): Promise<{
-  summary: EworksSyncBucketSummary;
-  run_id: string;
-}> {
-  const resp = await apiFetch<{ summary: EworksSyncBucketSummary; run_id: string }>(
+export async function triggerJobsSync(req: EworksSyncRequest = {}): Promise<EworksSyncStartResponse> {
+  const resp = await apiFetch<EworksSyncStartResponse>(
     "/api/v1/eworks-sync/jobs",
     { method: "POST", body: JSON.stringify(req) }
   );
   return resp.data;
 }
 
-export async function triggerAllSync(req: EworksSyncRequest = {}): Promise<EworksSyncResult> {
-  const resp = await apiFetch<EworksSyncResult>(
+export async function triggerAllSync(req: EworksSyncRequest = {}): Promise<EworksSyncStartResponse> {
+  const resp = await apiFetch<EworksSyncStartResponse>(
     "/api/v1/eworks-sync/all",
     { method: "POST", body: JSON.stringify(req) }
   );
   return resp.data;
+}
+
+export async function getSyncRun(runId: string): Promise<EworksSyncRunRecord> {
+  const resp = await apiFetch<EworksSyncRunRecord>(`/api/v1/eworks-sync/runs/${runId}`);
+  return resp.data;
+}
+
+export function runToSyncResult(run: EworksSyncRunRecord): EworksSyncResult | EworksSyncBucketSummary | null {
+  if (run.sync_type === "all" && run.metadata) {
+    return {
+      quotes: run.metadata.quotes ?? { fetched: 0, created: 0, updated: 0, failed: 0 },
+      jobs: run.metadata.jobs ?? { fetched: 0, created: 0, updated: 0, failed: 0 },
+      errors: run.metadata.errors ?? (run.error_message ? [run.error_message] : []),
+    };
+  }
+  if (run.metadata?.summary) {
+    return run.metadata.summary;
+  }
+  if (run.status !== "running") {
+    return {
+      fetched: run.fetched_count,
+      created: run.created_count,
+      updated: run.updated_count,
+      failed: run.failed_count,
+    };
+  }
+  return null;
 }
 
 export async function getSyncRuns(params: { limit?: number; offset?: number } = {}): Promise<
@@ -169,6 +230,7 @@ export async function listSyncedQuotes(
   if (filters.search) qs.set("search", filters.search);
   if (filters.customer_name) qs.set("customer_name", filters.customer_name);
   if (filters.status) qs.set("status", filters.status);
+  if (filters.tag) qs.set("tag", filters.tag);
   if (filters.date_from) qs.set("date_from", filters.date_from);
   if (filters.date_to) qs.set("date_to", filters.date_to);
   if (filters.limit !== undefined) qs.set("limit", String(filters.limit));
@@ -186,6 +248,7 @@ export async function listSyncedJobs(
   if (filters.search) qs.set("search", filters.search);
   if (filters.customer_name) qs.set("customer_name", filters.customer_name);
   if (filters.status) qs.set("status", filters.status);
+  if (filters.tag) qs.set("tag", filters.tag);
   if (filters.date_from) qs.set("date_from", filters.date_from);
   if (filters.date_to) qs.set("date_to", filters.date_to);
   if (filters.limit !== undefined) qs.set("limit", String(filters.limit));
@@ -194,4 +257,155 @@ export async function listSyncedJobs(
     `/api/v1/eworks-sync/jobs${qs.size ? `?${qs}` : ""}`
   );
   return resp.data;
+}
+
+export type EworksSafeLineItem = {
+  name?: string | null;
+  description?: string | null;
+  quantity?: string | null;
+  unit_price?: string | null;
+  total?: string | null;
+};
+
+export type EworksSafeCustomField = {
+  label: string;
+  field_key: string;
+  value: string;
+};
+
+export type EworksLinkedEstimate = {
+  has_estimate_session: boolean;
+  session_id?: string | null;
+  status?: string | null;
+  client_accepted_at?: string | null;
+};
+
+export type EworksSafeFinancials = {
+  subtotal?: number | null;
+  vat?: number | null;
+  total?: number | null;
+  discount_type?: string | null;
+  discount_value?: string | null;
+  currency?: string | null;
+};
+
+export type EworksQuoteSafeDetail = {
+  identity: {
+    id: number;
+    eworks_quote_id: number;
+    quote_ref?: string | null;
+    status?: string | null;
+    status_name?: string | null;
+    synced_at?: string | null;
+  };
+  customer: {
+    customer_id?: number | string | null;
+    customer_name?: string | null;
+    customer_contact_id?: number | string | null;
+    customer_contact_name?: string | null;
+    customer_site_id?: number | string | null;
+    site_name?: string | null;
+    site_address?: string | null;
+    customer_ref?: string | null;
+    po_ref?: string | null;
+    wo_ref?: string | null;
+  };
+  quote_details: {
+    quote_type_id?: number | string | null;
+    quote_source_id?: number | string | null;
+    project_id?: number | string | null;
+    quote_date?: string | null;
+    expiry_date?: string | null;
+    preferred_date?: string | null;
+    preferred_time?: string | null;
+    description?: string | null;
+    notes?: string | null;
+    customer_notes?: string | null;
+    terms?: string | null;
+  };
+  financials: EworksSafeFinancials;
+  tags: string[];
+  items: EworksSafeLineItem[];
+  custom_fields: EworksSafeCustomField[];
+  dates: {
+    created_on?: string | null;
+    updated_on?: string | null;
+    converted_date?: string | null;
+    accepted_date?: string | null;
+  };
+  linked_estimate: EworksLinkedEstimate;
+};
+
+export type EworksJobSafeDetail = {
+  identity: {
+    id: number;
+    eworks_job_id: number;
+    job_ref?: string | null;
+    status?: string | null;
+    status_name?: string | null;
+    synced_at?: string | null;
+  };
+  customer: {
+    customer_id?: number | string | null;
+    customer_name?: string | null;
+    customer_contact_id?: number | string | null;
+    customer_contact_name?: string | null;
+    customer_site_id?: number | string | null;
+    site_name?: string | null;
+    site_address?: string | null;
+  };
+  related_quote: {
+    eworks_quote_id?: number | string | null;
+    quote_ref?: string | null;
+  };
+  job_details: {
+    job_date?: string | null;
+    description?: string | null;
+    notes?: string | null;
+  };
+  financials: EworksSafeFinancials;
+  tags: string[];
+  items: EworksSafeLineItem[];
+  custom_fields: EworksSafeCustomField[];
+  dates: {
+    created_on?: string | null;
+    updated_on?: string | null;
+    completed_date?: string | null;
+  };
+  linked_estimate: EworksLinkedEstimate;
+};
+
+export async function getSafeQuoteDetail(id: number): Promise<EworksQuoteSafeDetail> {
+  const resp = await apiFetch<EworksQuoteSafeDetail>(`/api/v1/eworks-sync/quotes/${id}/safe`);
+  return resp.data;
+}
+
+export async function getSafeJobDetail(id: number): Promise<EworksJobSafeDetail> {
+  const resp = await apiFetch<EworksJobSafeDetail>(`/api/v1/eworks-sync/jobs/${id}/safe`);
+  return resp.data;
+}
+
+export type EworksAttachmentSafe = {
+  id: number;
+  filename?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  description?: string | null;
+  uploaded_by?: string | null;
+  created_on?: string | null;
+  synced_at?: string | null;
+};
+
+export async function listQuoteAttachments(quoteId: number): Promise<EworksAttachmentSafe[]> {
+  const resp = await apiFetch<{ items: EworksAttachmentSafe[]; total: number }>(
+    `/api/v1/eworks-sync/quotes/${quoteId}/attachments`
+  );
+  return resp.data.items;
+}
+
+export async function listJobAttachments(jobId: number): Promise<EworksAttachmentSafe[]> {
+  const resp = await apiFetch<{ items: EworksAttachmentSafe[]; total: number }>(
+    `/api/v1/eworks-sync/jobs/${jobId}/attachments`
+  );
+  return resp.data.items;
 }

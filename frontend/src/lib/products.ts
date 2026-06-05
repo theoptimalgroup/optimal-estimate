@@ -43,6 +43,26 @@ export type ProductUpdatePayload = {
   is_active?: boolean;
 };
 
+export type ProductSyncItemError = {
+  eworks_item_id: string;
+  item_name: string;
+  error: string;
+};
+
+export type ProductSyncSummary = {
+  fetched: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  errors: ProductSyncItemError[];
+};
+
+export type ProductSyncResult = {
+  message: string;
+  summary: ProductSyncSummary;
+};
+
 function normalizeProduct(raw: Record<string, unknown>): Product {
   return {
     id: Number(raw.id),
@@ -97,6 +117,59 @@ export async function updateProduct(productId: number, payload: ProductUpdatePay
     body: JSON.stringify(payload),
   });
   return normalizeProduct(response.data as unknown as Record<string, unknown>);
+}
+
+function normalizeProductSyncError(raw: unknown): ProductSyncItemError {
+  if (raw && typeof raw === "object") {
+    const item = raw as Record<string, unknown>;
+    return {
+      eworks_item_id: String(item.eworks_item_id ?? ""),
+      item_name: String(item.item_name ?? ""),
+      error: String(item.error ?? "invalid item data"),
+    };
+  }
+  return {
+    eworks_item_id: "",
+    item_name: "",
+    error: String(raw ?? "invalid item data"),
+  };
+}
+
+function normalizeProductSyncSummary(raw: Record<string, unknown>): ProductSyncSummary {
+  return {
+    fetched: Number(raw.fetched ?? raw.total_fetched ?? 0),
+    created: Number(raw.created ?? raw.inserted ?? 0),
+    updated: Number(raw.updated ?? 0),
+    skipped: Number(raw.skipped ?? 0),
+    failed: Number(raw.failed ?? 0),
+    errors: Array.isArray(raw.errors) ? raw.errors.map(normalizeProductSyncError) : [],
+  };
+}
+
+export async function syncProductsFromEworks(): Promise<ProductSyncResult> {
+  const response = await apiFetch<ProductSyncResult>("/api/v1/integrations/eworks/products/sync", {
+    method: "POST",
+  });
+  const data = response.data as unknown as Record<string, unknown>;
+  const summaryRaw = (data.summary ?? data) as Record<string, unknown>;
+  return {
+    message: String(data.message ?? "eWorks products synced successfully"),
+    summary: normalizeProductSyncSummary(summaryRaw),
+  };
+}
+
+export function formatProductSyncError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "Failed to sync products from eWorks.";
+  }
+  const message = error.message;
+  if (/EWORKS_(BASE_URL|API_KEY) is missing/i.test(message)) {
+    return "eWorks API is not configured. Ask an administrator to set EWORKS_BASE_URL and EWORKS_API_KEY.";
+  }
+  if (/misconfigured|not configured/i.test(message)) {
+    return "eWorks API is not configured. Ask an administrator to set EWORKS_BASE_URL and EWORKS_API_KEY.";
+  }
+  return message || "Failed to sync products from eWorks.";
 }
 
 export function hasScope(product: Product): boolean {

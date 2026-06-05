@@ -7,16 +7,33 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.models.eworks_sync import EworksJob, EworksQuote, EworksSyncRun
 from app.schemas.eworks_sync_api import EworksSyncBucketSummary, EworksSyncSummary
+from app.services.eworks_attachment_sync_service import sync_parent_attachments
 from app.services.eworks_quotes_jobs_api_service import fetch_all_jobs, fetch_all_quotes
 
 logger = logging.getLogger(__name__)
+
+SYNC_DEFAULT_DAYS = 7
+
+
+def resolve_sync_filters(filters: dict | None = None, *, full: bool = False) -> dict:
+    """Apply default rolling date window unless full sync or explicit dates are provided."""
+    resolved = dict(filters or {})
+    if full:
+        return resolved
+    if resolved.get("date_from") or resolved.get("date_to"):
+        return resolved
+
+    today = datetime.now(timezone.utc).date()
+    resolved["date_from"] = (today - timedelta(days=SYNC_DEFAULT_DAYS)).isoformat()
+    resolved["date_to"] = today.isoformat()
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +66,74 @@ def _safe_str(val: Any, max_len: int | None = None) -> str | None:
     if s and max_len:
         s = s[:max_len]
     return s
+
+
+def _normalize_tag_string(value: str) -> str | None:
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _extract_tag_from_object(obj: Any) -> str | None:
+    if isinstance(obj, str):
+        return _normalize_tag_string(obj)
+    if isinstance(obj, dict):
+        for key in ("name", "title", "label", "value", "tag"):
+            val = obj.get(key)
+            if val is not None:
+                tag = _normalize_tag_string(str(val))
+                if tag:
+                    return tag
+    return None
+
+
+def _normalize_tags(value: Any) -> list[str]:
+    """Normalize eWorks tag-like values into a deduplicated list of strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [part for part in (_normalize_tag_string(p) for p in value.split(",")) if part]
+    if isinstance(value, list):
+        tags: list[str] = []
+        for item in value:
+            tag = _extract_tag_from_object(item)
+            if tag and tag not in tags:
+                tags.append(tag)
+        return tags
+    if isinstance(value, dict):
+        tag = _extract_tag_from_object(value)
+        return [tag] if tag else []
+    tag = _normalize_tag_string(str(value))
+    return [tag] if tag else []
+
+
+def _append_tags(tags: list[str], values: Any) -> None:
+    for tag in _normalize_tags(values):
+        if tag not in tags:
+            tags.append(tag)
+
+
+def _extract_tags_from_raw(raw: dict[str, Any]) -> list[str]:
+    """Extract normalized tags from common eWorks payload fields."""
+    tags: list[str] = []
+    for field in ("tags", "tag", "tag_names", "labels", "categories"):
+        _append_tags(tags, raw.get(field))
+
+    custom_fields = raw.get("custom_fields")
+    if isinstance(custom_fields, dict):
+        for field in ("tags", "tag", "tag_names", "labels", "categories"):
+            _append_tags(tags, custom_fields.get(field))
+    elif isinstance(custom_fields, list):
+        for item in custom_fields:
+            if not isinstance(item, dict):
+                _append_tags(tags, item)
+                continue
+            field_name = str(
+                item.get("name") or item.get("label") or item.get("field") or item.get("key") or ""
+            ).lower()
+            if field_name and ("tag" in field_name or field_name in {"labels", "categories"}):
+                _append_tags(tags, item.get("value") or item.get("values") or item)
+
+    return tags
 
 
 def _extract_quote_fields(raw: dict[str, Any]) -> dict[str, Any]:
@@ -85,6 +170,7 @@ def _extract_quote_fields(raw: dict[str, Any]) -> dict[str, Any]:
         "subtotal": _safe_float(raw.get("sub_total") or raw.get("subtotal")),
         "vat": _safe_float(raw.get("vat")),
         "total": _safe_float(raw.get("total")),
+        "tags": _extract_tags_from_raw(raw),
         "raw_payload": raw,
     }
 
@@ -123,6 +209,7 @@ def _extract_job_fields(raw: dict[str, Any]) -> dict[str, Any]:
         "subtotal": _safe_float(raw.get("sub_total") or raw.get("subtotal")),
         "vat": _safe_float(raw.get("vat")),
         "total": _safe_float(raw.get("total")),
+        "tags": _extract_tags_from_raw(raw),
         "raw_payload": raw,
     }
 
@@ -148,14 +235,26 @@ def _upsert_quotes(db: Session, records: list[dict[str, Any]]) -> EworksSyncBuck
             fields["synced_at"] = now
 
             if existing is None:
-                db.add(EworksQuote(**fields))
+                row = EworksQuote(**fields)
+                db.add(row)
+                db.flush()
                 summary.created += 1
             else:
                 for key, val in fields.items():
                     if key == "eworks_quote_id":
                         continue
                     setattr(existing, key, val)
+                row = existing
+                db.flush()
                 summary.updated += 1
+
+            sync_parent_attachments(
+                db,
+                parent_type="quote",
+                parent_eworks_id=eworks_id,
+                parent_local_id=row.id,
+                raw_payload=raw,
+            )
 
         except Exception as exc:
             logger.exception("Failed to upsert eWorks Quote id=%s: %s", raw.get("id"), exc)
@@ -182,14 +281,26 @@ def _upsert_jobs(db: Session, records: list[dict[str, Any]]) -> EworksSyncBucket
             fields["synced_at"] = now
 
             if existing is None:
-                db.add(EworksJob(**fields))
+                row = EworksJob(**fields)
+                db.add(row)
+                db.flush()
                 summary.created += 1
             else:
                 for key, val in fields.items():
                     if key == "eworks_job_id":
                         continue
                     setattr(existing, key, val)
+                row = existing
+                db.flush()
                 summary.updated += 1
+
+            sync_parent_attachments(
+                db,
+                parent_type="job",
+                parent_eworks_id=eworks_id,
+                parent_local_id=row.id,
+                raw_payload=raw,
+            )
 
         except Exception as exc:
             logger.exception("Failed to upsert eWorks Job id=%s: %s", raw.get("id"), exc)
@@ -246,10 +357,12 @@ def sync_quotes_from_eworks(
     *,
     filters: dict | None = None,
     user_id: uuid.UUID | None = None,
+    run: EworksSyncRun | None = None,
 ) -> tuple[EworksSyncBucketSummary, EworksSyncRun]:
     """Fetch all eWorks Quotes and upsert into local DB."""
     filters = filters or {}
-    run = _start_run(db, sync_type="quotes", user_id=user_id)
+    if run is None:
+        run = _start_run(db, sync_type="quotes", user_id=user_id)
 
     try:
         records = fetch_all_quotes(
@@ -265,6 +378,7 @@ def sync_quotes_from_eworks(
             fetched=0, created=0, updated=0, failed=0,
             error_message=str(exc),
         )
+        run.metadata_ = {**(run.metadata_ or {}), "summary": {"fetched": 0, "created": 0, "updated": 0, "failed": 0}}
         raise
 
     summary = _upsert_quotes(db, records)
@@ -277,6 +391,7 @@ def sync_quotes_from_eworks(
         updated=summary.updated,
         failed=summary.failed,
     )
+    run.metadata_ = {**(run.metadata_ or {}), "summary": summary.model_dump()}
 
     logger.info(
         "eWorks quotes sync finished: fetched=%s created=%s updated=%s failed=%s",
@@ -290,10 +405,12 @@ def sync_jobs_from_eworks(
     *,
     filters: dict | None = None,
     user_id: uuid.UUID | None = None,
+    run: EworksSyncRun | None = None,
 ) -> tuple[EworksSyncBucketSummary, EworksSyncRun]:
     """Fetch all eWorks Jobs and upsert into local DB."""
     filters = filters or {}
-    run = _start_run(db, sync_type="jobs", user_id=user_id)
+    if run is None:
+        run = _start_run(db, sync_type="jobs", user_id=user_id)
 
     try:
         records = fetch_all_jobs(
@@ -309,6 +426,7 @@ def sync_jobs_from_eworks(
             fetched=0, created=0, updated=0, failed=0,
             error_message=str(exc),
         )
+        run.metadata_ = {**(run.metadata_ or {}), "summary": {"fetched": 0, "created": 0, "updated": 0, "failed": 0}}
         raise
 
     summary = _upsert_jobs(db, records)
@@ -321,6 +439,7 @@ def sync_jobs_from_eworks(
         updated=summary.updated,
         failed=summary.failed,
     )
+    run.metadata_ = {**(run.metadata_ or {}), "summary": summary.model_dump()}
 
     logger.info(
         "eWorks jobs sync finished: fetched=%s created=%s updated=%s failed=%s",
@@ -334,22 +453,79 @@ def sync_all_eworks(
     *,
     filters: dict | None = None,
     user_id: uuid.UUID | None = None,
+    run: EworksSyncRun | None = None,
 ) -> EworksSyncSummary:
     """Fetch all eWorks Quotes and Jobs and upsert both into local DB."""
+    filters = filters or {}
     errors: list[str] = []
+    q_summary = EworksSyncBucketSummary()
+    j_summary = EworksSyncBucketSummary()
+
+    if run is None:
+        run = _start_run(db, sync_type="all", user_id=user_id)
+
+    run.metadata_ = {**(run.metadata_ or {}), "phase": "quotes"}
 
     try:
-        q_summary, _ = sync_quotes_from_eworks(db, filters=filters, user_id=user_id)
+        records = fetch_all_quotes(
+            date_from=filters.get("date_from"),
+            date_to=filters.get("date_to"),
+            status=filters.get("status"),
+            page_limit=filters.get("page_limit"),
+        )
+        q_summary = _upsert_quotes(db, records)
     except Exception as exc:
         logger.exception("eWorks all-sync: quotes failed: %s", exc)
-        q_summary = EworksSyncBucketSummary()
         errors.append(f"Quotes: {exc}")
 
+    run.metadata_ = {**(run.metadata_ or {}), "phase": "jobs", "quotes": q_summary.model_dump()}
+
     try:
-        j_summary, _ = sync_jobs_from_eworks(db, filters=filters, user_id=user_id)
+        records = fetch_all_jobs(
+            date_from=filters.get("date_from"),
+            date_to=filters.get("date_to"),
+            status=filters.get("status"),
+            page_limit=filters.get("page_limit"),
+        )
+        j_summary = _upsert_jobs(db, records)
     except Exception as exc:
         logger.exception("eWorks all-sync: jobs failed: %s", exc)
-        j_summary = EworksSyncBucketSummary()
         errors.append(f"Jobs: {exc}")
 
+    total_fetched = q_summary.fetched + j_summary.fetched
+    total_created = q_summary.created + j_summary.created
+    total_updated = q_summary.updated + j_summary.updated
+    total_failed = q_summary.failed + j_summary.failed
+
+    if errors and total_fetched == 0:
+        run_status = "failed"
+    elif errors or total_failed > 0:
+        run_status = "partial"
+    else:
+        run_status = "success"
+
+    _finish_run(
+        db,
+        run,
+        status=run_status,
+        fetched=total_fetched,
+        created=total_created,
+        updated=total_updated,
+        failed=total_failed,
+        error_message="; ".join(errors) if errors else None,
+    )
+    run.metadata_ = {
+        **(run.metadata_ or {}),
+        "phase": "completed",
+        "quotes": q_summary.model_dump(),
+        "jobs": j_summary.model_dump(),
+        "errors": errors,
+    }
+
+    logger.info(
+        "eWorks all-sync finished: quotes_fetched=%s jobs_fetched=%s errors=%s",
+        q_summary.fetched,
+        j_summary.fetched,
+        len(errors),
+    )
     return EworksSyncSummary(quotes=q_summary, jobs=j_summary, errors=errors)
