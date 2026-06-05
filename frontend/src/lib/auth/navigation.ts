@@ -15,6 +15,7 @@ const ADMIN_NAV: NavItem[] = [
   { label: "Trades", href: "/admin/trades" },
   { label: "Products/Scope", href: "/admin/products" },
   { label: "Rate Rules", href: "/admin/rate-rules" },
+  { label: "eWorks Sync", href: "/admin/eworks-sync" },
   { label: "Audit Logs", href: "/admin/audit-logs" },
   { label: "Settings", href: "/admin/settings" },
 ];

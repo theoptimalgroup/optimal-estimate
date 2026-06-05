@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import auth, audit_logs, calculation_session, client_quotes, clients, dashboard, engineer_session, estimator, integrations, products, rate_rules, reports, settings, trades, users
+from app.api.v1 import eworks_sync
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -18,3 +19,4 @@ api_router.include_router(settings.router)
 api_router.include_router(estimator.router)
 api_router.include_router(client_quotes.router)
 api_router.include_router(integrations.eworks.router)
+api_router.include_router(eworks_sync.router)

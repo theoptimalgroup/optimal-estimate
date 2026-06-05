@@ -1,6 +1,7 @@
 from app.models.calculation_session import CalculationSession
 from app.models.client import Client
 from app.models.client_alias import ClientAlias
+from app.models.eworks_sync import EworksJob, EworksQuote, EworksSyncRun
 from app.models.job import Job, JobFinding
 from app.models.quote import Quote, QuoteCharge, QuoteLabour, QuoteMaterial, QuoteScopeItem
 from app.models.product import Product
@@ -30,4 +31,7 @@ __all__ = [
     "AuditLog",
     "IntegrationEvent",
     "IdempotencyKey",
+    "EworksQuote",
+    "EworksJob",
+    "EworksSyncRun",
 ]
