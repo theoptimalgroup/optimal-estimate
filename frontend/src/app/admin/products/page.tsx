@@ -336,7 +336,6 @@ export default function AdminProductsPage() {
     <div className="space-y-6" data-testid="admin-products-page">
       <PageHeader
         title="Products / Scope"
-        description="Manage product catalogue and scope-of-work templates used in the estimate form."
         actions={
           <div className="flex flex-wrap gap-2">
             <PrimaryButton
@@ -354,7 +353,7 @@ export default function AdminProductsPage() {
       />
 
       <p className="text-sm text-slate-600" data-testid="products-sync-helper">
-        Reads product names, codes, descriptions, and pricing from eWorks. This does not write to eWorks.
+        Read-only from eWorks.
       </p>
 
       {syncSummary ? <SyncSummaryBanner summary={syncSummary} /> : null}

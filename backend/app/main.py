@@ -14,7 +14,31 @@ from app.core.logging import configure_application_insights, configure_logging
 async def lifespan(_app: FastAPI):
     configure_logging()
     configure_application_insights()
+
+    from app.db.session import SessionLocal
+    from app.services.background_sync_scheduler import (
+        start_background_sync_scheduler,
+        stop_background_sync_scheduler,
+    )
+    from app.services.eworks_sync_run_state import clear_stale_running_sync_locks
+
+    import logging
+
+    startup_logger = logging.getLogger(__name__)
+
+    db = SessionLocal()
+    try:
+        cleared = clear_stale_running_sync_locks(db)
+        if cleared:
+            startup_logger.info("Cleared %s stale eWorks sync run(s) on startup", cleared)
+    except Exception:
+        startup_logger.exception("Failed to recover stale eWorks sync runs on startup")
+    finally:
+        db.close()
+
+    start_background_sync_scheduler()
     yield
+    stop_background_sync_scheduler()
 
 
 app = FastAPI(title="Optimal Estimate Calculator API", version="1.0.0", lifespan=lifespan)

@@ -39,6 +39,7 @@ import {
   step2ToQuestionnaire,
   type QuestionnaireFormValues,
 } from "@/lib/eworks-calculate-schema";
+import { formatWorkLabel } from "@/lib/work-label";
 import { fetchAllTrades } from "@/lib/trades";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -108,12 +109,16 @@ function firstErrorMessage(error: unknown, path: string[] = []): string | null {
   return null;
 }
 
-function questionnaireValidationMessage(errors: FieldErrors<QuestionnaireFormValues>): string | null {
+function questionnaireValidationMessage(
+  errors: FieldErrors<QuestionnaireFormValues>,
+  works: QuestionnaireFormValues["works"],
+): string | null {
   const workIndex = firstInvalidWorkIndex(errors);
   if (workIndex === null) return null;
   const workErrors = errors.works?.[workIndex];
   const message = firstErrorMessage(workErrors) ?? "complete all required fields";
-  return `Work ${workIndex + 1}: ${message}`;
+  const label = formatWorkLabel(works[workIndex], workIndex);
+  return `${label}: ${message}`;
 }
 
 function restoreUiState(
@@ -451,14 +456,15 @@ function EworksCalculateContent() {
       if (!valid) {
         const currentErrors = form.formState.errors;
         setValidationError(
-          questionnaireValidationMessage(currentErrors) ?? "Please complete all required fields in the questionnaire.",
+          questionnaireValidationMessage(currentErrors, getValues().works) ??
+            "Please complete all required fields in the questionnaire.",
         );
         setFocusWorkIndex(firstInvalidWorkIndex(currentErrors));
       }
       return valid;
     }
     return true;
-  }, [step, trigger, form]);
+  }, [step, trigger, form, getValues]);
 
   const goToStep = useCallback(
     (index: number) => {
@@ -494,7 +500,8 @@ function EworksCalculateContent() {
       setStep(1);
       setFocusWorkIndex(workIndex);
       setValidationError(
-        questionnaireValidationMessage(currentErrors) ?? "Please complete all required fields before submitting.",
+        questionnaireValidationMessage(currentErrors, getValues().works) ??
+          "Please complete all required fields before submitting.",
       );
       return;
     }
@@ -665,12 +672,7 @@ function EworksCalculateContent() {
             </div>
             <div className="space-y-2">
               <EworksSectionTitle title="Quote submitted" />
-              <p className="text-sm leading-relaxed text-emerald-800">
-                Your estimate for quote {step1.quote_number} / job {step1.job_number} has been submitted successfully.
-              </p>
-              <p className="text-xs text-emerald-700">
-                The office team can review the full calculation and photos in the dashboard.
-              </p>
+              <p className="text-sm text-emerald-800">Estimate submitted.</p>
             </div>
           </div>
         )}

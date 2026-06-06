@@ -144,6 +144,16 @@ export async function getPublicAssignment(token: string): Promise<PublicAssignme
   return resp.data;
 }
 
+export async function startPublicAssignmentEstimate(
+  token: string,
+): Promise<AssignmentStartEstimateResult> {
+  const resp = await apiFetch<AssignmentStartEstimateResult>(
+    `/api/v1/quote-assignments/public/${token}/start-estimate`,
+    { method: "POST", token: null },
+  );
+  return resp.data;
+}
+
 export async function submitPublicAssignment(
   token: string,
   notes?: string,

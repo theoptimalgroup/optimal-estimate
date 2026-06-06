@@ -54,8 +54,22 @@ class Settings(BaseSettings):
     eworks_api_key: str | None = None
     eworks_api_enabled: bool = False
     eworks_api_timeout_seconds: float = 10.0
+    eworks_customers_resource_path: str = "Customer"
     eworks_sync_attachments_enabled: bool = False
     eworks_sync_attachment_files_enabled: bool = False
+    eworks_sync_running_timeout_minutes: int = 30
+    eworks_sync_lookback_days: int = 7
+
+    # Background eWorks sync scheduler (disabled by default; enable on one worker only)
+    eworks_background_sync_enabled: bool = False
+    eworks_background_quotes_enabled: bool = True
+    eworks_background_jobs_enabled: bool = True
+    eworks_background_products_enabled: bool = False
+    eworks_background_attachments_enabled: bool = True
+    eworks_quotes_sync_interval_minutes: int = 10
+    eworks_jobs_sync_interval_minutes: int = 30
+    eworks_products_sync_interval_minutes: int = 1440
+    run_background_worker: bool = False
 
     # eWorks acceptance sync (client quote acceptance → eWorks custom field)
     eworks_acceptance_sync_enabled: bool = False

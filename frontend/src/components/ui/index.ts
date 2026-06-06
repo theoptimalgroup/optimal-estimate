@@ -12,6 +12,7 @@ export {
 } from "@/components/ui/status-badge";
 export { RoleBadge } from "@/components/ui/role-badge";
 export { MoneyText } from "@/components/ui/money-text";
+export { SafeRichText, sanitizeRichTextHtml, looksLikeHtml, prepareRichTextValue, renderEworksRichText } from "@/components/ui/safe-rich-text";
 export { DateText } from "@/components/ui/date-text";
 export {
   FilterBar,

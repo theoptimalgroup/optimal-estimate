@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from app.auth.dependencies import DashboardAccess, require_dashboard_access
@@ -16,9 +16,15 @@ from app.schemas.eworks_link import (
 from app.services.audit_helpers import record_dashboard_audit
 from app.services.calculation_session_service import (
     combine_selected_work_internal_notes,
+    get_submitted_quote_group_detail,
+    list_submitted_quote_groups,
     list_submitted_quotes,
     reopen_submitted_session,
     render_combined_works_pdf,
+)
+from app.schemas.dashboard_quote_groups import (
+    DashboardQuoteGroupDetailResponse,
+    DashboardQuoteGroupsResponse,
 )
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -28,6 +34,34 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 def get_submitted_quotes(db: DbSession, _auth=Depends(require_dashboard_access)):
     result = list_submitted_quotes(db)
     return success_response(DashboardQuotesResponse.model_validate(result))
+
+
+@router.get("/quote-groups")
+def get_submitted_quote_groups(db: DbSession, _auth=Depends(require_dashboard_access)):
+    result = list_submitted_quote_groups(db)
+    return success_response(
+        DashboardQuoteGroupsResponse.model_validate(result).model_dump(mode="json"),
+        meta={"total": len(result.groups)},
+    )
+
+
+@router.get("/quote-groups/detail")
+def get_submitted_quote_group_detail_endpoint(
+    db: DbSession,
+    _auth=Depends(require_dashboard_access),
+    group_key: str | None = Query(default=None),
+    quote_ref: str | None = Query(default=None),
+    eworks_quote_id: int | None = Query(default=None),
+):
+    if not group_key and not quote_ref and eworks_quote_id is None:
+        raise HTTPException(status_code=400, detail="group_key, quote_ref, or eworks_quote_id is required")
+    result = get_submitted_quote_group_detail(
+        db,
+        group_key=group_key,
+        quote_ref=quote_ref,
+        eworks_quote_id=eworks_quote_id,
+    )
+    return success_response(DashboardQuoteGroupDetailResponse.model_validate(result).model_dump(mode="json"))
 
 
 @router.post("/quotes/{session_id}/reopen")

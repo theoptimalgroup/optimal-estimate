@@ -8,7 +8,7 @@ const mockPublicQuote = {
   scope_of_work: "Repaint hallway and landing",
   works: [
     {
-      title: "Work 1",
+      title: "Painting",
       product_name: "Painting",
       scope: "Repaint hallway and landing",
       description: "Two coats emulsion",

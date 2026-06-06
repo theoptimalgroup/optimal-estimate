@@ -62,3 +62,30 @@ def test_build_material_items_uses_per_item_cost_and_delivery() -> None:
     assert items[1][0] == "Bracket"
     assert items[1][2] == Decimal("10")
     assert items[1][3] == Decimal("0")
+
+
+def test_material_supplier_accepts_supplier_name() -> None:
+    supplier = MaterialSupplier(
+        supplier_name="Travis Perkins",
+        links=[MaterialLinkRow(link="Widget", quantity=Decimal("1"), cost=Decimal("10"))],
+        delivery_charge=Decimal("0"),
+    )
+    assert supplier.supplier_name == "Travis Perkins"
+
+
+def test_build_material_items_unchanged_by_supplier_name() -> None:
+    step2 = Step2Snapshot(
+        materials_to_order=[
+            MaterialSupplier(
+                supplier_name="Travis Perkins",
+                links=[MaterialLinkRow(link="Widget", quantity=Decimal("2"), cost=Decimal("25"))],
+                delivery_charge=Decimal("5"),
+            )
+        ],
+        markup_value=Decimal("20"),
+    )
+    items = build_material_items(step2)
+    assert len(items) == 1
+    assert items[0][0] == "Widget"
+    assert items[0][2] == Decimal("25")
+    assert items[0][3] == Decimal("5")

@@ -211,7 +211,7 @@ test.describe("Manager dashboard", () => {
     await expect(page.getByTestId("manager-dashboard-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Manager Dashboard" })).toBeVisible();
     await expect(
-      page.getByText("Track synced eWorks quotes by operational status.")
+      page.getByText("Quote workflow overview.")
     ).toBeVisible();
 
     await expect(page.getByTestId("kpi-new-quotes")).toBeVisible();

@@ -167,6 +167,46 @@ export default function AdminSettingsPage() {
             </dl>
           </SectionCard>
 
+          <SectionCard title="Background eWorks Sync" testId="settings-background-sync-card">
+            <dl className="divide-y divide-slate-100">
+              <SettingsRow
+                label="Background sync enabled"
+                value={<BoolBadge value={settings.eworks.background_sync.enabled} />}
+              />
+              <SettingsRow
+                label="Background worker"
+                value={<BoolBadge value={settings.eworks.background_sync.worker_enabled} />}
+              />
+              <SettingsRow
+                label="Scheduler active"
+                value={<BoolBadge value={settings.eworks.background_sync.scheduler_active} />}
+              />
+              <SettingsRow
+                label="Quotes interval"
+                value={`Every ${settings.eworks.background_sync.quotes_interval_minutes} minutes`}
+              />
+              <SettingsRow
+                label="Jobs interval"
+                value={`Every ${settings.eworks.background_sync.jobs_interval_minutes} minutes`}
+              />
+              <SettingsRow
+                label="Products interval"
+                value={`Every ${settings.eworks.background_sync.products_interval_minutes} minutes`}
+              />
+              <SettingsRow
+                label="Lookback days"
+                value={String(settings.eworks.background_sync.lookback_days)}
+              />
+              <SettingsRow
+                label="Running timeout"
+                value={`${settings.eworks.background_sync.running_timeout_minutes} minutes`}
+              />
+            </dl>
+            <p className="mt-4 text-xs text-slate-500">
+              Values are read from environment configuration. Editing from the UI is not supported yet.
+            </p>
+          </SectionCard>
+
           <SectionCard title="Dashboard" testId="settings-dashboard-card">
             <dl className="divide-y divide-slate-100">
               <SettingsRow

@@ -28,12 +28,28 @@ class EworksAcceptanceSyncSettingsRead(BaseModel):
     custom_field_configured: bool = True
 
 
+class EworksBackgroundSyncSettingsRead(BaseModel):
+    enabled: bool = False
+    worker_enabled: bool = False
+    scheduler_active: bool = False
+    quotes_enabled: bool = True
+    jobs_enabled: bool = True
+    products_enabled: bool = False
+    attachments_enabled: bool = True
+    quotes_interval_minutes: int = 10
+    jobs_interval_minutes: int = 30
+    products_interval_minutes: int = 1440
+    lookback_days: int = 7
+    running_timeout_minutes: int = 30
+
+
 class EworksSettingsRead(BaseModel):
     base_url_configured: bool
     api_key_configured: bool
     license_key_configured: bool
     api_enabled: bool
     acceptance_sync: EworksAcceptanceSyncSettingsRead = EworksAcceptanceSyncSettingsRead()
+    background_sync: EworksBackgroundSyncSettingsRead = EworksBackgroundSyncSettingsRead()
 
 
 class DashboardSettingsRead(BaseModel):

@@ -10,11 +10,12 @@ import { EworksButton, cn } from "@/components/eworks-ui";
 import {
   computeProductTotalPrice,
   defaultWorkBlockValues,
-  formatProductLabel,
   type ProductOption,
   type QuestionnaireFormValues,
 } from "@/lib/eworks-calculate-schema";
+import { formatWorkIndexLabel, formatWorkLabel } from "@/lib/work-label";
 import { canAutoFillScope, productScopeText, shouldPromptScopeReplace } from "@/lib/product-scope";
+import { cleanRichTextForTextarea, stripHtmlFromLabel } from "@/lib/html-text";
 
 type Props = {
   control: Control<QuestionnaireFormValues>;
@@ -96,7 +97,7 @@ export function EworksQuestionnaireStep({
 
     setValue(`${base}.selected_product_id`, product.id, { shouldValidate: true });
     setValue(`${base}.eworks_item_id`, product.eworks_item_id, { shouldValidate: true });
-    setValue(`${base}.product_name`, product.product_name, { shouldValidate: true });
+    setValue(`${base}.product_name`, stripHtmlFromLabel(product.product_name), { shouldValidate: true });
     setValue(`${base}.product_code`, product.product_code ?? "", { shouldValidate: true });
     setValue(`${base}.product_unit_price`, unitPrice, { shouldValidate: true });
     setValue(`${base}.product_total_price`, computeProductTotalPrice(quantity, unitPrice), { shouldValidate: true });
@@ -158,10 +159,6 @@ export function EworksQuestionnaireStep({
 
   return (
     <div className="space-y-5">
-      <p className="text-sm text-optimal-muted">
-        Complete each work block below. Select a product to auto-fill scope, then review and edit before submitting.
-      </p>
-
       <ScopeReplaceDialog
         open={scopeReplacePrompt !== null}
         onKeep={() => {
@@ -182,11 +179,10 @@ export function EworksQuestionnaireStep({
         {fields.map((field, index) => {
           const isExpanded = expandedIndex === index;
           const work = values.works[index];
+          const workTitle = formatWorkLabel(work, index);
+          const workIndexLabel = formatWorkIndexLabel(index);
           const scopePreview = work?.scope?.trim();
-          const productPreview =
-            work?.selected_product_id != null && work?.product_name
-              ? formatProductLabel({ product_name: work.product_name, product_code: work.product_code ?? null })
-              : null;
+          const scopePreviewText = scopePreview ? cleanRichTextForTextarea(scopePreview) : "";
           const hasErrors = !!errors.works?.[index];
           const cachedProductScope =
             work?.selected_product_id != null ? productScopeCache[work.selected_product_id] : undefined;
@@ -210,15 +206,15 @@ export function EworksQuestionnaireStep({
                     "flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all duration-200",
                     isExpanded ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700",
                   )}
-                  aria-label={`Work ${index + 1}`}
+                  aria-label={workTitle}
                 >
                   {index + 1}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Work {index + 1}
-                    {productPreview ? ` · ${productPreview}` : scopePreview ? " · Scope entered" : ""}
-                  </p>
+                  <p className="text-sm font-semibold text-gray-900">{workTitle}</p>
+                  {workTitle !== workIndexLabel ? (
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{workIndexLabel}</p>
+                  ) : null}
                   <div
                     className="mt-1"
                     onMouseDown={(e) => e.stopPropagation()}
@@ -231,10 +227,10 @@ export function EworksQuestionnaireStep({
                       onSelect={(product) => handleProductSelect(index, product)}
                     />
                   </div>
-                  {!isExpanded && scopePreview && (
+                  {!isExpanded && scopePreviewText && (
                     <span className="mt-1 block truncate text-xs text-optimal-muted">
-                      {scopePreview.slice(0, 72)}
-                      {scopePreview.length > 72 ? "…" : ""}
+                      {scopePreviewText.slice(0, 72)}
+                      {scopePreviewText.length > 72 ? "…" : ""}
                     </span>
                   )}
                 </div>
@@ -243,7 +239,7 @@ export function EworksQuestionnaireStep({
                   className="flex min-h-[44px] shrink-0 items-center rounded-lg px-2 py-2 text-optimal-muted transition-colors hover:bg-gray-50"
                   onClick={() => setExpandedIndex(isExpanded ? -1 : index)}
                   aria-expanded={isExpanded}
-                  aria-label={isExpanded ? `Collapse work ${index + 1}` : `Expand work ${index + 1}`}
+                  aria-label={isExpanded ? `Collapse ${workTitle}` : `Expand ${workTitle}`}
                 >
                   <span className={cn("transition-transform duration-200", isExpanded && "rotate-180")}>▾</span>
                 </button>
@@ -263,7 +259,6 @@ export function EworksQuestionnaireStep({
                   <div className="border-t border-slate-200 px-5 pb-5 pt-4">
                     <EworksWorkBlockForm
                       workIndex={index}
-                      workNumber={index + 1}
                       control={control}
                       register={register}
                       watch={watch}

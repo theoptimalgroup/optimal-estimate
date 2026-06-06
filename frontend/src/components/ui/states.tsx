@@ -29,12 +29,14 @@ export function EmptyState({
   action,
   icon,
   className,
+  "data-testid": testId,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
   icon?: ReactNode;
   className?: string;
+  "data-testid"?: string;
 }) {
   return (
     <div
@@ -42,7 +44,7 @@ export function EmptyState({
         "flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center shadow-sm",
         className,
       )}
-      data-testid="empty-state"
+      data-testid={testId ?? "empty-state"}
     >
       {icon ? (
         <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-slate-50 text-slate-400">

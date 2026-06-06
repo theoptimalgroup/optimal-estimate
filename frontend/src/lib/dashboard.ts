@@ -8,6 +8,9 @@ const DASHBOARD_PASSWORD_KEY = "eworks-dashboard-password";
 export type DashboardWorkItem = {
   work_index: number;
   scope?: string | null;
+  product_name?: string | null;
+  product_code?: string | null;
+  display_label?: string | null;
   labour_subtotal?: number | string | null;
   materials_subtotal?: number | string | null;
   internal_notes?: string | null;
@@ -32,6 +35,95 @@ export type DashboardQuoteItem = {
 export type DashboardQuotesResponse = {
   quotes: DashboardQuoteItem[];
 };
+
+export type DashboardQuoteGroupSessionItem = {
+  session_id: string;
+  submitted_at: string;
+  final_total?: number | string | null;
+  works_count: number;
+  status: string;
+  accepted: boolean;
+  client_accepted_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type DashboardQuoteGroupSessionDetailItem = DashboardQuoteGroupSessionItem & {
+  submitted_by_user_id?: string | null;
+  submitted_by_name?: string;
+  submitted_by_email?: string | null;
+  submitted_by_role?: string | null;
+  is_latest?: boolean;
+};
+
+export type DashboardQuoteGroupAssignmentItem = {
+  id: number;
+  assignment_type: "estimator" | "engineer" | string;
+  assignee_kind: "registered" | "external" | string;
+  assigned_user_id?: string | null;
+  assigned_user_name?: string | null;
+  assigned_user_email?: string | null;
+  status: "assigned" | "in_progress" | "submitted" | "cancelled" | string;
+  assigned_at: string;
+  started_at?: string | null;
+  submitted_at?: string | null;
+  calculation_session_id?: string | null;
+  has_submission: boolean;
+};
+
+export type DashboardQuoteGroupAssignmentSummary = {
+  total_assignments: number;
+  estimator_assignments: number;
+  engineer_assignments: number;
+  pending_assignments: number;
+  in_progress_assignments: number;
+  submitted_assignments: number;
+  cancelled_assignments: number;
+};
+
+export type DashboardQuoteGroupItem = {
+  group_key: string;
+  quote_ref: string | null;
+  eworks_quote_id: number | null;
+  client_name: string;
+  trade_name: string;
+  submission_count: number;
+  latest_submitted_at: string;
+  latest_total?: number | string | null;
+  highest_total?: number | string | null;
+  lowest_total?: number | string | null;
+  accepted: boolean;
+  client_accepted_at?: string | null;
+  reopened_count: number;
+  latest_session_id: string;
+  sessions: DashboardQuoteGroupSessionItem[];
+};
+
+export type DashboardQuoteGroupDetailItem = DashboardQuoteGroupItem & {
+  review_status?: "pending" | "in_progress" | "ready_for_review" | "accepted" | string;
+  assignment_summary?: DashboardQuoteGroupAssignmentSummary;
+  assignments?: DashboardQuoteGroupAssignmentItem[];
+  sessions: DashboardQuoteGroupSessionDetailItem[];
+};
+
+export type DashboardQuoteGroupsResponse = {
+  groups: DashboardQuoteGroupItem[];
+};
+
+export type DashboardQuoteGroupDetailResponse = {
+  group: DashboardQuoteGroupDetailItem;
+};
+
+export function buildQuoteGroupHref(group: Pick<DashboardQuoteGroupItem, "quote_ref" | "eworks_quote_id">): string {
+  const params = new URLSearchParams();
+  if (group.quote_ref) {
+    params.set("quote_ref", group.quote_ref);
+  } else if (group.eworks_quote_id != null) {
+    params.set("eworks_quote_id", String(group.eworks_quote_id));
+  }
+  const query = params.toString();
+  return query ? `/manager/review/group?${query}` : "/manager/review/group";
+}
 
 export type ReopenQuoteResponse = {
   session_id: string;

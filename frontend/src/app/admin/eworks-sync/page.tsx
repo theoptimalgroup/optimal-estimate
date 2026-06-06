@@ -28,25 +28,29 @@ import {
   EWORKS_ACTIVE_SYNC_RUN_KEY,
   EWORKS_SYNC_DEFAULT_DAYS,
   buildDefaultSyncRequest,
+  cancelSyncRun,
   getEworksSyncStatus,
   getSyncRun,
   getSyncRuns,
+  listSyncedCustomers,
   listSyncedJobs,
   listSyncedQuotes,
   runToSyncResult,
   triggerAllSync,
+  triggerCustomersSync,
   triggerJobsSync,
   triggerQuotesSync,
   type EworksSyncBucketSummary,
   type EworksSyncResult,
   type EworksSyncRunRecord,
   type EworksSyncStatus,
+  type EworksCustomerRecord,
   type EworksJobRecord,
   type EworksQuoteRecord,
 } from "@/lib/eworks-sync";
 
-type TabId = "sync" | "quotes" | "jobs";
-type SyncType = "quotes" | "jobs" | "all";
+type TabId = "sync" | "customers" | "quotes" | "jobs";
+type SyncType = "customers" | "quotes" | "jobs" | "all";
 
 const PAGE_SIZE = 50;
 const POLL_INTERVAL_MS = 2500;
@@ -99,30 +103,58 @@ function SyncSummaryPanel({ label, summary }: { label: string; summary: EworksSy
 function ActiveSyncBanner({
   syncType,
   phase,
+  fetched,
+  updated,
+  onCancel,
+  cancelling,
+  loading = false,
 }: {
   syncType: SyncType;
   phase?: string | null;
+  fetched?: number;
+  updated?: number;
+  onCancel?: () => void;
+  cancelling?: boolean;
+  loading?: boolean;
 }) {
-  const label =
-    syncType === "all"
-      ? "Syncing quotes and jobs in the background"
-      : syncType === "quotes"
-        ? "Syncing quotes in the background"
-        : "Syncing jobs in the background";
+  const label = loading
+    ? "Sync is running..."
+    : syncType === "all"
+      ? "Syncing customers, quotes, and jobs in the background"
+      : syncType === "customers"
+        ? "Syncing customers in the background"
+        : syncType === "quotes"
+          ? "Syncing quotes in the background"
+          : "Syncing jobs in the background";
+
+  const progressParts: string[] = [];
+  if (typeof fetched === "number" && fetched > 0) {
+    progressParts.push(`${fetched.toLocaleString()} fetched`);
+  }
+  if (typeof updated === "number" && updated > 0) {
+    progressParts.push(`${updated.toLocaleString()} updated`);
+  }
 
   return (
     <div
-      className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4"
+      className="flex items-start justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4"
       data-testid="sync-active-banner"
     >
-      <RefreshCw className="mt-0.5 h-5 w-5 flex-shrink-0 animate-spin text-blue-600" />
-      <div>
-        <p className="text-sm font-semibold text-blue-800">{label}</p>
-        <p className="mt-0.5 text-xs text-blue-700">
-          You can switch tabs or navigate away — sync continues on the server.
-          {phase ? ` Current phase: ${phase}.` : ""}
-        </p>
+      <div className="flex items-start gap-3">
+        <RefreshCw className="mt-0.5 h-5 w-5 flex-shrink-0 animate-spin text-blue-600" />
+        <div>
+          <p className="text-sm font-semibold text-blue-800">{label}</p>
+          <p className="mt-0.5 text-xs text-blue-700">
+            {phase ? `Phase: ${phase}.` : "Sync in progress."}
+            {progressParts.length ? ` ${progressParts.join(", ")}.` : ""}
+          </p>
+        </div>
       </div>
+      {onCancel ? (
+        <SecondaryButton onClick={onCancel} disabled={cancelling} data-testid="btn-cancel-sync">
+          {cancelling ? "Cancelling…" : "Cancel sync"}
+        </SecondaryButton>
+      ) : null}
     </div>
   );
 }
@@ -139,6 +171,60 @@ type SyncTabProps = {
   onSync: (type: SyncType) => void;
 };
 
+function BackgroundSyncPanel({
+  status,
+}: {
+  status: EworksSyncStatus;
+}) {
+  const bg = status.background_sync;
+  const last = status.last_background_sync;
+
+  return (
+    <SectionCard title="Background Sync" testId="eworks-sync-background-config">
+      <dl className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</dt>
+          <dd className="mt-1 text-sm text-slate-900" data-testid="background-sync-status">
+            {bg.scheduler_active ? "Active" : bg.enabled ? "Enabled (worker inactive)" : "Disabled"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Lookback window</dt>
+          <dd className="mt-1 text-sm text-slate-900">{bg.lookback_days} days</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Quotes</dt>
+          <dd className="mt-1 text-sm text-slate-900">
+            {bg.quotes_enabled ? `Every ${bg.quotes_interval_minutes} minutes` : "Disabled"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Jobs</dt>
+          <dd className="mt-1 text-sm text-slate-900">
+            {bg.jobs_enabled ? `Every ${bg.jobs_interval_minutes} minutes` : "Disabled"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Products</dt>
+          <dd className="mt-1 text-sm text-slate-900">
+            {bg.products_enabled ? `Every ${bg.products_interval_minutes} minutes` : "Disabled"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Last background run</dt>
+          <dd className="mt-1 text-sm text-slate-900" data-testid="background-sync-last-run">
+            {last?.finished_at
+              ? `${last.sync_type ?? "sync"} · ${last.status ?? "unknown"} · ${fmtDate(last.finished_at)}`
+              : last?.started_at
+                ? `${last.sync_type ?? "sync"} · running · ${fmtDate(last.started_at)}`
+                : "None yet"}
+          </dd>
+        </div>
+      </dl>
+    </SectionCard>
+  );
+}
+
 function SyncTab({
   status,
   statusError,
@@ -152,13 +238,15 @@ function SyncTab({
 }: SyncTabProps) {
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+      <div
+        className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4"
+        data-testid="eworks-sync-readonly-warning"
+      >
         <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
         <div>
           <p className="text-sm font-semibold text-amber-800">Read-only from eWorks</p>
           <p className="mt-0.5 text-xs text-amber-700">
-            This sync fetches eWorks data into the local database only. No records are modified in eWorks.
-            By default, only the last {EWORKS_SYNC_DEFAULT_DAYS} days are synced.
+            No records are modified in eWorks.
           </p>
         </div>
       </div>
@@ -168,19 +256,41 @@ function SyncTab({
       ) : !status ? (
         <LoadingState />
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatCard label="Local Quotes" value={String(status.quotes_count)} data-testid="stat-quotes-count" />
-          <StatCard label="Local Jobs" value={String(status.jobs_count)} data-testid="stat-jobs-count" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6" data-testid="eworks-sync-status-cards">
+          <StatCard
+            label="Local Customers"
+            value={String(status.customers_count)}
+            data-testid="eworks-sync-card-customers-count"
+          />
+          <StatCard
+            label="Local Quotes"
+            value={String(status.quotes_count)}
+            data-testid="eworks-sync-card-quotes-count"
+          />
+          <StatCard
+            label="Local Jobs"
+            value={String(status.jobs_count)}
+            data-testid="eworks-sync-card-jobs-count"
+          />
+          <StatCard
+            label="Last Customers Sync"
+            value={status.last_customers_sync ? fmtDate(status.last_customers_sync) : "Never"}
+            data-testid="eworks-sync-card-last-customers-sync"
+          />
           <StatCard
             label="Last Quotes Sync"
             value={status.last_quotes_sync ? fmtDate(status.last_quotes_sync) : "Never"}
+            data-testid="eworks-sync-card-last-quotes-sync"
           />
           <StatCard
             label="Last Jobs Sync"
             value={status.last_jobs_sync ? fmtDate(status.last_jobs_sync) : "Never"}
+            data-testid="eworks-sync-card-last-status"
           />
         </div>
       )}
+
+      {status ? <BackgroundSyncPanel status={status} /> : null}
 
       {!status?.eworks_api_enabled && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -233,6 +343,19 @@ function SyncTab({
                 "Sync Jobs"
               )}
             </SecondaryButton>
+            <SecondaryButton
+              onClick={() => onSync("customers")}
+              disabled={!!syncing}
+              data-testid="btn-sync-customers"
+            >
+              {syncing === "customers" ? (
+                <span className="flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin" /> Starting…
+                </span>
+              ) : (
+                "Sync Customers"
+              )}
+            </SecondaryButton>
           </div>
         </div>
       </SectionCard>
@@ -251,11 +374,12 @@ function SyncTab({
             <p className="text-sm font-semibold text-emerald-800">Sync completed</p>
           </div>
           {"quotes" in lastResult ? (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <SyncSummaryPanel label="Customers" summary={(lastResult as EworksSyncResult).customers} />
               <SyncSummaryPanel label="Quotes" summary={(lastResult as EworksSyncResult).quotes} />
               <SyncSummaryPanel label="Jobs" summary={(lastResult as EworksSyncResult).jobs} />
               {(lastResult as EworksSyncResult).errors.length > 0 && (
-                <div className="col-span-2 text-xs text-red-600">
+                <div className="col-span-3 text-xs text-red-600">
                   Errors: {(lastResult as EworksSyncResult).errors.join("; ")}
                 </div>
               )}
@@ -269,9 +393,9 @@ function SyncTab({
       <SectionCard>
         <h2 className="mb-3 text-sm font-semibold text-slate-700">Recent Sync Runs</h2>
         {runs.length === 0 ? (
-          <EmptyState message="No sync runs yet" />
+          <EmptyState title="No sync runs yet" data-testid="eworks-sync-empty-runs" />
         ) : (
-          <DataTable data-testid="sync-runs-table">
+          <DataTable testId="eworks-sync-runs-table">
             <DataTableHead>
               <DataTableRow>
                 <DataTableCell header>Type</DataTableCell>
@@ -309,6 +433,97 @@ function SyncTab({
           </DataTable>
         )}
       </SectionCard>
+    </div>
+  );
+}
+
+function CustomersTab({ refreshKey }: { refreshKey: number }) {
+  const [search, setSearch] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [items, setItems] = useState<EworksCustomerRecord[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await listSyncedCustomers({
+        search: search || undefined,
+        limit: PAGE_SIZE,
+        offset,
+      });
+      setItems(result.items);
+      setTotal(result.total);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load customers");
+    } finally {
+      setLoading(false);
+    }
+  }, [search, offset]);
+
+  useEffect(() => {
+    void load();
+  }, [load, refreshKey]);
+
+  return (
+    <div className="space-y-4">
+      <FilterBar>
+        <FilterField label="Search">
+          <input
+            className={filterInputClass}
+            placeholder="ID, name, email, phone…"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setOffset(0);
+            }}
+            data-testid="customers-search"
+          />
+        </FilterField>
+      </FilterBar>
+
+      {error ? (
+        <ErrorState message={error} />
+      ) : loading ? (
+        <LoadingState />
+      ) : items.length === 0 ? (
+        <EmptyState
+          title="No customers synced yet."
+          data-testid="eworks-sync-empty-customers"
+        />
+      ) : (
+        <>
+          <DataTable testId="eworks-sync-customers-table">
+            <DataTableHead>
+              <DataTableRow>
+                <DataTableCell header>Customer ID</DataTableCell>
+                <DataTableCell header>Name</DataTableCell>
+                <DataTableCell header>Email</DataTableCell>
+                <DataTableCell header>Phone</DataTableCell>
+                <DataTableCell header>Synced At</DataTableCell>
+              </DataTableRow>
+            </DataTableHead>
+            <DataTableBody>
+              {items.map((c) => (
+                <DataTableRow key={c.id}>
+                  <DataTableCell>
+                    <span className="font-mono text-xs">{c.eworks_customer_id}</span>
+                  </DataTableCell>
+                  <DataTableCell>
+                    {c.customer_name ?? c.full_name ?? c.company_name ?? "—"}
+                  </DataTableCell>
+                  <DataTableCell>{c.email ?? "—"}</DataTableCell>
+                  <DataTableCell>{c.phone ?? "—"}</DataTableCell>
+                  <DataTableCell>{fmtDate(c.synced_at)}</DataTableCell>
+                </DataTableRow>
+              ))}
+            </DataTableBody>
+          </DataTable>
+          <PaginationBar total={total} limit={PAGE_SIZE} offset={offset} onPageChange={setOffset} />
+        </>
+      )}
     </div>
   );
 }
@@ -391,10 +606,10 @@ function QuotesTab({ refreshKey }: { refreshKey: number }) {
       ) : loading ? (
         <LoadingState />
       ) : items.length === 0 ? (
-        <EmptyState message="No quotes synced yet. Run 'Sync Quotes' from the Sync tab." />
+        <EmptyState title="No quotes synced yet." data-testid="eworks-sync-empty-quotes" />
       ) : (
         <>
-          <DataTable data-testid="quotes-table">
+          <DataTable testId="eworks-sync-quotes-table">
             <DataTableHead>
               <DataTableRow>
                 <DataTableCell header>Quote ID</DataTableCell>
@@ -424,7 +639,7 @@ function QuotesTab({ refreshKey }: { refreshKey: number }) {
               ))}
             </DataTableBody>
           </DataTable>
-          <PaginationBar total={total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
+          <PaginationBar total={total} limit={PAGE_SIZE} offset={offset} onPageChange={setOffset} />
         </>
       )}
     </div>
@@ -509,10 +724,13 @@ function JobsTab({ refreshKey }: { refreshKey: number }) {
       ) : loading ? (
         <LoadingState />
       ) : items.length === 0 ? (
-        <EmptyState message="No jobs synced yet. Run 'Sync Jobs' from the Sync tab." />
+        <EmptyState
+          title="No jobs synced yet."
+          data-testid="eworks-sync-empty-jobs"
+        />
       ) : (
         <>
-          <DataTable data-testid="jobs-table">
+          <DataTable testId="eworks-sync-jobs-table">
             <DataTableHead>
               <DataTableRow>
                 <DataTableCell header>Job ID</DataTableCell>
@@ -542,7 +760,7 @@ function JobsTab({ refreshKey }: { refreshKey: number }) {
               ))}
             </DataTableBody>
           </DataTable>
-          <PaginationBar total={total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
+          <PaginationBar total={total} limit={PAGE_SIZE} offset={offset} onPageChange={setOffset} />
         </>
       )}
     </div>
@@ -551,6 +769,7 @@ function JobsTab({ refreshKey }: { refreshKey: number }) {
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "sync", label: "Sync" },
+  { id: "customers", label: "Customers" },
   { id: "quotes", label: "Quotes" },
   { id: "jobs", label: "Jobs" },
 ];
@@ -567,6 +786,7 @@ export default function EworksSyncPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [fullSync, setFullSync] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [cancelling, setCancelling] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clearPollTimer = useCallback(() => {
@@ -676,7 +896,9 @@ export default function EworksSyncPage() {
             ? await triggerQuotesSync(req)
             : type === "jobs"
               ? await triggerJobsSync(req)
-              : await triggerAllSync(req);
+              : type === "customers"
+                ? await triggerCustomersSync(req)
+                : await triggerAllSync(req);
         startTracking(started.run_id, type);
         void loadOverview();
       } catch (e: unknown) {
@@ -687,19 +909,38 @@ export default function EworksSyncPage() {
     [fullSync, loadOverview, startTracking]
   );
 
-  const isRunning = !!activeRunId && activeRun?.status === "running";
+  const handleCancelSync = useCallback(async () => {
+    if (!activeRunId) return;
+    setCancelling(true);
+    try {
+      const run = await cancelSyncRun(activeRunId);
+      finishTracking(run);
+    } catch (e: unknown) {
+      setSyncError(e instanceof Error ? e.message : "Failed to cancel sync");
+    } finally {
+      setCancelling(false);
+    }
+  }, [activeRunId, finishTracking]);
+
+  const isRunning =
+    !!activeRunId && (activeRun === null || activeRun.status === "running");
+  const bannerLoading = isRunning && activeRun === null;
 
   return (
     <div className="space-y-6" data-testid="eworks-sync-page">
-      <PageHeader
-        title="eWorks Sync"
-        description="Sync Quotes and Jobs from eWorks Manager into the local database (read-only from eWorks)."
-      />
+      <div data-testid="eworks-sync-title">
+        <PageHeader title="eWorks Sync" />
+      </div>
 
       {isRunning && (
         <ActiveSyncBanner
           syncType={(activeRun?.sync_type as SyncType) ?? syncing ?? "all"}
           phase={activeRun?.metadata?.phase}
+          fetched={activeRun?.fetched_count}
+          updated={activeRun?.updated_count}
+          onCancel={() => void handleCancelSync()}
+          cancelling={cancelling}
+          loading={bannerLoading}
         />
       )}
 
@@ -708,7 +949,7 @@ export default function EworksSyncPage() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            data-testid={`tab-${tab.id}`}
+            data-testid={`eworks-sync-tab-${tab.id}`}
             className={[
               "px-4 py-2 text-sm font-medium transition-colors",
               activeTab === tab.id
@@ -721,7 +962,7 @@ export default function EworksSyncPage() {
         ))}
       </div>
 
-      <div className={activeTab === "sync" ? "block" : "hidden"}>
+      <div className={activeTab === "sync" ? "block" : "hidden"} data-testid="eworks-sync-tab-sync-panel">
         <SyncTab
           status={status}
           statusError={statusError}
@@ -734,11 +975,14 @@ export default function EworksSyncPage() {
           onSync={handleSync}
         />
       </div>
-      <div className={activeTab === "quotes" ? "block" : "hidden"}>
-        <QuotesTab refreshKey={refreshKey} />
+      <div className={activeTab === "customers" ? "block" : "hidden"} data-testid="eworks-sync-tab-customers-panel">
+        {activeTab === "customers" ? <CustomersTab refreshKey={refreshKey} /> : null}
       </div>
-      <div className={activeTab === "jobs" ? "block" : "hidden"}>
-        <JobsTab refreshKey={refreshKey} />
+      <div className={activeTab === "quotes" ? "block" : "hidden"} data-testid="eworks-sync-tab-quotes-panel">
+        {activeTab === "quotes" ? <QuotesTab refreshKey={refreshKey} /> : null}
+      </div>
+      <div className={activeTab === "jobs" ? "block" : "hidden"} data-testid="eworks-sync-tab-jobs-panel">
+        {activeTab === "jobs" ? <JobsTab refreshKey={refreshKey} /> : null}
       </div>
     </div>
   );

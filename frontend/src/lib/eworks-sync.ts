@@ -13,13 +13,46 @@ export type EworksActiveSync = {
   phase?: string | null;
 };
 
+export type EworksBackgroundSyncConfig = {
+  enabled: boolean;
+  worker_enabled: boolean;
+  scheduler_active: boolean;
+  quotes_enabled: boolean;
+  jobs_enabled: boolean;
+  products_enabled: boolean;
+  attachments_enabled: boolean;
+  quotes_interval_minutes: number;
+  jobs_interval_minutes: number;
+  products_interval_minutes: number;
+  lookback_days: number;
+  running_timeout_minutes: number;
+};
+
+export type EworksBackgroundSyncLastRun = {
+  run_id?: string | null;
+  sync_type?: string | null;
+  status?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  source?: string | null;
+  phase?: string | null;
+  fetched_count?: number | null;
+  updated_count?: number | null;
+  failed_count?: number | null;
+  error_message?: string | null;
+};
+
 export type EworksSyncStatus = {
   quotes_count: number;
   jobs_count: number;
+  customers_count: number;
   last_quotes_sync: string | null;
   last_jobs_sync: string | null;
+  last_customers_sync: string | null;
   eworks_api_enabled: boolean;
   active_sync?: EworksActiveSync | null;
+  background_sync: EworksBackgroundSyncConfig;
+  last_background_sync?: EworksBackgroundSyncLastRun | null;
 };
 
 export type EworksSyncStartResponse = {
@@ -37,6 +70,7 @@ export type EworksSyncBucketSummary = {
 };
 
 export type EworksSyncResult = {
+  customers: EworksSyncBucketSummary;
   quotes: EworksSyncBucketSummary;
   jobs: EworksSyncBucketSummary;
   errors: string[];
@@ -89,6 +123,11 @@ export type EworksQuoteRecord = {
   total: number | null;
   tags?: string[];
   synced_at: string | null;
+  display_customer_name?: string | null;
+  display_status?: string | null;
+  display_tags?: string[];
+  display_total?: number | null;
+  display_quote_date?: string | null;
 };
 
 export type EworksJobRecord = {
@@ -107,6 +146,23 @@ export type EworksJobRecord = {
   vat: number | null;
   total: number | null;
   tags?: string[];
+  synced_at: string | null;
+};
+
+export type EworksCustomerRecord = {
+  id: number;
+  eworks_customer_id: number;
+  customer_name: string | null;
+  full_name: string | null;
+  company_name: string | null;
+  email: string | null;
+  phone: string | null;
+  billing_email: string | null;
+  address_1: string | null;
+  address_2: string | null;
+  city: string | null;
+  county: string | null;
+  postcode: string | null;
   synced_at: string | null;
 };
 
@@ -135,6 +191,12 @@ export type JobFilters = {
   tag?: string;
   date_from?: string;
   date_to?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type CustomerFilters = {
+  search?: string;
   limit?: number;
   offset?: number;
 };
@@ -176,6 +238,14 @@ export async function triggerJobsSync(req: EworksSyncRequest = {}): Promise<Ewor
   return resp.data;
 }
 
+export async function triggerCustomersSync(req: EworksSyncRequest = {}): Promise<EworksSyncStartResponse> {
+  const resp = await apiFetch<EworksSyncStartResponse>(
+    "/api/v1/eworks-sync/customers",
+    { method: "POST", body: JSON.stringify(req) }
+  );
+  return resp.data;
+}
+
 export async function triggerAllSync(req: EworksSyncRequest = {}): Promise<EworksSyncStartResponse> {
   const resp = await apiFetch<EworksSyncStartResponse>(
     "/api/v1/eworks-sync/all",
@@ -189,9 +259,17 @@ export async function getSyncRun(runId: string): Promise<EworksSyncRunRecord> {
   return resp.data;
 }
 
+export async function cancelSyncRun(runId: string): Promise<EworksSyncRunRecord> {
+  const resp = await apiFetch<EworksSyncRunRecord>(`/api/v1/eworks-sync/runs/${runId}/cancel`, {
+    method: "POST",
+  });
+  return resp.data;
+}
+
 export function runToSyncResult(run: EworksSyncRunRecord): EworksSyncResult | EworksSyncBucketSummary | null {
   if (run.sync_type === "all" && run.metadata) {
     return {
+      customers: run.metadata.customers ?? { fetched: 0, created: 0, updated: 0, failed: 0 },
       quotes: run.metadata.quotes ?? { fetched: 0, created: 0, updated: 0, failed: 0 },
       jobs: run.metadata.jobs ?? { fetched: 0, created: 0, updated: 0, failed: 0 },
       errors: run.metadata.errors ?? (run.error_message ? [run.error_message] : []),
@@ -255,6 +333,19 @@ export async function listSyncedJobs(
   if (filters.offset !== undefined) qs.set("offset", String(filters.offset));
   const resp = await apiFetch<PaginatedResult<EworksJobRecord>>(
     `/api/v1/eworks-sync/jobs${qs.size ? `?${qs}` : ""}`
+  );
+  return resp.data;
+}
+
+export async function listSyncedCustomers(
+  filters: CustomerFilters = {}
+): Promise<PaginatedResult<EworksCustomerRecord>> {
+  const qs = new URLSearchParams();
+  if (filters.search) qs.set("search", filters.search);
+  if (filters.limit !== undefined) qs.set("limit", String(filters.limit));
+  if (filters.offset !== undefined) qs.set("offset", String(filters.offset));
+  const resp = await apiFetch<PaginatedResult<EworksCustomerRecord>>(
+    `/api/v1/eworks-sync/customers${qs.size ? `?${qs}` : ""}`
   );
   return resp.data;
 }

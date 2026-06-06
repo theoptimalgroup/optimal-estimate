@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 from app.models.calculation_session import CalculationSession
 from app.models.eworks_sync import EworksJob, EworksQuote
 from app.services.eworks_acceptance_sync_service import resolve_eworks_quote_id
-from app.services.eworks_sync_service import _extract_tags_from_raw
+from app.services.eworks_sync_service import (
+    _extract_tags_from_raw,
+    extract_customer_contact_id_from_raw,
+    extract_customer_id_from_raw,
+    extract_customer_name_from_raw,
+    extract_customer_site_id_from_raw,
+)
 
 REDACTED = "***REDACTED***"
 
@@ -62,9 +68,9 @@ def redact_sensitive_data(value: Any) -> Any:
 
 
 def _serialize_tags(tags: list | None) -> list[str]:
-    if not tags or not isinstance(tags, list):
-        return []
-    return [str(tag) for tag in tags if tag is not None and str(tag).strip()]
+    from app.services.manager_dashboard_service import _parse_tags_value
+
+    return _parse_tags_value(tags)
 
 
 def _pick(raw: dict[str, Any], *keys: str) -> Any:
@@ -253,6 +259,98 @@ def _find_linked_estimate(db: Session, *, quote: EworksQuote | None = None, job:
     }
 
 
+_STATUS_ID_LABELS: dict[str, str] = {
+    "1": "New Quote",
+}
+
+
+def _resolve_display_customer_name(quote: EworksQuote, raw: dict[str, Any]) -> str | None:
+    return _as_str(quote.customer_name) or extract_customer_name_from_raw(raw)
+
+
+def _resolve_display_status(quote: EworksQuote, raw: dict[str, Any]) -> str | None:
+    status_name = (
+        _as_str(quote.status_name)
+        or _as_str(_pick(raw, "status_name", "Status_Name"))
+        or _as_str(_pick_nested(raw, "quote_status.quote_status", "quote_status.name", "Status_Name"))
+    )
+    if status_name:
+        return status_name
+
+    status = _as_str(quote.status) or _as_str(_pick(raw, "status", "Status"))
+    if status in _STATUS_ID_LABELS:
+        return _STATUS_ID_LABELS[status]
+    if status:
+        return status
+
+    status_id = _pick_nested(raw, "quote_status.id")
+    if status_id is not None:
+        mapped = _STATUS_ID_LABELS.get(str(status_id).strip())
+        if mapped:
+            return mapped
+        return str(status_id).strip() or None
+    return None
+
+
+def _resolve_display_tags(quote: EworksQuote, raw: dict[str, Any]) -> list[str]:
+    tags = _serialize_tags(quote.tags) or _extract_tags_from_raw(raw)
+    return tags
+
+
+def _resolve_display_total(quote: EworksQuote, raw: dict[str, Any]) -> float | None:
+    if quote.total is not None:
+        return _as_float(quote.total)
+    return _as_float(_pick(raw, "total", "quote_total", "grand_total", "total_amount"))
+
+
+def _resolve_display_quote_date(quote: EworksQuote, raw: dict[str, Any]) -> str | None:
+    return _as_str(quote.quote_date) or _as_str(_pick(raw, "quote_date", "Quote_Date"))
+
+
+def build_quote_list_display_fields(quote: EworksQuote) -> dict[str, Any]:
+    """Resolve manager-safe list display fields with raw_payload fallbacks."""
+    raw = quote.raw_payload if isinstance(quote.raw_payload, dict) else {}
+    return {
+        "display_customer_name": _resolve_display_customer_name(quote, raw),
+        "display_status": _resolve_display_status(quote, raw),
+        "display_tags": _resolve_display_tags(quote, raw),
+        "display_total": _resolve_display_total(quote, raw),
+        "display_quote_date": _resolve_display_quote_date(quote, raw),
+    }
+
+
+def serialize_quote_list_item(quote: EworksQuote) -> dict[str, Any]:
+    """Serialize a synced quote for list endpoints without exposing raw_payload."""
+    from app.schemas.eworks_sync_api import EworksQuoteRead
+
+    display = build_quote_list_display_fields(quote)
+    return EworksQuoteRead(
+        id=quote.id,
+        eworks_quote_id=quote.eworks_quote_id,
+        quote_ref=quote.quote_ref,
+        customer_id=quote.customer_id,
+        customer_name=display["display_customer_name"],
+        status=quote.status,
+        status_name=display["display_status"],
+        quote_date=display["display_quote_date"],
+        expiry_date=quote.expiry_date,
+        description=quote.description,
+        customer_ref=quote.customer_ref,
+        po_ref=quote.po_ref,
+        wo_ref=quote.wo_ref,
+        subtotal=float(quote.subtotal) if quote.subtotal is not None else None,
+        vat=float(quote.vat) if quote.vat is not None else None,
+        total=display["display_total"],
+        tags=display["display_tags"],
+        synced_at=str(quote.synced_at) if quote.synced_at else None,
+        display_customer_name=display["display_customer_name"],
+        display_status=display["display_status"],
+        display_tags=display["display_tags"],
+        display_total=display["display_total"],
+        display_quote_date=display["display_quote_date"],
+    ).model_dump()
+
+
 def build_quote_safe_detail(db: Session, quote: EworksQuote) -> dict[str, Any]:
     raw = quote.raw_payload if isinstance(quote.raw_payload, dict) else {}
     customer = raw.get("customer") if isinstance(raw.get("customer"), dict) else {}
@@ -272,16 +370,14 @@ def build_quote_safe_detail(db: Session, quote: EworksQuote) -> dict[str, Any]:
             "synced_at": str(quote.synced_at) if quote.synced_at else None,
         },
         "customer": {
-            "customer_id": quote.customer_id or _pick(raw, "customer_id") or _pick(customer, "id"),
-            "customer_name": quote.customer_name
-            or _as_str(_pick(raw, "customer_name", "full_name"))
-            or _as_str(_pick(customer, "customer_name", "full_name", "name")),
-            "customer_contact_id": quote.customer_contact_id or _pick(raw, "customer_contact_id") or _pick(contact, "id"),
+            "customer_id": quote.customer_id or extract_customer_id_from_raw(raw),
+            "customer_name": _as_str(quote.customer_name) or extract_customer_name_from_raw(raw),
+            "customer_contact_id": quote.customer_contact_id or extract_customer_contact_id_from_raw(raw),
             "customer_contact_name": _as_str(
                 _pick(raw, "customer_contact_name")
                 or _pick(contact, "full_name", "name", "contact_name")
             ),
-            "customer_site_id": quote.customer_site_id or _pick(raw, "customer_site_id") or _pick(site, "id"),
+            "customer_site_id": quote.customer_site_id or extract_customer_site_id_from_raw(raw),
             "site_name": _as_str(_pick(raw, "site_name") or _pick(site, "site_name", "name")),
             "site_address": _build_site_address(raw),
             "customer_ref": quote.customer_ref or _as_str(_pick(raw, "customer_ref")),
@@ -346,10 +442,8 @@ def build_job_safe_detail(db: Session, job: EworksJob) -> dict[str, Any]:
             "synced_at": str(job.synced_at) if job.synced_at else None,
         },
         "customer": {
-            "customer_id": job.customer_id or _pick(raw, "customer_id") or _pick(customer, "id"),
-            "customer_name": job.customer_name
-            or _as_str(_pick(raw, "customer_name", "full_name"))
-            or _as_str(_pick(customer, "customer_name", "full_name", "name")),
+            "customer_id": job.customer_id or extract_customer_id_from_raw(raw),
+            "customer_name": _as_str(job.customer_name) or extract_customer_name_from_raw(raw),
             "customer_contact_id": _pick(raw, "customer_contact_id") or _pick(contact, "id"),
             "customer_contact_name": _as_str(
                 _pick(raw, "customer_contact_name")

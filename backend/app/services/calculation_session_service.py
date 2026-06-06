@@ -4,10 +4,20 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.utils.work_label import format_work_label
 from app.core.exceptions import AppError
 from app.models.calculation_session import CalculationSession
 from app.schemas.calculation import CalculationBreakdown, CalculationPreviewRequest
+from app.schemas.dashboard_quote_groups import (
+    DashboardQuoteGroupAssignmentItem,
+    DashboardQuoteGroupAssignmentSummary,
+    DashboardQuoteGroupDetailItem,
+    DashboardQuoteGroupDetailResponse,
+    DashboardQuoteGroupItem,
+    DashboardQuoteGroupSessionDetailItem,
+    DashboardQuoteGroupSessionItem,
+    DashboardQuoteGroupsResponse,
+)
 from app.schemas.eworks_link import (
     AggregatedQuoteSummary,
     CalculateSessionResponse,
@@ -595,6 +605,49 @@ def submit_session(
     db.flush()
 
 
+def _resolve_work_product_fields(db: Session, block: WorkBlockSnapshot) -> tuple[str | None, str | None]:
+    product_name = (block.product_name or "").strip() or None
+    product_code = (block.product_code or "").strip() or None
+    if product_name or block.selected_product_id is None:
+        return product_name, product_code
+
+    from app.models.product import Product
+
+    product = db.get(Product, block.selected_product_id)
+    if product is None:
+        return product_name, product_code
+    return product.product_name, product.product_code
+
+
+def _build_dashboard_work_item(
+    db: Session,
+    *,
+    index: int,
+    block: WorkBlockSnapshot,
+    labour_subtotal,
+    materials_subtotal,
+    work_internal_notes,
+) -> DashboardWorkItem:
+    product_name, product_code = _resolve_work_product_fields(db, block)
+    return DashboardWorkItem(
+        work_index=index,
+        scope=block.scope,
+        product_name=product_name,
+        product_code=product_code,
+        display_label=format_work_label(
+            product_name=product_name,
+            product_code=product_code,
+            scope=block.scope,
+            index=index,
+        ),
+        labour_subtotal=labour_subtotal,
+        materials_subtotal=materials_subtotal,
+        internal_notes=work_internal_notes,
+        attachments=block.attachments,
+        details=block,
+    )
+
+
 def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
     from decimal import Decimal
 
@@ -635,14 +688,13 @@ def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
             if not work_internal_notes and len(step2.works) == 1:
                 work_internal_notes = internal_notes
             works.append(
-                DashboardWorkItem(
-                    work_index=index,
-                    scope=block.scope,
+                _build_dashboard_work_item(
+                    db,
+                    index=index,
+                    block=block,
                     labour_subtotal=labour_subtotal,
                     materials_subtotal=materials_subtotal,
-                    internal_notes=work_internal_notes,
-                    attachments=block.attachments,
-                    details=block,
+                    work_internal_notes=work_internal_notes,
                 )
             )
 
@@ -663,6 +715,357 @@ def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
         )
 
     return DashboardQuotesResponse(quotes=quotes)
+
+
+def _reopened_session_ids(db: Session) -> set[UUID]:
+    from sqlalchemy import select
+
+    from app.models.support import AuditLog
+
+    rows = db.scalars(select(AuditLog.entity_id).where(AuditLog.action == "quote_reopened")).all()
+    return {row for row in rows if row is not None}
+
+
+def _parse_eworks_quote_id(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _quote_group_identity(session: CalculationSession, step1: Step1Snapshot) -> tuple[str, str | None, int | None]:
+    payload = session.payload_snapshot if isinstance(session.payload_snapshot, dict) else {}
+    eworks_quote_id = _parse_eworks_quote_id(payload.get("eworks_quote_id"))
+    if eworks_quote_id is None:
+        eworks_quote_id = _parse_eworks_quote_id(step1.external_job_id)
+    if eworks_quote_id is not None:
+        quote_ref = (step1.quote_number or "").strip() or None
+        return f"eworks_quote_id:{eworks_quote_id}", quote_ref, eworks_quote_id
+
+    quote_ref = (step1.quote_number or "").strip() or None
+    if quote_ref:
+        return f"quote_ref:{quote_ref}", quote_ref, None
+
+    return f"session_id:{session.id}", step1.quote_number or None, None
+
+
+def _session_final_total(db: Session, session: CalculationSession) -> Decimal | None:
+    last_result = _dashboard_last_result(db, session)
+    if not last_result:
+        return None
+    breakdown = last_result.get("breakdown") or {}
+    if breakdown.get("final_total") is None:
+        return None
+    return Decimal(str(breakdown["final_total"]))
+
+
+def _build_quote_group_session_item(db: Session, session: CalculationSession) -> DashboardQuoteGroupSessionItem:
+    step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else Step2Snapshot()
+    acceptance = staff_acceptance_from_session(session)
+    return DashboardQuoteGroupSessionItem(
+        session_id=session.id,
+        submitted_at=session.submitted_at,  # type: ignore[arg-type]
+        final_total=_session_final_total(db, session),
+        works_count=len(step2.works),
+        status=session.status,
+        accepted=acceptance.accepted,
+        client_accepted_at=session.client_accepted_at,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
+def _build_quote_groups(db: Session, sessions: list[CalculationSession]) -> list[DashboardQuoteGroupItem]:
+    reopened_ids = _reopened_session_ids(db)
+    grouped: dict[str, dict] = {}
+
+    for session in sessions:
+        if not session.submitted_at:
+            continue
+        step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+        group_key, quote_ref, eworks_quote_id = _quote_group_identity(session, step1)
+        session_item = _build_quote_group_session_item(db, session)
+
+        bucket = grouped.get(group_key)
+        if bucket is None:
+            bucket = {
+                "group_key": group_key,
+                "quote_ref": quote_ref,
+                "eworks_quote_id": eworks_quote_id,
+                "client_name": step1.client_name,
+                "trade_name": step1.trade_name,
+                "sessions": [],
+            }
+            grouped[group_key] = bucket
+        bucket["sessions"].append(session_item)
+
+    groups: list[DashboardQuoteGroupItem] = []
+    for bucket in grouped.values():
+        sessions_sorted = sorted(
+            bucket["sessions"],
+            key=lambda item: item.submitted_at,
+            reverse=True,
+        )
+        totals = [item.final_total for item in sessions_sorted if item.final_total is not None]
+        latest = sessions_sorted[0]
+        accepted_session = next((item for item in sessions_sorted if item.accepted), None)
+        groups.append(
+            DashboardQuoteGroupItem(
+                group_key=bucket["group_key"],
+                quote_ref=bucket["quote_ref"],
+                eworks_quote_id=bucket["eworks_quote_id"],
+                client_name=bucket["client_name"],
+                trade_name=bucket["trade_name"],
+                submission_count=len(sessions_sorted),
+                latest_submitted_at=latest.submitted_at,
+                latest_total=latest.final_total,
+                highest_total=max(totals) if totals else None,
+                lowest_total=min(totals) if totals else None,
+                accepted=accepted_session.accepted if accepted_session else False,
+                client_accepted_at=accepted_session.client_accepted_at if accepted_session else None,
+                reopened_count=sum(1 for item in sessions_sorted if item.session_id in reopened_ids),
+                latest_session_id=latest.session_id,
+                sessions=sessions_sorted,
+            )
+        )
+
+    groups.sort(key=lambda group: group.latest_submitted_at, reverse=True)
+    return groups
+
+
+def list_submitted_quote_groups(db: Session) -> DashboardQuoteGroupsResponse:
+    from sqlalchemy import select
+
+    sessions = db.scalars(
+        select(CalculationSession)
+        .where(CalculationSession.status == "submitted")
+        .order_by(CalculationSession.submitted_at.desc())
+    ).all()
+    return DashboardQuoteGroupsResponse(groups=_build_quote_groups(db, list(sessions)))
+
+
+def get_submitted_quote_group_detail(
+    db: Session,
+    *,
+    group_key: str | None = None,
+    quote_ref: str | None = None,
+    eworks_quote_id: int | None = None,
+) -> DashboardQuoteGroupDetailResponse:
+    groups = list_submitted_quote_groups(db).groups
+    target: DashboardQuoteGroupItem | None = None
+
+    if group_key:
+        target = next((group for group in groups if group.group_key == group_key), None)
+    elif eworks_quote_id is not None:
+        target = next((group for group in groups if group.eworks_quote_id == eworks_quote_id), None)
+    elif quote_ref:
+        normalized = quote_ref.strip()
+        target = next((group for group in groups if (group.quote_ref or "").strip() == normalized), None)
+
+    if target is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Quote group not found")
+
+    return DashboardQuoteGroupDetailResponse(group=_build_quote_group_detail(db, target))
+
+
+def _derive_assignment_status(
+    assignment_status: str,
+    linked_session: CalculationSession | None,
+) -> str:
+    if assignment_status == "cancelled":
+        return "cancelled"
+    if (
+        linked_session is not None
+        and linked_session.submitted_at is not None
+        and linked_session.status == "submitted"
+    ):
+        return "submitted"
+    if linked_session is not None or assignment_status == "in_progress":
+        return "in_progress"
+    return "assigned"
+
+
+def _list_assignments_for_quote_identity(
+    db: Session,
+    *,
+    eworks_quote_id: int | None,
+    quote_ref: str | None,
+) -> list:
+    from sqlalchemy import or_
+
+    from app.models.quote_assignment import EworksQuoteAssignment
+
+    filters = []
+    if eworks_quote_id is not None:
+        filters.append(EworksQuoteAssignment.eworks_quote_id == eworks_quote_id)
+    normalized_ref = (quote_ref or "").strip()
+    if normalized_ref:
+        filters.append(EworksQuoteAssignment.quote_ref == normalized_ref)
+    if not filters:
+        return []
+
+    return (
+        db.query(EworksQuoteAssignment)
+        .filter(or_(*filters))
+        .order_by(EworksQuoteAssignment.assigned_at.desc(), EworksQuoteAssignment.id.desc())
+        .all()
+    )
+
+
+def _load_linked_sessions(db: Session, session_ids: list[UUID]) -> dict[UUID, CalculationSession]:
+    if not session_ids:
+        return {}
+    from sqlalchemy import select
+
+    rows = db.scalars(select(CalculationSession).where(CalculationSession.id.in_(session_ids))).all()
+    return {row.id: row for row in rows}
+
+
+def _build_dashboard_assignment_items(
+    db: Session,
+    assignments: list,
+) -> list[DashboardQuoteGroupAssignmentItem]:
+    linked_session_ids = [
+        row.calculation_session_id for row in assignments if row.calculation_session_id is not None
+    ]
+    linked_sessions = _load_linked_sessions(db, linked_session_ids)
+
+    items: list[DashboardQuoteGroupAssignmentItem] = []
+    for row in assignments:
+        linked_session = linked_sessions.get(row.calculation_session_id) if row.calculation_session_id else None
+        derived_status = _derive_assignment_status(row.status, linked_session)
+        items.append(
+            DashboardQuoteGroupAssignmentItem(
+                id=row.id,
+                assignment_type=row.assignment_type,
+                assignee_kind=row.assignee_kind,
+                assigned_user_id=row.assigned_user_id,
+                assigned_user_name=row.assigned_user_name,
+                assigned_user_email=row.assigned_user_email,
+                status=derived_status,
+                assigned_at=row.assigned_at,
+                started_at=linked_session.created_at if linked_session is not None else None,
+                submitted_at=linked_session.submitted_at
+                if linked_session is not None and linked_session.submitted_at is not None
+                else None,
+                calculation_session_id=row.calculation_session_id,
+                has_submission=derived_status == "submitted",
+            )
+        )
+    return items
+
+
+def _build_assignment_summary(
+    assignments: list[DashboardQuoteGroupAssignmentItem],
+) -> DashboardQuoteGroupAssignmentSummary:
+    summary = DashboardQuoteGroupAssignmentSummary(total_assignments=len(assignments))
+    for item in assignments:
+        if item.assignment_type == "estimator":
+            summary.estimator_assignments += 1
+        elif item.assignment_type == "engineer":
+            summary.engineer_assignments += 1
+
+        if item.status == "assigned":
+            summary.pending_assignments += 1
+        elif item.status == "in_progress":
+            summary.in_progress_assignments += 1
+        elif item.status == "submitted":
+            summary.submitted_assignments += 1
+        elif item.status == "cancelled":
+            summary.cancelled_assignments += 1
+    return summary
+
+
+def _derive_group_review_status(
+    group: DashboardQuoteGroupItem,
+    assignment_summary: DashboardQuoteGroupAssignmentSummary,
+) -> str:
+    if group.accepted or group.client_accepted_at is not None:
+        return "accepted"
+    if group.submission_count > 0:
+        return "ready_for_review"
+    if assignment_summary.in_progress_assignments > 0:
+        return "in_progress"
+    if assignment_summary.pending_assignments > 0:
+        return "pending"
+    return "pending"
+
+
+def _resolve_session_submitter(
+    session_id: UUID,
+    *,
+    assignments_by_session_id: dict[UUID, object],
+    assignments_by_id: dict[int, object],
+    payload_assignment_id,
+) -> tuple[UUID | None, str, str | None, str | None]:
+    assignment = assignments_by_session_id.get(session_id)
+    if assignment is None and payload_assignment_id is not None:
+        try:
+            assignment = assignments_by_id.get(int(payload_assignment_id))
+        except (TypeError, ValueError):
+            assignment = None
+
+    if assignment is None:
+        return None, "Unknown submitter", None, None
+
+    name = (assignment.assigned_user_name or "").strip() or "Unknown submitter"
+    role = assignment.assignment_type if assignment.assignment_type in {"estimator", "engineer"} else None
+    return assignment.assigned_user_id, name, assignment.assigned_user_email, role
+
+
+def _build_quote_group_detail(
+    db: Session,
+    group: DashboardQuoteGroupItem,
+) -> DashboardQuoteGroupDetailItem:
+    raw_assignments = _list_assignments_for_quote_identity(
+        db,
+        eworks_quote_id=group.eworks_quote_id,
+        quote_ref=group.quote_ref,
+    )
+    assignments = _build_dashboard_assignment_items(db, raw_assignments)
+    assignment_summary = _build_assignment_summary(assignments)
+    review_status = _derive_group_review_status(group, assignment_summary)
+
+    assignments_by_session_id = {
+        row.calculation_session_id: row for row in raw_assignments if row.calculation_session_id is not None
+    }
+    assignments_by_id = {row.id: row for row in raw_assignments}
+
+    session_ids = [item.session_id for item in group.sessions]
+    sessions_by_id = _load_linked_sessions(db, session_ids)
+
+    detail_sessions: list[DashboardQuoteGroupSessionDetailItem] = []
+    for item in group.sessions:
+        session = sessions_by_id.get(item.session_id)
+        payload = session.payload_snapshot if session and isinstance(session.payload_snapshot, dict) else {}
+        submitter_id, submitter_name, submitter_email, submitter_role = _resolve_session_submitter(
+            item.session_id,
+            assignments_by_session_id=assignments_by_session_id,
+            assignments_by_id=assignments_by_id,
+            payload_assignment_id=payload.get("assignment_id"),
+        )
+        detail_sessions.append(
+            DashboardQuoteGroupSessionDetailItem(
+                **item.model_dump(),
+                submitted_by_user_id=submitter_id,
+                submitted_by_name=submitter_name,
+                submitted_by_email=submitter_email,
+                submitted_by_role=submitter_role,
+                is_latest=item.session_id == group.latest_session_id,
+            )
+        )
+
+    return DashboardQuoteGroupDetailItem(
+        **group.model_dump(exclude={"sessions"}),
+        review_status=review_status,
+        assignment_summary=assignment_summary,
+        assignments=assignments,
+        sessions=detail_sessions,
+    )
 
 
 def _preview_internal_notes_for_works(

@@ -106,8 +106,7 @@ export default function ClientQuotePage({ params }: { params: { publicToken: str
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">Works</h2>
                 {quote.works.map((work) => (
-                  <SectionCard key={work.title} title={work.title}>
-                    {work.product_name ? <p className="text-sm text-slate-600">{work.product_name}</p> : null}
+                  <SectionCard key={`${work.title}-${work.scope ?? "work"}`} title={work.title}>
                     {work.scope ? (
                       <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{work.scope}</p>
                     ) : null}

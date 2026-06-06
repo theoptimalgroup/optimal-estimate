@@ -18,10 +18,12 @@ import {
   eworksInputClass,
 } from "@/components/eworks-ui";
 import { fetchProduct } from "@/lib/products-api";
+import { cleanRichTextForTextarea } from "@/lib/html-text";
 import type { AttachmentMeta, MaterialSupplierFormValues, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
-import { defaultMaterialSuppliers, PARKING_COPY_FIELDS, computeProductTotalPrice, supplierMaterialsTotal } from "@/lib/eworks-calculate-schema";
+import { defaultMaterialSuppliers, formatSupplierDisplayName, PARKING_COPY_FIELDS, computeProductTotalPrice, supplierMaterialsTotal } from "@/lib/eworks-calculate-schema";
 import { getAttachmentUrl, rewordScope } from "@/lib/eworks-session";
 import { withRegisterChange } from "@/lib/form-register";
+import { formatWorkLabel } from "@/lib/work-label";
 
 // Uses type="text" to avoid browser number-input quirks (can't clear, intermediate
 // decimals eaten, spinners fighting React). The `editing` state owns the display while
@@ -77,7 +79,6 @@ function NumericInput({
 
 type Props = {
   workIndex: number;
-  workNumber: number;
   control: Control<QuestionnaireFormValues>;
   register: UseFormRegister<QuestionnaireFormValues>;
   watch: UseFormWatch<QuestionnaireFormValues>;
@@ -221,21 +222,35 @@ function SupplierMaterialsSection({
 }: SupplierMaterialsSectionProps) {
   return (
     <div className="space-y-4">
-      {suppliers.map((supplier, supplierIndex) => (
-        <div key={supplierIndex} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
-            <span className="text-sm font-semibold text-gray-900">Supplier {supplierIndex + 1}</span>
-            <button
-              type="button"
-              className="flex size-8 items-center justify-center rounded border border-gray-300 text-lg leading-none text-gray-600 hover:bg-gray-100 disabled:opacity-40"
-              disabled={suppliers.length <= 1}
-              onClick={() => onRemoveSupplier(supplierIndex)}
-              aria-label={`Remove supplier ${supplierIndex + 1}`}
-            >
-              −
-            </button>
-          </div>
+      {suppliers.map((supplier, supplierIndex) => {
+        const supplierFallback = `Supplier ${supplierIndex + 1}`;
+        return (
+        <div
+          key={supplierIndex}
+          className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+          data-testid={`supplier-card-${supplierIndex}`}
+        >
           <div className="space-y-3 p-3">
+            <div className="flex items-end justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-1">
+                <EworksLabel className="text-sm font-medium">Supplier name</EworksLabel>
+                <EworksInput
+                  className="min-h-[44px] rounded-lg border-slate-300 bg-white text-base lg:min-h-[40px] lg:text-sm"
+                  placeholder={supplierFallback}
+                  data-testid={`supplier-name-${supplierIndex}`}
+                  {...register(`works.${workIndex}.materials_to_order.${supplierIndex}.supplier_name`)}
+                />
+              </div>
+              <button
+                type="button"
+                className="flex size-8 shrink-0 items-center justify-center rounded border border-gray-300 text-lg leading-none text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                disabled={suppliers.length <= 1}
+                onClick={() => onRemoveSupplier(supplierIndex)}
+                aria-label={`Remove ${formatSupplierDisplayName(supplier, supplierIndex)}`}
+              >
+                −
+              </button>
+            </div>
             <EworksTableShell>
               <div className="hidden bg-gray-100 px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-gray-700 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_4.5rem] lg:gap-3">
                 <span>Link</span>
@@ -333,7 +348,8 @@ function SupplierMaterialsSection({
             </div>
           </div>
         </div>
-      ))}
+        );
+      })}
       <EworksButton variant="ghost" className="min-h-[40px] px-3 text-xs" onClick={onAddSupplier}>
         + Add supplier
       </EworksButton>
@@ -343,7 +359,6 @@ function SupplierMaterialsSection({
 
 export function EworksWorkBlockForm({
   workIndex,
-  workNumber,
   control,
   register,
   watch,
@@ -361,6 +376,9 @@ export function EworksWorkBlockForm({
 }: Props) {
   const values = watch(`works.${workIndex}`);
   const work1Parking = watch("works.0");
+  const previousWork = workIndex > 0 ? watch(`works.${workIndex - 1}`) : null;
+  const work1Label = formatWorkLabel(work1Parking, 0);
+  const previousWorkLabel = previousWork ? formatWorkLabel(previousWork, workIndex - 1) : work1Label;
   const workErrors = errors.works?.[workIndex];
   const suppliers = values.materials_to_order;
   const shelfRows = values.shelf_materials_rows;
@@ -387,7 +405,7 @@ export function EworksWorkBlockForm({
     setResetScopeError(null);
     try {
       const product = await fetchProduct(values.selected_product_id);
-      const scope = product.scope_of_work?.trim() ?? "";
+      const scope = cleanRichTextForTextarea(product.scope_of_work);
       setValue(fieldPath(workIndex, "scope"), scope, { shouldValidate: true });
       setValue(fieldPath(workIndex, "scope_from_product"), true, { shouldValidate: false });
     } catch (error) {
@@ -602,11 +620,9 @@ export function EworksWorkBlockForm({
 
   return (
     <div className="space-y-6">
-      <p className="text-sm font-semibold text-slate-900">Work {workNumber} details</p>
-
       {(engineerNotes || engineerFindings) && (
         <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/80 p-4 shadow-sm">
-          <EworksSectionTitle title="Site visit information" subtitle="From engineer site visit — preserved for estimator review" />
+          <EworksSectionTitle title="Site visit information" />
           {engineerFindings ? (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Engineer findings</p>
@@ -663,16 +679,10 @@ export function EworksWorkBlockForm({
             </EworksButton>
           </div>
         </div>
-        <p className="text-xs text-optimal-muted">
-          Auto-filled from selected product. You can edit before generating the quote.
-        </p>
         {showMissingScopeWarning ? (
           <p className="text-xs text-amber-700" data-testid={`missing-product-scope-work-${workIndex}`}>
             No default scope configured for this product. Admin can add it in Products / Scope.
           </p>
-        ) : null}
-        {values.scope_from_product && scopeText ? (
-          <p className="text-xs text-green-700">Scope linked to selected product.</p>
         ) : null}
         {resetScopeError ? <EworksFieldError message={resetScopeError} /> : null}
         <Controller
@@ -701,7 +711,7 @@ export function EworksWorkBlockForm({
       </div>
 
       <div className="space-y-3">
-        <EworksSectionTitle title="Materials to Order and Cost" subtitle="Optional. Add suppliers when materials need ordering." />
+        <EworksSectionTitle title="Materials to Order and Cost" subtitle="Materials and supplier costs." />
         <SupplierMaterialsSection
           workIndex={workIndex}
           suppliers={suppliers}
@@ -718,7 +728,7 @@ export function EworksWorkBlockForm({
       </div>
 
       <div className="space-y-3">
-        <EworksSectionTitle title="Materials bought off the Shelf and Cost" subtitle="Optional. Add shelf items only when needed." />
+        <EworksSectionTitle title="Materials bought off the Shelf and Cost" />
         <MaterialRowsSection
           workIndex={workIndex}
           labelColumn="Item"
@@ -944,7 +954,7 @@ export function EworksWorkBlockForm({
                     className="min-h-[40px] px-3 text-xs"
                     onClick={copyParkingFromPreviousWork}
                   >
-                    Use parking from Work {workIndex}
+                    Use parking from {previousWorkLabel}
                   </EworksButton>
                 </div>
               )}
@@ -1032,7 +1042,7 @@ export function EworksWorkBlockForm({
                     control={control}
                     render={({ field }) => (
                       <EworksCheckbox
-                        label="Same parking location as Work 1"
+                        label={`Same parking location as ${work1Label}`}
                         name={field.name}
                         ref={field.ref}
                         checked={field.value === true}
@@ -1055,11 +1065,11 @@ export function EworksWorkBlockForm({
                   />
                 )}
                 {usesWork1ParkingLocation && !work1HasParkingGps && (
-                  <p className="text-xs text-amber-700">Set parking location on Work 1 first.</p>
+                  <p className="text-xs text-amber-700">Set parking location on {work1Label} first.</p>
                 )}
                 {usesWork1ParkingLocation && work1HasParkingGps && (
                   <p className="text-xs text-optimal-muted">
-                    Using Work 1 location: {work1Parking.parking_latitude}, {work1Parking.parking_longitude}
+                    Using {work1Label} location: {work1Parking.parking_latitude}, {work1Parking.parking_longitude}
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2">
@@ -1162,7 +1172,7 @@ export function EworksWorkBlockForm({
       </div>
 
       <div className="space-y-3">
-        <EworksSectionTitle title="Photos / Videos" subtitle="Capture on site or choose from library" />
+        <EworksSectionTitle title="Photos / Videos" />
         <input
           ref={photoInputRef}
           type="file"
@@ -1201,9 +1211,6 @@ export function EworksWorkBlockForm({
             Choose files
           </EworksButton>
         </div>
-        <p className="text-xs leading-relaxed text-optimal-muted">
-          Use the camera on your phone or choose existing photos and videos (max 50MB each).
-        </p>
         {uploading && <p className="text-xs font-medium text-optimal-orange animate-pulse-soft">Uploading…</p>}
         {attachments.length > 0 && (
           <ul className="space-y-2">

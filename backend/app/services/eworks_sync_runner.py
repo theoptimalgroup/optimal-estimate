@@ -11,14 +11,22 @@ from app.core.exceptions import AppError
 from app.db.session import SessionLocal
 from app.models.eworks_sync import EworksSyncRun
 from app.services.audit_helpers import record_audit
+from app.services.eworks_sync_run_state import (
+    clear_stale_running_sync_locks,
+    fail_sync_run,
+    update_sync_run_progress,
+)
 from app.services.eworks_sync_service import (
     _start_run,
     sync_all_eworks,
+    sync_customers_from_eworks,
     sync_jobs_from_eworks,
     sync_quotes_from_eworks,
 )
 
 logger = logging.getLogger(__name__)
+
+_UNEXPECTED_EXIT_MESSAGE = "Sync ended without completing (unexpected worker exit)."
 
 
 def _parse_user_id(user_id: str | uuid.UUID | None) -> uuid.UUID | None:
@@ -41,6 +49,8 @@ def _audit_action_for_type(sync_type: str, phase: str) -> str:
         return "eworks_all_sync_failed"
     if sync_type == "jobs":
         return f"eworks_jobs_sync_{phase}"
+    if sync_type == "customers":
+        return f"eworks_customers_sync_{phase}"
     return f"eworks_quotes_sync_{phase}"
 
 
@@ -60,10 +70,13 @@ def schedule_eworks_sync(
     filters: dict[str, Any] | None,
     user_id: str | uuid.UUID | None,
     actor_email: str | None = None,
+    source: str = "manual",
 ) -> EworksSyncRun:
     """Create a sync run record and execute sync in a background thread."""
-    if sync_type not in {"quotes", "jobs", "all"}:
+    if sync_type not in {"quotes", "jobs", "customers", "all"}:
         raise AppError("INVALID_SYNC_TYPE", f"Unsupported sync type: {sync_type}", 400)
+
+    clear_stale_running_sync_locks(db)
 
     existing = get_running_sync_run(db)
     if existing is not None:
@@ -75,7 +88,7 @@ def schedule_eworks_sync(
 
     parsed_user_id = _parse_user_id(user_id)
     run = _start_run(db, sync_type=sync_type, user_id=parsed_user_id)
-    run.metadata_ = {"filters": filters or {}, "phase": "queued"}
+    run.metadata_ = {"filters": filters or {}, "phase": "queued", "source": source}
     db.flush()
 
     run_id = run.id
@@ -110,6 +123,7 @@ def _run_sync_worker(
     actor_email: str | None,
 ) -> None:
     db = SessionLocal()
+    run: EworksSyncRun | None = None
     try:
         run = db.get(EworksSyncRun, run_id)
         if run is None:
@@ -117,7 +131,7 @@ def _run_sync_worker(
             return
 
         run.metadata_ = {**(run.metadata_ or {}), "phase": "running"}
-        db.commit()
+        update_sync_run_progress(db, run, phase="running", commit=True)
 
         if sync_type == "quotes":
             summary, _ = sync_quotes_from_eworks(db, filters=filters, user_id=user_id, run=run)
@@ -126,6 +140,26 @@ def _run_sync_worker(
                 db,
                 actor=None,
                 action=_audit_action_for_type("quotes", "completed"),
+                entity_type="eworks_sync",
+                entity_id=str(run_id),
+                metadata={
+                    "fetched": summary.fetched,
+                    "created": summary.created,
+                    "updated": summary.updated,
+                    "failed": summary.failed,
+                    "actor_email": actor_email,
+                },
+            )
+            db.commit()
+            return
+
+        if sync_type == "customers":
+            summary, _ = sync_customers_from_eworks(db, filters=filters, user_id=user_id, run=run)
+            db.commit()
+            record_audit(
+                db,
+                actor=None,
+                action=_audit_action_for_type("customers", "completed"),
                 entity_type="eworks_sync",
                 entity_id=str(run_id),
                 metadata={
@@ -168,6 +202,7 @@ def _run_sync_worker(
             entity_type="eworks_sync",
             entity_id=str(run_id),
             metadata={
+                "customers_fetched": result.customers.fetched,
                 "quotes_fetched": result.quotes.fetched,
                 "jobs_fetched": result.jobs.fetched,
                 "errors": result.errors,
@@ -180,11 +215,8 @@ def _run_sync_worker(
         db.rollback()
         try:
             run = db.get(EworksSyncRun, run_id)
-            if run is not None and run.status == "running":
-                run.status = "failed"
-                run.error_message = str(exc)
-                run.metadata_ = {**(run.metadata_ or {}), "phase": "failed"}
-                db.commit()
+            if run is not None:
+                fail_sync_run(db, run, error_message=str(exc), commit=True)
             record_audit(
                 db,
                 actor=None,
@@ -198,4 +230,11 @@ def _run_sync_worker(
             logger.exception("Failed to mark background sync run as failed run_id=%s", run_id)
             db.rollback()
     finally:
+        try:
+            run = db.get(EworksSyncRun, run_id)
+            if run is not None and run.status == "running":
+                fail_sync_run(db, run, error_message=_UNEXPECTED_EXIT_MESSAGE, commit=True)
+        except Exception:
+            logger.exception("Failed to finalize background sync run run_id=%s", run_id)
+            db.rollback()
         db.close()

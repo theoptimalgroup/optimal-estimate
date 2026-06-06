@@ -57,15 +57,45 @@ function TagBadges({ tags }: { tags?: string[] }) {
   if (!tags?.length) {
     return <span className="text-slate-400">—</span>;
   }
+
+  const maxVisible = 2;
+  const visible = tags.slice(0, maxVisible);
+  const hiddenCount = tags.length - visible.length;
+
   return (
-    <div className="flex flex-wrap gap-1">
-      {tags.map((tag) => (
-        <StatusBadge key={tag} tone="info">
-          {tag}
+    <div className="flex flex-wrap items-center gap-1">
+      {visible.map((tag) => (
+        <StatusBadge key={tag} tone="info" className="max-w-[8rem] truncate" title={tag}>
+          {tag.length > 18 ? `${tag.slice(0, 18)}…` : tag}
         </StatusBadge>
       ))}
+      {hiddenCount > 0 ? (
+        <span className="text-xs text-slate-500" title={tags.slice(maxVisible).join(", ")}>
+          +{hiddenCount} more
+        </span>
+      ) : null}
     </div>
   );
+}
+
+function quoteListCustomer(q: EworksQuoteRecord): string {
+  return q.display_customer_name ?? q.customer_name ?? "Unknown Customer";
+}
+
+function quoteListStatus(q: EworksQuoteRecord): string | null {
+  return q.display_status ?? q.status_name ?? null;
+}
+
+function quoteListTags(q: EworksQuoteRecord): string[] {
+  return q.display_tags ?? q.tags ?? [];
+}
+
+function quoteListTotal(q: EworksQuoteRecord): number | null | undefined {
+  return q.display_total ?? q.total;
+}
+
+function quoteListDate(q: EworksQuoteRecord): string {
+  return q.display_quote_date ?? q.quote_date ?? "—";
 }
 
 function SharedFilters({
@@ -323,10 +353,7 @@ export default function ManagerQuotesPage() {
 
   return (
     <div className="space-y-6" data-testid="manager-quotes-page">
-      <PageHeader
-        title="Quotes"
-        description="Search quotes and jobs synced from eWorks."
-      />
+      <PageHeader title="Quotes" />
 
       <div className="flex gap-1 border-b border-slate-200">
         {(
@@ -399,40 +426,44 @@ export default function ManagerQuotesPage() {
         quoteItems.length === 0 ? (
           <EmptyState
             title="No synced quotes found."
-            description="Ask an admin to run eWorks Sync."
+            description="No synced quotes."
           />
         ) : (
           <>
             <DataTable testId="quotes-table">
               <DataTableHead>
-                <DataTableRow>
-                  <DataTableCell header>Quote Ref</DataTableCell>
-                  <DataTableCell header>eWorks Quote ID</DataTableCell>
-                  <DataTableCell header>Customer</DataTableCell>
-                  <DataTableCell header>Status</DataTableCell>
-                  <DataTableCell header>Tags</DataTableCell>
-                  <DataTableCell header>Quote Date</DataTableCell>
-                  <DataTableCell header numeric>Total</DataTableCell>
-                  <DataTableCell header>Synced At</DataTableCell>
-                  <DataTableCell header>Action</DataTableCell>
-                </DataTableRow>
+                <DataTableCell header>Quote Ref</DataTableCell>
+                <DataTableCell header>eWorks Quote ID</DataTableCell>
+                <DataTableCell header>Customer</DataTableCell>
+                <DataTableCell header>Status</DataTableCell>
+                <DataTableCell header>Tags</DataTableCell>
+                <DataTableCell header>Quote Date</DataTableCell>
+                <DataTableCell header align="right">
+                  Total
+                </DataTableCell>
+                <DataTableCell header>Synced At</DataTableCell>
+                <DataTableCell header>Action</DataTableCell>
               </DataTableHead>
               <DataTableBody>
                 {quoteItems.map((q) => (
-                  <DataTableRow key={q.id}>
+                  <DataTableRow key={q.id} data-testid={`quote-row-${q.id}`}>
                     <DataTableCell>{q.quote_ref ?? "—"}</DataTableCell>
                     <DataTableCell>
                       <span className="font-mono text-xs">{q.eworks_quote_id}</span>
                     </DataTableCell>
-                    <DataTableCell>{q.customer_name ?? "—"}</DataTableCell>
+                    <DataTableCell>{quoteListCustomer(q)}</DataTableCell>
                     <DataTableCell>
-                      {q.status_name ? <StatusBadge tone="neutral">{q.status_name}</StatusBadge> : "—"}
+                      {quoteListStatus(q) ? (
+                        <StatusBadge tone="neutral">{quoteListStatus(q)}</StatusBadge>
+                      ) : (
+                        "—"
+                      )}
                     </DataTableCell>
                     <DataTableCell>
-                      <TagBadges tags={q.tags} />
+                      <TagBadges tags={quoteListTags(q)} />
                     </DataTableCell>
-                    <DataTableCell>{q.quote_date ?? "—"}</DataTableCell>
-                    <DataTableCell numeric>{fmtMoney(q.total)}</DataTableCell>
+                    <DataTableCell>{quoteListDate(q)}</DataTableCell>
+                    <DataTableCell align="right">{fmtMoney(quoteListTotal(q))}</DataTableCell>
                     <DataTableCell>{fmtDate(q.synced_at)}</DataTableCell>
                     <DataTableCell>
                       <button
@@ -452,31 +483,31 @@ export default function ManagerQuotesPage() {
               total={quoteTotal}
               limit={PAGE_SIZE}
               offset={offset}
-              onOffsetChange={setOffset}
+              onPageChange={setOffset}
             />
           </>
         )
       ) : jobItems.length === 0 ? (
         <EmptyState
           title="No synced jobs found."
-          description="Ask an admin to run eWorks Sync."
+          description="No synced quotes."
         />
       ) : (
         <>
           <DataTable testId="jobs-table">
             <DataTableHead>
-              <DataTableRow>
-                <DataTableCell header>Job Ref</DataTableCell>
-                <DataTableCell header>eWorks Job ID</DataTableCell>
-                <DataTableCell header>Related Quote</DataTableCell>
-                <DataTableCell header>Customer</DataTableCell>
-                <DataTableCell header>Status</DataTableCell>
-                <DataTableCell header>Tags</DataTableCell>
-                <DataTableCell header>Job Date</DataTableCell>
-                <DataTableCell header numeric>Total</DataTableCell>
-                <DataTableCell header>Synced At</DataTableCell>
-                <DataTableCell header>Action</DataTableCell>
-              </DataTableRow>
+              <DataTableCell header>Job Ref</DataTableCell>
+              <DataTableCell header>eWorks Job ID</DataTableCell>
+              <DataTableCell header>Related Quote</DataTableCell>
+              <DataTableCell header>Customer</DataTableCell>
+              <DataTableCell header>Status</DataTableCell>
+              <DataTableCell header>Tags</DataTableCell>
+              <DataTableCell header>Job Date</DataTableCell>
+              <DataTableCell header align="right">
+                Total
+              </DataTableCell>
+              <DataTableCell header>Synced At</DataTableCell>
+              <DataTableCell header>Action</DataTableCell>
             </DataTableHead>
             <DataTableBody>
               {jobItems.map((j) => (
@@ -500,7 +531,7 @@ export default function ManagerQuotesPage() {
                     <TagBadges tags={j.tags} />
                   </DataTableCell>
                   <DataTableCell>{j.job_date ?? "—"}</DataTableCell>
-                  <DataTableCell numeric>{fmtMoney(j.total)}</DataTableCell>
+                  <DataTableCell align="right">{fmtMoney(j.total)}</DataTableCell>
                   <DataTableCell>{fmtDate(j.synced_at)}</DataTableCell>
                   <DataTableCell>
                     <button
@@ -516,7 +547,7 @@ export default function ManagerQuotesPage() {
               ))}
             </DataTableBody>
           </DataTable>
-          <PaginationBar total={jobTotal} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
+          <PaginationBar total={jobTotal} limit={PAGE_SIZE} offset={offset} onPageChange={setOffset} />
         </>
       )}
 

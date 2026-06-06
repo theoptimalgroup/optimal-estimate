@@ -9,7 +9,6 @@ from app.core.config import Settings
 from app.models.calculation_session import CalculationSession
 from app.models.client import Client
 from app.models.product import Product
-from app.models.product import Product
 from app.models.rate_rule import RateRule
 from app.models.support import AuditLog
 from app.models.trade import Trade
@@ -20,6 +19,7 @@ from app.schemas.settings import (
     DashboardSettingsRead,
     DatabaseSettingsRead,
     EworksAcceptanceSyncSettingsRead,
+    EworksBackgroundSyncSettingsRead,
     EworksSettingsRead,
     PdfSettingsRead,
     SecuritySettingsRead,
@@ -29,8 +29,16 @@ from app.schemas.settings import (
     StorageSettingsRead,
 )
 
+from app.services.background_sync_scheduler import build_background_sync_config
+
 APP_VERSION = "1.0.0"
 REDACTED = "***REDACTED***"
+
+
+def _background_sync_settings(settings: Settings) -> EworksBackgroundSyncSettingsRead:
+    del settings
+    config = build_background_sync_config()
+    return EworksBackgroundSyncSettingsRead(**config)
 
 
 def _storage_provider(settings: Settings) -> str:
@@ -82,6 +90,7 @@ def get_safe_settings(settings: Settings) -> SettingsRead:
                 custom_field_key=settings.eworks_acceptance_custom_field_key,
                 custom_field_configured=bool(settings.eworks_acceptance_custom_field_key),
             ),
+            background_sync=_background_sync_settings(settings),
         ),
         dashboard=DashboardSettingsRead(
             password_configured=bool(settings.dashboard_password),

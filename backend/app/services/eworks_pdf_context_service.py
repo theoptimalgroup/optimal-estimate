@@ -18,6 +18,7 @@ from app.schemas.eworks_link import (
     migrate_legacy_material_rows,
 )
 from app.services.eworks_questionnaire_service import format_time_frame
+from app.utils.work_label import format_product_label, format_work_label
 
 
 def _money(amount: Decimal | float | None) -> str:
@@ -73,6 +74,11 @@ def _material_link_table_rows(rows: list[MaterialLinkRow] | list[MaterialOrderRo
     return table or [{"link": "—", "quantity": "—", "cost": "—"}]
 
 
+def _supplier_display_title(supplier: MaterialSupplier, index: int) -> str:
+    name = (supplier.supplier_name or "").strip()
+    return name if name else f"Supplier {index}"
+
+
 def _supplier_material_sections(suppliers: list[MaterialSupplier]) -> list[dict[str, object]]:
     sections: list[dict[str, object]] = []
     for index, supplier in enumerate(suppliers, start=1):
@@ -87,7 +93,7 @@ def _supplier_material_sections(suppliers: list[MaterialSupplier]) -> list[dict[
             continue
         sections.append(
             {
-                "title": f"Supplier {index}",
+                "title": _supplier_display_title(supplier, index),
                 "links": link_rows,
                 "delivery_charge": _money(delivery),
                 "subtotal": _money(subtotal),
@@ -187,13 +193,15 @@ def _work_parking_section(block: WorkBlockSnapshot) -> dict[str, object]:
 
 def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) -> dict:
     suppliers = [MaterialSupplier.model_validate(item) for item in migrate_legacy_material_rows(block.materials_to_order)]
-    product_label = None
-    if block.product_name:
-        code = (block.product_code or "").strip()
-        product_label = f"{block.product_name} — {code}" if code else block.product_name
+    product_label = format_product_label(block.product_name, block.product_code)
     return {
         "index": index,
-        "title": f"Work {index}",
+        "title": format_work_label(
+            product_name=block.product_name,
+            product_code=block.product_code,
+            scope=block.scope,
+            index=index - 1,
+        ),
         "product_label": product_label,
         "scope": _display(block.scope),
         "material_suppliers": _supplier_material_sections(suppliers),
@@ -271,15 +279,26 @@ def _format_line_items(breakdown: CalculationBreakdown) -> list[dict[str, str]]:
     return items
 
 
-def _format_work_results(work_breakdowns: list[WorkBreakdownResult]) -> list[dict[str, object]]:
+def _format_work_results(
+    work_breakdowns: list[WorkBreakdownResult],
+    work_blocks: list[WorkBlockSnapshot] | None = None,
+) -> list[dict[str, object]]:
+    blocks = work_blocks or []
     works: list[dict[str, object]] = []
     for work in work_breakdowns:
+        block = blocks[work.work_index] if work.work_index < len(blocks) else None
         labour_total = _sum_lines(work.breakdown.labour)
         materials_total = _sum_lines(work.breakdown.materials)
+        title = format_work_label(
+            product_name=block.product_name if block else None,
+            product_code=block.product_code if block else None,
+            scope=work.scope or (block.scope if block else None),
+            index=work.work_index,
+        )
         works.append(
             {
                 "index": work.work_index + 1,
-                "title": f"Work {work.work_index + 1}",
+                "title": title,
                 "scope": _truncate_scope(work.scope),
                 "labour_subtotal": _money(labour_total),
                 "materials_subtotal": _money(materials_total),
@@ -382,7 +401,7 @@ def build_eworks_estimate_pdf_context(
         ),
         "results": {
             "has_multiple_works": len(work_results) > 1,
-            "works": _format_work_results(work_results),
+            "works": _format_work_results(work_results, works),
             "combined": _format_combined_quote(breakdown, aggregated_summary),
             "internal_notes": combined_notes,
         },

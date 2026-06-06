@@ -6,8 +6,10 @@ import { EworksButton, EworksSectionTitle, cn } from "@/components/eworks-ui";
 import type { DashboardQuoteItem, DashboardWorkItem } from "@/lib/dashboard";
 import type { AttachmentMeta } from "@/lib/eworks-calculate-schema";
 import type { MaterialOrderRow, MaterialSupplier, WorkBlockSnapshot } from "@/lib/eworks-session";
-import { migrateLegacyMaterialRows } from "@/lib/eworks-calculate-schema";
+import { formatSupplierDisplayName, migrateLegacyMaterialRows } from "@/lib/eworks-calculate-schema";
+import { cleanRichTextForTextarea } from "@/lib/html-text";
 import { getAttachmentUrl } from "@/lib/eworks-session";
+import { formatWorkLabel } from "@/lib/work-label";
 
 export function money(value?: number | string | null) {
   if (value === undefined || value === null || value === "") return "—";
@@ -50,7 +52,7 @@ function WorkAttachmentsGallery({
 }) {
   return (
     <div className="space-y-3">
-      <EworksSectionTitle title="Photos / Videos" subtitle="Click to open full size" />
+      <EworksSectionTitle title="Photos / Videos" />
       {attachments.length === 0 ? (
         <p className="text-sm text-optimal-muted">No photos or videos uploaded for this work.</p>
       ) : (
@@ -180,7 +182,9 @@ function ReadOnlySupplierMaterials({ suppliers }: { suppliers?: MaterialSupplier
         );
         return (
           <div key={supplierIndex} className="space-y-2 rounded-lg border border-gray-200 p-3">
-            <p className="text-sm font-semibold text-gray-900">Supplier {supplierIndex + 1}</p>
+            <p className="text-sm font-semibold text-gray-900">
+              {formatSupplierDisplayName(supplier, supplierIndex)}
+            </p>
             {linkRows.length > 0 && (
               <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="min-w-full text-left text-sm">
@@ -253,7 +257,9 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
       {hasText(details.scope) && (
         <div className="space-y-2">
           <EworksSectionTitle title="Scope of Works" />
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{details.scope}</p>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
+            {cleanRichTextForTextarea(details.scope)}
+          </p>
         </div>
       )}
 
@@ -337,6 +343,16 @@ export function WorkSection({
 }) {
   const attachments = workAttachments(work);
   const attachmentLabel = attachmentSummary(attachments);
+  const workLabel =
+    work.display_label ??
+    formatWorkLabel(
+      {
+        product_name: work.product_name ?? work.details?.product_name ?? null,
+        product_code: work.product_code ?? work.details?.product_code ?? null,
+        scope: work.scope ?? work.details?.scope ?? null,
+      },
+      work.work_index,
+    );
   const workTotal =
     work.labour_subtotal != null || work.materials_subtotal != null
       ? Number(work.labour_subtotal ?? 0) + Number(work.materials_subtotal ?? 0)
@@ -357,7 +373,7 @@ export function WorkSection({
               checked={selected ?? false}
               onChange={(event) => onSelect(event.target.checked)}
               className="size-5 rounded border-gray-300 bg-optimal-field text-optimal-orange focus:ring-optimal-orange/40"
-              aria-label={`Select work ${work.work_index + 1}`}
+              aria-label={`Select ${workLabel}`}
             />
           </label>
         )}
@@ -377,9 +393,9 @@ export function WorkSection({
             ▶
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-gray-900">Work {work.work_index + 1}</p>
-            {!open && work.scope && (
-              <p className="mt-1 truncate text-sm text-optimal-muted">{work.scope}</p>
+            <p className="font-semibold text-gray-900">{workLabel}</p>
+            {!open && work.scope && work.details?.product_name?.trim() && (
+              <p className="mt-1 truncate text-sm text-optimal-muted">{cleanRichTextForTextarea(work.scope)}</p>
             )}
             {attachmentLabel && (
               <p className="mt-1 text-xs text-optimal-orange">{attachmentLabel}</p>
@@ -397,7 +413,9 @@ export function WorkSection({
           {work.details ? (
             <WorkDetailsReadonly details={work.details} />
           ) : (
-            work.scope && <p className="text-sm leading-relaxed text-gray-800">{work.scope}</p>
+            work.scope && (
+              <p className="text-sm leading-relaxed text-gray-800">{cleanRichTextForTextarea(work.scope)}</p>
+            )
           )}
 
           <WorkAttachmentsGallery quote={quote} attachments={attachments} />

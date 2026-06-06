@@ -44,6 +44,27 @@ const mockSettings = {
     api_key_configured: true,
     license_key_configured: false,
     api_enabled: true,
+    acceptance_sync: {
+      enabled: false,
+      mode: "custom_field",
+      custom_field_id: 45,
+      custom_field_key: "txtar_45",
+      custom_field_configured: true,
+    },
+    background_sync: {
+      enabled: false,
+      worker_enabled: false,
+      scheduler_active: false,
+      quotes_enabled: true,
+      jobs_enabled: true,
+      products_enabled: false,
+      attachments_enabled: true,
+      quotes_interval_minutes: 10,
+      jobs_interval_minutes: 30,
+      products_interval_minutes: 1440,
+      lookback_days: 7,
+      running_timeout_minutes: 30,
+    },
   },
   dashboard: {
     password_configured: true,
@@ -113,6 +134,7 @@ test.describe("Admin settings page", () => {
     await expect(page.getByTestId("settings-app-card")).toBeVisible();
     await expect(page.getByTestId("settings-auth-card")).toBeVisible();
     await expect(page.getByTestId("settings-eworks-card")).toBeVisible();
+    await expect(page.getByTestId("settings-background-sync-card")).toBeVisible();
     await expect(page.getByTestId("settings-status-card")).toBeVisible();
     await expect(page.getByTestId("status-badge-eworks-api-key")).toContainText("Configured");
     await expect(page.getByTestId("status-badge-eworks-license-key")).toContainText("Not configured");
@@ -139,5 +161,6 @@ test.describe("Admin settings page", () => {
     await expect(page.getByText("postgresql://")).toHaveCount(0);
     await expect(page.getByText("session_token")).toHaveCount(0);
     await expect(page.getByText("api_key")).toHaveCount(0);
+    await expect(page.getByText("Every 10 minutes")).toBeVisible();
   });
 });

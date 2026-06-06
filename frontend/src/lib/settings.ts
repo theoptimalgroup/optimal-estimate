@@ -17,20 +17,36 @@ export type AuthSettings = {
   auth_provider: string;
 };
 
-export type EworksSettings = {
-  base_url_configured: boolean;
-  api_key_configured: boolean;
-  license_key_configured: boolean;
-  api_enabled: boolean;
-  acceptance_sync: EworksAcceptanceSyncSettings;
-};
-
 export type EworksAcceptanceSyncSettings = {
   enabled: boolean;
   mode: string;
   custom_field_id: number;
   custom_field_key: string;
   custom_field_configured: boolean;
+};
+
+export type EworksBackgroundSyncSettings = {
+  enabled: boolean;
+  worker_enabled: boolean;
+  scheduler_active: boolean;
+  quotes_enabled: boolean;
+  jobs_enabled: boolean;
+  products_enabled: boolean;
+  attachments_enabled: boolean;
+  quotes_interval_minutes: number;
+  jobs_interval_minutes: number;
+  products_interval_minutes: number;
+  lookback_days: number;
+  running_timeout_minutes: number;
+};
+
+export type EworksSettings = {
+  base_url_configured: boolean;
+  api_key_configured: boolean;
+  license_key_configured: boolean;
+  api_enabled: boolean;
+  acceptance_sync: EworksAcceptanceSyncSettings;
+  background_sync: EworksBackgroundSyncSettings;
 };
 
 export type DashboardSettings = {
@@ -92,6 +108,7 @@ function normalizeSettings(raw: Record<string, unknown>): SystemSettings {
   const app = section("app");
   const auth = section("auth");
   const eworks = section("eworks");
+  const backgroundSync = (eworks.background_sync ?? {}) as Record<string, unknown>;
   const dashboard = section("dashboard");
   const storage = section("storage");
   const pdf = section("pdf");
@@ -129,6 +146,20 @@ function normalizeSettings(raw: Record<string, unknown>): SystemSettings {
         custom_field_configured: Boolean(
           (eworks.acceptance_sync as Record<string, unknown> | undefined)?.custom_field_configured,
         ),
+      },
+      background_sync: {
+        enabled: Boolean(backgroundSync.enabled),
+        worker_enabled: Boolean(backgroundSync.worker_enabled),
+        scheduler_active: Boolean(backgroundSync.scheduler_active),
+        quotes_enabled: Boolean(backgroundSync.quotes_enabled ?? true),
+        jobs_enabled: Boolean(backgroundSync.jobs_enabled ?? true),
+        products_enabled: Boolean(backgroundSync.products_enabled),
+        attachments_enabled: Boolean(backgroundSync.attachments_enabled ?? true),
+        quotes_interval_minutes: Number(backgroundSync.quotes_interval_minutes ?? 10),
+        jobs_interval_minutes: Number(backgroundSync.jobs_interval_minutes ?? 30),
+        products_interval_minutes: Number(backgroundSync.products_interval_minutes ?? 1440),
+        lookback_days: Number(backgroundSync.lookback_days ?? 7),
+        running_timeout_minutes: Number(backgroundSync.running_timeout_minutes ?? 30),
       },
     },
     dashboard: {

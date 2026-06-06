@@ -36,6 +36,60 @@ async function mockAuthMe(page: Page, role: MockUserRole | null) {
   });
 }
 
+async function mockDashboardQuoteGroups(page: Page, options?: { requirePassword?: boolean }) {
+  const requirePassword = options?.requirePassword ?? false;
+  await page.route("**/api/v1/dashboard/quote-groups**", async (route) => {
+    const password = route.request().headers()["x-dashboard-password"];
+    if (requirePassword && password !== MOCK_DASHBOARD_PASSWORD) {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Invalid dashboard password" }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          groups: [
+            {
+              group_key: "quote_ref:Q-1001",
+              quote_ref: "Q-1001",
+              eworks_quote_id: 2001,
+              client_name: "Acme Ltd",
+              trade_name: "Electrical",
+              submission_count: 1,
+              latest_submitted_at: "2026-06-01T10:00:00Z",
+              latest_total: "1234.56",
+              highest_total: "1234.56",
+              lowest_total: "1234.56",
+              accepted: false,
+              client_accepted_at: null,
+              reopened_count: 0,
+              latest_session_id: "11111111-1111-1111-1111-111111111111",
+              sessions: [
+                {
+                  session_id: "11111111-1111-1111-1111-111111111111",
+                  submitted_at: "2026-06-01T10:00:00Z",
+                  final_total: "1234.56",
+                  works_count: 1,
+                  status: "submitted",
+                  accepted: false,
+                  client_accepted_at: null,
+                },
+              ],
+            },
+          ],
+        },
+        meta: { total: 1 },
+      }),
+    });
+  });
+}
+
 async function mockDashboardQuotes(page: Page, options?: { requirePassword?: boolean }) {
   const requirePassword = options?.requirePassword ?? false;
   await page.route("**/api/v1/dashboard/quotes", async (route) => {
@@ -115,11 +169,11 @@ test.describe("role-based navigation and access", () => {
 
   test("manager can open manager review and load submitted quotes", async ({ page }) => {
     await mockAuthMe(page, "manager");
-    await mockDashboardQuotes(page);
+    await mockDashboardQuoteGroups(page);
     await page.goto("/manager/review");
     await expect(page.getByTestId("app-shell")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Approvals & Quotes" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Q-1001" })).toBeVisible();
+    await expect(page.getByTestId("quote-group-row-quote_ref:Q-1001")).toBeVisible();
     await expect(page.getByRole("cell", { name: "Acme Ltd" })).toBeVisible();
   });
 

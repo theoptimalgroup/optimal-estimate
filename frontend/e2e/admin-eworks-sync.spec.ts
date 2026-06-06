@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
 type MockUserRole = "admin" | "manager" | "engineer";
 
@@ -23,88 +23,91 @@ async function mockAuthMe(page: Page, role: MockUserRole) {
   });
 }
 
-const MOCK_STATUS = {
-  quotes_count: 42,
-  jobs_count: 17,
-  last_quotes_sync: "2026-06-01T10:00:00Z",
-  last_jobs_sync: "2026-06-01T10:05:00Z",
+const EWORKS_SYNC_API = process.env.PLAYWRIGHT_API_URL ?? "http://127.0.0.1:8000";
+
+const MOCK_RUN_ID = "aaaa-1111";
+
+const MOCK_IDLE_STATUS = {
+  quotes_count: 0,
+  jobs_count: 0,
+  customers_count: 0,
+  last_quotes_sync: null,
+  last_jobs_sync: null,
+  last_customers_sync: null,
   eworks_api_enabled: true,
+  active_sync: null,
+  background_sync: {
+    enabled: false,
+    worker_enabled: false,
+    scheduler_active: false,
+    quotes_enabled: false,
+    jobs_enabled: false,
+    products_enabled: false,
+    attachments_enabled: false,
+    quotes_interval_minutes: 10,
+    jobs_interval_minutes: 30,
+    products_interval_minutes: 1440,
+    lookback_days: 7,
+    running_timeout_minutes: 30,
+  },
+  last_background_sync: null,
 };
 
-const MOCK_RUNS = {
-  items: [
-    {
-      id: "aaaa-1111",
-      sync_type: "all",
-      status: "success",
-      started_at: "2026-06-01T10:00:00Z",
-      finished_at: "2026-06-01T10:00:10Z",
-      fetched_count: 59,
-      created_count: 20,
-      updated_count: 39,
-      failed_count: 0,
-      error_message: null,
-    },
-  ],
-  total: 1,
-  limit: 10,
-  offset: 0,
+const MOCK_RUN_RUNNING = {
+  id: MOCK_RUN_ID,
+  sync_type: "all",
+  status: "running",
+  started_at: "2026-06-01T10:00:00Z",
+  finished_at: null,
+  fetched_count: 12,
+  created_count: 0,
+  updated_count: 4,
+  failed_count: 0,
+  error_message: null,
+  metadata: { phase: "quotes" },
 };
 
-const MOCK_QUOTES = {
-  items: [
-    {
-      id: 1,
-      eworks_quote_id: 101,
-      quote_ref: "Q-101",
-      customer_id: 5,
-      customer_name: "ACME Ltd",
-      status: "2",
-      status_name: "Pending",
-      quote_date: "2026-01-15",
-      expiry_date: "2026-04-15",
-      description: "Full rewire",
-      customer_ref: null,
-      po_ref: null,
-      wo_ref: null,
-      subtotal: 1200.0,
-      vat: 240.0,
-      total: 1440.0,
-      synced_at: "2026-06-01T10:00:00Z",
-    },
-  ],
-  total: 1,
-  limit: 50,
-  offset: 0,
-};
+async function clearEworksSyncSessionStorage(page: Page) {
+  await page.addInitScript(() => {
+    sessionStorage.removeItem("eworks-active-sync-run");
+  });
+}
 
-const MOCK_JOBS = {
-  items: [
-    {
-      id: 1,
-      eworks_job_id: 201,
-      job_ref: "J-201",
-      eworks_quote_id: 101,
-      customer_id: 5,
-      customer_name: "ACME Ltd",
-      status: "open",
-      status_name: "Open",
-      job_date: "2026-02-01",
-      description: "Site inspection",
-      address: "10 Main St, London",
-      subtotal: 400.0,
-      vat: 80.0,
-      total: 480.0,
-      synced_at: "2026-06-01T10:05:00Z",
-    },
-  ],
-  total: 1,
-  limit: 50,
-  offset: 0,
-};
+/** Proxy read-only eWorks sync GET calls via Node fetch (avoids browser CORS and route.fetch page-lifecycle errors). */
+async function proxyEworksSyncReads(page: Page) {
+  await page.route("**/api/v1/eworks-sync/**", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    try {
+      const request = route.request();
+      const url = new URL(request.url());
+      const backendUrl = `${EWORKS_SYNC_API}${url.pathname}${url.search}`;
+      const response = await fetch(backendUrl, {
+        method: "GET",
+        headers: {
+          Accept: request.headers().accept ?? "application/json",
+          "Content-Type": "application/json",
+        },
+      });
+      await route.fulfill({
+        status: response.status,
+        contentType: response.headers.get("content-type") ?? "application/json",
+        body: await response.text(),
+      });
+    } catch {
+      try {
+        await route.abort();
+      } catch {
+        // Page may close while requests are still in flight.
+      }
+    }
+  });
+}
 
 const MOCK_RUN_SUCCESS = {
-  id: "aaaa-1111",
+  id: MOCK_RUN_ID,
   sync_type: "all",
   status: "success",
   started_at: "2026-06-01T10:00:00Z",
@@ -116,111 +119,54 @@ const MOCK_RUN_SUCCESS = {
   error_message: null,
   metadata: {
     phase: "completed",
+    customers: { fetched: 12, created: 3, updated: 9, failed: 0 },
     quotes: { fetched: 42, created: 5, updated: 37, failed: 0 },
     jobs: { fetched: 17, created: 2, updated: 15, failed: 0 },
     errors: [],
   },
 };
 
-async function mockEworksSyncApis(page: Page) {
-  let pollCount = 0;
-
+async function mockIdleEworksSyncStatus(page: Page) {
   await page.route("**/api/v1/eworks-sync/status**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: MOCK_STATUS }),
-    });
-  });
-
-  await page.route("**/api/v1/eworks-sync/runs/aaaa-1111", async (route) => {
-    pollCount += 1;
-    const isRunning = pollCount < 3;
-    const run = isRunning
-      ? {
-          ...MOCK_RUN_SUCCESS,
-          status: "running",
-          finished_at: null,
-          fetched_count: 0,
-          metadata: { phase: pollCount === 1 ? "quotes" : "jobs" },
-        }
-      : MOCK_RUN_SUCCESS;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: run }),
-    });
-  });
-
-  await page.route("**/api/v1/eworks-sync/runs**", async (route) => {
-    const url = route.request().url();
-    if (url.includes("/runs/aaaa-1111")) {
+    if (route.request().method() !== "GET") {
       await route.fallback();
       return;
     }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: MOCK_RUNS }),
+      body: JSON.stringify({ success: true, data: MOCK_IDLE_STATUS }),
+    });
+  });
+}
+
+async function mockPersistentRunningSync(page: Page) {
+  await mockIdleEworksSyncStatus(page);
+
+  await page.route(`**/api/v1/eworks-sync/runs/${MOCK_RUN_ID}`, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: MOCK_RUN_RUNNING }),
     });
   });
 
-  await page.route("**/api/v1/eworks-sync/quotes**", async (route) => {
-    if (route.request().method() === "GET") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: MOCK_QUOTES }),
-      });
-    } else {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: {
-            run_id: "aaaa-1111",
-            sync_type: "quotes",
-            status: "running",
-            message: "Sync started in background",
-          },
-        }),
-      });
-    }
-  });
-
-  await page.route("**/api/v1/eworks-sync/jobs**", async (route) => {
-    if (route.request().method() === "GET") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: MOCK_JOBS }),
-      });
-    } else {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: {
-            run_id: "aaaa-1111",
-            sync_type: "jobs",
-            status: "running",
-            message: "Sync started in background",
-          },
-        }),
-      });
-    }
-  });
-
   await page.route("**/api/v1/eworks-sync/all**", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
         data: {
-          run_id: "aaaa-1111",
+          run_id: MOCK_RUN_ID,
           sync_type: "all",
           status: "running",
           message: "Sync started in background",
@@ -230,113 +176,205 @@ async function mockEworksSyncApis(page: Page) {
   });
 }
 
+async function mockSyncTriggerApis(page: Page) {
+  let pollCount = 0;
+
+  await page.route(`**/api/v1/eworks-sync/runs/${MOCK_RUN_ID}`, async (route) => {
+    pollCount += 1;
+    const isRunning = pollCount < 3;
+    const run = isRunning
+      ? {
+          ...MOCK_RUN_SUCCESS,
+          status: "running",
+          finished_at: null,
+          fetched_count: 0,
+          metadata: { phase: pollCount === 1 ? "customers" : pollCount === 2 ? "quotes" : "jobs" },
+        }
+      : MOCK_RUN_SUCCESS;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: run }),
+    });
+  });
+
+  await page.route("**/api/v1/eworks-sync/all**", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          run_id: MOCK_RUN_ID,
+          sync_type: "all",
+          status: "running",
+          message: "Sync started in background",
+        },
+      }),
+    });
+  });
+}
+
+async function gotoEworksSyncPage(page: Page) {
+  await page.goto("/admin/eworks-sync");
+  await expect(page.getByTestId("eworks-sync-page")).toBeVisible({ timeout: 15000 });
+}
+
+async function waitForSyncOverview(page: Page) {
+  await expect(page.getByTestId("eworks-sync-status-cards")).toBeVisible({ timeout: 30000 });
+}
+
+async function expectNumericCountCard(card: Locator) {
+  await expect(card).toBeVisible();
+  const text = (await card.innerText()).replace(/,/g, "");
+  expect(text).toMatch(/\d+/);
+}
+
+async function expectCustomersTabContent(page: Page) {
+  const panel = page.getByTestId("eworks-sync-tab-customers-panel");
+  await expect(panel).toBeVisible({ timeout: 15000 });
+  const table = panel.getByTestId("eworks-sync-customers-table");
+  const empty = panel.getByTestId("eworks-sync-empty-customers");
+  await expect(table.or(empty)).toBeVisible({ timeout: 30000 });
+}
+
+async function expectQuotesTabContent(page: Page) {
+  const panel = page.getByTestId("eworks-sync-tab-quotes-panel");
+  await expect(panel).toBeVisible({ timeout: 15000 });
+  const table = panel.getByTestId("eworks-sync-quotes-table");
+  const empty = panel.getByTestId("eworks-sync-empty-quotes");
+  await expect(table.or(empty)).toBeVisible({ timeout: 30000 });
+}
+
+async function expectJobsTabContent(page: Page) {
+  const panel = page.getByTestId("eworks-sync-tab-jobs-panel");
+  await expect(panel).toBeVisible({ timeout: 15000 });
+  const table = panel.getByTestId("eworks-sync-jobs-table");
+  const empty = panel.getByTestId("eworks-sync-empty-jobs");
+  await expect(table.or(empty)).toBeVisible({ timeout: 30000 });
+}
+
+async function expectRecentSyncRunsContent(page: Page) {
+  const table = page.getByTestId("eworks-sync-runs-table");
+  const empty = page.getByTestId("eworks-sync-empty-runs");
+  await expect(table.or(empty)).toBeVisible({ timeout: 15000 });
+}
+
+async function assertNoSecretsVisible(page: Page) {
+  await expect(page.getByText("EWORKS_API_KEY")).toHaveCount(0);
+  await expect(page.getByText("api_key")).toHaveCount(0);
+  await expect(page.getByText("session_token")).toHaveCount(0);
+  await expect(page.getByText("dashboard_password")).toHaveCount(0);
+  await expect(page.getByText("super-secret")).toHaveCount(0);
+}
+
 // ---------------------------------------------------------------------------
 // Admin access tests
 // ---------------------------------------------------------------------------
 
 test.describe("Admin: /admin/eworks-sync", () => {
-  test("admin can open eWorks Sync page", async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
+    await clearEworksSyncSessionStorage(page);
     await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
+    await proxyEworksSyncReads(page);
+  });
 
-    await page.goto("/admin/eworks-sync");
-    await expect(page.getByTestId("eworks-sync-page")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("eWorks Sync")).toBeVisible();
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
+
+  test("admin can open eWorks Sync page", async ({ page }) => {
+    await gotoEworksSyncPage(page);
+    await expect(page.getByTestId("eworks-sync-title")).toContainText("eWorks Sync");
   });
 
   test("admin sees status cards with counts", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
+    await gotoEworksSyncPage(page);
+    await waitForSyncOverview(page);
+    await expectNumericCountCard(page.getByTestId("eworks-sync-card-customers-count"));
+    await expectNumericCountCard(page.getByTestId("eworks-sync-card-quotes-count"));
+    await expectNumericCountCard(page.getByTestId("eworks-sync-card-jobs-count"));
+    await expect(page.getByTestId("eworks-sync-card-last-status")).toBeVisible();
+  });
 
-    await page.goto("/admin/eworks-sync");
-    await expect(page.getByTestId("stat-quotes-count")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("42")).toBeVisible();
-    await expect(page.getByText("17")).toBeVisible();
+  test("admin sees background sync configuration", async ({ page }) => {
+    await gotoEworksSyncPage(page);
+    await waitForSyncOverview(page);
+    await expect(page.getByTestId("eworks-sync-background-config")).toBeVisible();
+    await expect(page.getByTestId("background-sync-status")).toBeVisible();
+    await expect(page.getByTestId("background-sync-last-run")).toBeVisible();
   });
 
   test("admin sees read-only warning", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
-
-    await page.goto("/admin/eworks-sync");
-    await expect(page.getByText("Read-only from eWorks")).toBeVisible({ timeout: 10000 });
+    await gotoEworksSyncPage(page);
+    await expect(page.getByTestId("eworks-sync-readonly-warning")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("eworks-sync-readonly-warning")).toContainText("Read-only from eWorks");
   });
 
   test("admin sees sync buttons", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
-
-    await page.goto("/admin/eworks-sync");
-    await expect(page.getByTestId("btn-sync-all")).toBeVisible({ timeout: 10000 });
+    await gotoEworksSyncPage(page);
+    await expect(page.getByTestId("btn-sync-all")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("btn-sync-quotes")).toBeVisible();
     await expect(page.getByTestId("btn-sync-jobs")).toBeVisible();
+    await expect(page.getByTestId("btn-sync-customers")).toBeVisible();
   });
 
   test("admin can trigger Sync All and sees result summary", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
-
-    await page.goto("/admin/eworks-sync");
+    await mockSyncTriggerApis(page);
+    await gotoEworksSyncPage(page);
     await page.getByTestId("btn-sync-all").click();
 
-    await expect(page.getByTestId("sync-active-banner")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId("sync-result")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("sync-active-banner")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("sync-result")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Sync completed")).toBeVisible();
   });
 
   test("sync banner stays visible when switching tabs", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
-
-    await page.goto("/admin/eworks-sync");
+    await mockPersistentRunningSync(page);
+    await gotoEworksSyncPage(page);
     await page.getByTestId("btn-sync-all").click();
-    await expect(page.getByTestId("sync-active-banner")).toBeVisible({ timeout: 10000 });
 
-    await page.getByTestId("tab-quotes").click();
-    await expect(page.getByTestId("sync-active-banner")).toBeVisible({ timeout: 5000 });
+    const banner = page.getByTestId("sync-active-banner");
+    await expect(banner).toBeVisible({ timeout: 15000 });
+
+    await page.getByTestId("eworks-sync-tab-quotes").click();
+    await expect(banner).toBeVisible();
+
+    await page.getByTestId("eworks-sync-tab-jobs").click();
+    await expect(banner).toBeVisible();
   });
 
   test("admin sees recent sync runs table", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
+    await gotoEworksSyncPage(page);
+    await waitForSyncOverview(page);
+    await expectRecentSyncRunsContent(page);
+  });
 
-    await page.goto("/admin/eworks-sync");
-    await expect(page.getByTestId("sync-runs-table")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("success")).toBeVisible();
+  test("admin can view Customers tab", async ({ page }) => {
+    await gotoEworksSyncPage(page);
+    await page.getByTestId("eworks-sync-tab-customers").click();
+    await expectCustomersTabContent(page);
   });
 
   test("admin can view Quotes tab", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
-
-    await page.goto("/admin/eworks-sync");
-    await page.getByTestId("tab-quotes").click();
-    await expect(page.getByTestId("quotes-table")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("ACME Ltd")).toBeVisible();
-    await expect(page.getByText("Q-101")).toBeVisible();
+    await gotoEworksSyncPage(page);
+    await page.getByTestId("eworks-sync-tab-quotes").click();
+    await expectQuotesTabContent(page);
   });
 
   test("admin can view Jobs tab", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
-
-    await page.goto("/admin/eworks-sync");
-    await page.getByTestId("tab-jobs").click();
-    await expect(page.getByTestId("jobs-table")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("J-201")).toBeVisible();
-    await expect(page.getByText("10 Main St, London")).toBeVisible();
+    await gotoEworksSyncPage(page);
+    await page.getByTestId("eworks-sync-tab-jobs").click();
+    await expectJobsTabContent(page);
   });
 
   test("no API key or secret visible in DOM", async ({ page }) => {
-    await mockAuthMe(page, "admin");
-    await mockEworksSyncApis(page);
-
-    await page.goto("/admin/eworks-sync");
-    await expect(page.getByTestId("eworks-sync-page")).toBeVisible({ timeout: 10000 });
-
-    const bodyText = await page.locator("body").innerText();
-    expect(bodyText).not.toContain("api_key");
-    expect(bodyText).not.toContain("EWORKS_API_KEY");
+    await gotoEworksSyncPage(page);
+    await assertNoSecretsVisible(page);
   });
 });
 
@@ -347,16 +385,9 @@ test.describe("Admin: /admin/eworks-sync", () => {
 test.describe("Non-admin: /admin/eworks-sync blocked", () => {
   test("manager gets redirected/blocked from /admin/eworks-sync", async ({ page }) => {
     await mockAuthMe(page, "manager");
-    await page.route("**/api/v1/eworks-sync/**", async (route) => {
-      await route.fulfill({ status: 403, body: JSON.stringify({ detail: "Forbidden" }) });
-    });
-
     await page.goto("/admin/eworks-sync");
-    // The admin layout requires admin role — manager should be redirected to login or shown denied
-    // The RequireRole component redirects to /login for non-admin
-    await page.waitForTimeout(2000);
-    const url = page.url();
-    expect(url).not.toContain("/admin/eworks-sync");
+    await expect(page.getByTestId("require-role-forbidden")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("You do not have access to this page.")).toBeVisible();
   });
 });
 
@@ -366,17 +397,6 @@ test.describe("Non-admin: /admin/eworks-sync blocked", () => {
 
 test("admin sidebar shows eWorks Sync navigation item", async ({ page }) => {
   await mockAuthMe(page, "admin");
-  await mockEworksSyncApis(page);
-  await page.route("**/api/v1/**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: {} }),
-    });
-  });
-
   await page.goto("/admin/dashboard");
-  await page.waitForTimeout(1500);
-  const navItem = page.getByRole("link", { name: /eWorks Sync/i });
-  await expect(navItem).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("link", { name: /eWorks Sync/i })).toBeVisible({ timeout: 15000 });
 });

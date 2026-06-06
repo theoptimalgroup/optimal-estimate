@@ -168,14 +168,16 @@ export function QuoteAssignmentSection({ quoteId }: { quoteId: number | null }) 
                     <DataTableCell>
                       <div className="flex flex-wrap gap-2">
                         {assignment.assignee_kind === "external" && assignment.assignment_link ? (
-                          <button
-                            type="button"
-                            className="text-sm font-medium text-blue-600 hover:text-blue-800"
-                            onClick={() => void handleCopyLink(assignment)}
-                            data-testid={`copy-assignment-link-${assignment.id}`}
-                          >
-                            {copiedId === assignment.id ? "Copied" : "Copy link"}
-                          </button>
+                          <div className="flex flex-col gap-1">
+                            <button
+                              type="button"
+                              className="text-sm font-medium text-blue-600 hover:text-blue-800"
+                              onClick={() => void handleCopyLink(assignment)}
+                              data-testid={`copy-assignment-link-${assignment.id}`}
+                            >
+                              {copiedId === assignment.id ? "Copied" : "Copy link"}
+                            </button>
+                          </div>
                         ) : null}
                         {assignment.status !== "cancelled" ? (
                           <button

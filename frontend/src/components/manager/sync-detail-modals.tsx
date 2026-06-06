@@ -13,6 +13,7 @@ import {
   SectionCard,
   StatusBadge,
 } from "@/components/ui";
+import { SafeRichText } from "@/components/ui/safe-rich-text";
 import type { EworksAttachmentSafe, EworksJobSafeDetail, EworksQuoteSafeDetail } from "@/lib/eworks-sync";
 import { QuoteAssignmentSection } from "@/components/manager/quote-assignment-section";
 
@@ -34,6 +35,11 @@ function fmtMoney(val: number | null | undefined, currency?: string | null): str
 function displayValue(val: string | number | null | undefined): string {
   if (val === null || val === undefined || val === "") return "Not available";
   return String(val);
+}
+
+function displayCustomerName(val: string | null | undefined): string {
+  if (val === null || val === undefined || val === "") return "Unknown Customer";
+  return val;
 }
 
 function fmtFileSize(bytes: number | null | undefined): string {
@@ -120,12 +126,19 @@ function DetailField({
   );
 }
 
-function TextBlock({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
+function RichTextBlock({
+  label,
+  value,
+  testId,
+}: {
+  label: string;
+  value?: string | null;
+  testId?: string;
+}) {
   return (
     <div>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-900">{value}</p>
+      <SafeRichText value={value} testId={testId} />
     </div>
   );
 }
@@ -290,7 +303,7 @@ export function QuoteDetailModal({
 
               <SectionCard title="Customer / Site" testId="customer-site-section">
                 <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <DetailField label="Customer" value={displayValue(detail.customer.customer_name)} />
+                  <DetailField label="Customer" value={displayCustomerName(detail.customer.customer_name)} />
                   <DetailField label="Contact" value={displayValue(detail.customer.customer_contact_name)} />
                   <DetailField label="Site" value={displayValue(detail.customer.site_name)} />
                   <DetailField label="Address" value={displayValue(detail.customer.site_address)} />
@@ -315,10 +328,26 @@ export function QuoteDetailModal({
 
               <SectionCard title="Description & Notes" testId="description-notes-section">
                 <div className="space-y-4">
-                  <TextBlock label="Description" value={detail.quote_details.description} />
-                  <TextBlock label="Customer Notes" value={detail.quote_details.customer_notes} />
-                  <TextBlock label="Terms" value={detail.quote_details.terms} />
-                  <TextBlock label="Notes" value={detail.quote_details.notes} />
+                  <RichTextBlock
+                    label="Description"
+                    value={detail.quote_details.description}
+                    testId="quote-description-rich-text"
+                  />
+                  <RichTextBlock
+                    label="Customer Notes"
+                    value={detail.quote_details.customer_notes}
+                    testId="quote-customer-notes-rich-text"
+                  />
+                  <RichTextBlock
+                    label="Terms"
+                    value={detail.quote_details.terms}
+                    testId="quote-terms-rich-text"
+                  />
+                  <RichTextBlock
+                    label="Notes"
+                    value={detail.quote_details.notes}
+                    testId="quote-notes-rich-text"
+                  />
                 </div>
               </SectionCard>
 
@@ -435,7 +464,7 @@ export function JobDetailModal({
 
               <SectionCard title="Customer / Site" testId="job-customer-site-section">
                 <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <DetailField label="Customer" value={displayValue(detail.customer.customer_name)} />
+                  <DetailField label="Customer" value={displayCustomerName(detail.customer.customer_name)} />
                   <DetailField label="Contact" value={displayValue(detail.customer.customer_contact_name)} />
                   <DetailField label="Site" value={displayValue(detail.customer.site_name)} />
                   <DetailField label="Address" value={displayValue(detail.customer.site_address)} />
@@ -463,8 +492,16 @@ export function JobDetailModal({
 
               <SectionCard title="Description & Notes" testId="job-description-notes-section">
                 <div className="space-y-4">
-                  <TextBlock label="Description" value={detail.job_details.description} />
-                  <TextBlock label="Notes" value={detail.job_details.notes} />
+                  <RichTextBlock
+                    label="Description"
+                    value={detail.job_details.description}
+                    testId="job-description-rich-text"
+                  />
+                  <RichTextBlock
+                    label="Notes"
+                    value={detail.job_details.notes}
+                    testId="job-notes-rich-text"
+                  />
                 </div>
               </SectionCard>
 

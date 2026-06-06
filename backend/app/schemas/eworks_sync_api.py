@@ -46,6 +46,7 @@ class EworksSyncBucketSummary(BaseModel):
 
 
 class EworksSyncSummary(BaseModel):
+    customers: EworksSyncBucketSummary = Field(default_factory=EworksSyncBucketSummary)
     quotes: EworksSyncBucketSummary = Field(default_factory=EworksSyncBucketSummary)
     jobs: EworksSyncBucketSummary = Field(default_factory=EworksSyncBucketSummary)
     errors: list[str] = Field(default_factory=list)
@@ -86,6 +87,11 @@ class EworksQuoteRead(BaseModel):
     total: float | None
     tags: list[str] = Field(default_factory=list)
     synced_at: str | None
+    display_customer_name: str | None = None
+    display_status: str | None = None
+    display_tags: list[str] = Field(default_factory=list)
+    display_total: float | None = None
+    display_quote_date: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -106,6 +112,25 @@ class EworksJobRead(BaseModel):
     vat: float | None
     total: float | None
     tags: list[str] = Field(default_factory=list)
+    synced_at: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class EworksCustomerRead(BaseModel):
+    id: int
+    eworks_customer_id: int
+    customer_name: str | None
+    full_name: str | None
+    company_name: str | None
+    email: str | None
+    phone: str | None
+    billing_email: str | None
+    address_1: str | None
+    address_2: str | None
+    city: str | None
+    county: str | None
+    postcode: str | None
     synced_at: str | None
 
     model_config = {"from_attributes": True}
@@ -141,13 +166,46 @@ class EworksActiveSyncRun(BaseModel):
     phase: str | None = None
 
 
+class EworksBackgroundSyncConfigRead(BaseModel):
+    enabled: bool
+    worker_enabled: bool
+    scheduler_active: bool
+    quotes_enabled: bool
+    jobs_enabled: bool
+    products_enabled: bool
+    attachments_enabled: bool
+    quotes_interval_minutes: int
+    jobs_interval_minutes: int
+    products_interval_minutes: int
+    lookback_days: int
+    running_timeout_minutes: int
+
+
+class EworksBackgroundSyncLastRunRead(BaseModel):
+    run_id: str | None = None
+    sync_type: str | None = None
+    status: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    source: str | None = None
+    phase: str | None = None
+    fetched_count: int | None = None
+    updated_count: int | None = None
+    failed_count: int | None = None
+    error_message: str | None = None
+
+
 class EworksSyncStatusResponse(BaseModel):
     quotes_count: int
     jobs_count: int
+    customers_count: int
     last_quotes_sync: str | None
     last_jobs_sync: str | None
+    last_customers_sync: str | None
     eworks_api_enabled: bool
     active_sync: EworksActiveSyncRun | None = None
+    background_sync: EworksBackgroundSyncConfigRead
+    last_background_sync: EworksBackgroundSyncLastRunRead | None = None
 
 
 class EworksQuoteDetailRead(EworksQuoteRead):

@@ -8,15 +8,17 @@ type StatCardProps = {
   hint?: string;
   icon?: ReactNode;
   className?: string;
+  "data-testid"?: string;
 };
 
-export function StatCard({ label, value, hint, icon, className }: StatCardProps) {
+export function StatCard({ label, value, hint, icon, className, "data-testid": testId }: StatCardProps) {
   return (
     <div
       className={cn(
         "rounded-xl border border-slate-200 bg-white p-6 shadow-sm",
         className,
       )}
+      data-testid={testId}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">

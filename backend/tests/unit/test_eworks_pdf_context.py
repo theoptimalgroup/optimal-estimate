@@ -3,12 +3,14 @@ from decimal import Decimal
 from app.schemas.calculation import CalculationBreakdown, LineBreakdown
 from app.schemas.eworks_link import (
     AggregatedQuoteSummary,
+    MaterialLinkRow,
+    MaterialSupplier,
     Step1Snapshot,
     Step2Snapshot,
     WorkBlockSnapshot,
     WorkBreakdownResult,
 )
-from app.services.eworks_pdf_context_service import build_eworks_estimate_pdf_context
+from app.services.eworks_pdf_context_service import _supplier_display_title, build_eworks_estimate_pdf_context
 
 
 def _step1(**overrides) -> Step1Snapshot:
@@ -74,6 +76,47 @@ def test_build_eworks_pdf_cover_matches_reference_fields():
     assert context["work_forms"][0]["material_suppliers"][0]["links"][0]["cost"] == "£30.00"
     assert context["total_pages"] == 4
     assert context["combined_page"] == 4
+
+
+def test_pdf_uses_supplier_name_when_present():
+    step1 = _step1()
+    step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                scope="Install door",
+                materials_to_order=[
+                    {
+                        "supplier_name": "Travis Perkins",
+                        "links": [{"link": "Lipping", "quantity": 1, "cost": 30}],
+                        "delivery_charge": 0,
+                    }
+                ],
+            )
+        ]
+    )
+    breakdown = CalculationBreakdown(
+        labour=[],
+        materials=[],
+        charges=[],
+        subtotal=Decimal("30"),
+        vat_rate=Decimal("20"),
+        vat_total=Decimal("6"),
+        final_total=Decimal("36"),
+        formula_version="test",
+    )
+    context = build_eworks_estimate_pdf_context(
+        step1=step1,
+        step2=step2,
+        breakdown=breakdown,
+        client_view={"calculation": breakdown.model_dump(mode="json")},
+    )
+
+    assert context["work_forms"][0]["material_suppliers"][0]["title"] == "Travis Perkins"
+
+
+def test_supplier_display_title_falls_back_when_blank():
+    supplier = MaterialSupplier(links=[MaterialLinkRow()], supplier_name="  ")
+    assert _supplier_display_title(supplier, 2) == "Supplier 2"
 
 
 def test_render_eworks_estimate_document_includes_form_sections():

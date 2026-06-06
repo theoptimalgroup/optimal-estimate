@@ -1,4 +1,5 @@
 import type { ProductOption } from "@/lib/eworks-calculate-schema";
+import { cleanRichTextForTextarea } from "@/lib/html-text";
 
 export type WorkScopeState = {
   scope?: string;
@@ -29,7 +30,7 @@ export function canAutoFillScope(work: WorkScopeState): boolean {
 }
 
 export function productScopeText(product: ProductOption | null | undefined): string {
-  return product?.scope_of_work?.trim() ?? "";
+  return cleanRichTextForTextarea(product?.scope_of_work);
 }
 
 export function hasProductScope(product: ProductOption | null | undefined): boolean {

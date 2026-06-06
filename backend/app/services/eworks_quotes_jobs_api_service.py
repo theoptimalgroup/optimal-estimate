@@ -95,6 +95,7 @@ def _fetch_all(
     resource_path: str,
     extra_params: dict[str, Any] | None = None,
     page_limit: int | None = None,
+    on_page_fetched: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all pages from an eWorks paginated endpoint."""
     if not settings.eworks_api_enabled:
@@ -131,6 +132,9 @@ def _fetch_all(
                 len(all_records),
             )
 
+            if on_page_fetched is not None:
+                on_page_fetched(result.current_page, last_page, len(all_records))
+
             if not result.records or result.current_page >= last_page:
                 break
 
@@ -152,6 +156,7 @@ def fetch_all_quotes(
     date_to: str | None = None,
     status: str | None = None,
     page_limit: int | None = None,
+    on_page_fetched: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all Quote records from eWorks (read-only)."""
     extra: dict[str, Any] = {}
@@ -161,7 +166,12 @@ def fetch_all_quotes(
         extra["date_to"] = date_to
     if status:
         extra["status"] = status
-    return _fetch_all(resource_path="Quote", extra_params=extra or None, page_limit=page_limit)
+    return _fetch_all(
+        resource_path="Quote",
+        extra_params=extra or None,
+        page_limit=page_limit,
+        on_page_fetched=on_page_fetched,
+    )
 
 
 def fetch_all_jobs(
@@ -170,6 +180,7 @@ def fetch_all_jobs(
     date_to: str | None = None,
     status: str | None = None,
     page_limit: int | None = None,
+    on_page_fetched: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all Job records from eWorks (read-only)."""
     extra: dict[str, Any] = {}
@@ -179,7 +190,12 @@ def fetch_all_jobs(
         extra["date_to"] = date_to
     if status:
         extra["status"] = status
-    return _fetch_all(resource_path="Job", extra_params=extra or None, page_limit=page_limit)
+    return _fetch_all(
+        resource_path="Job",
+        extra_params=extra or None,
+        page_limit=page_limit,
+        on_page_fetched=on_page_fetched,
+    )
 
 
 def fetch_quote_attachments(

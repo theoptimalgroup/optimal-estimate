@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { EworksFieldError, EworksInput, cn } from "@/components/eworks-ui";
 import { formatProductLabel, type ProductOption } from "@/lib/eworks-calculate-schema";
+import { stripHtmlFromLabel } from "@/lib/html-text";
 import { fetchProducts } from "@/lib/products-api";
 
 type Props = {
@@ -32,7 +33,10 @@ export function ProductCombobox({
 
   const selectedLabel =
     selectedProductId != null && productName
-      ? formatProductLabel({ product_name: productName, product_code: productCode ?? null })
+      ? formatProductLabel({
+          product_name: stripHtmlFromLabel(productName),
+          product_code: productCode ?? null,
+        })
       : "";
 
   const loadProducts = useCallback(async (search: string) => {
@@ -132,11 +136,17 @@ export function ProductCombobox({
                 )}
                 onClick={() => {
                   onSelect(product);
-                  setQuery(formatProductLabel(product));
+                  setQuery(formatProductLabel({
+                    product_name: stripHtmlFromLabel(product.product_name),
+                    product_code: product.product_code ?? null,
+                  }));
                   setOpen(false);
                 }}
               >
-                {formatProductLabel(product)}
+                {formatProductLabel({
+                  product_name: stripHtmlFromLabel(product.product_name),
+                  product_code: product.product_code ?? null,
+                })}
               </button>
             ))}
         </div>

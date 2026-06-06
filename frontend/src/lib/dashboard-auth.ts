@@ -3,12 +3,37 @@ import { getAuthHeaders } from "@/lib/auth/token-provider";
 import {
   buildCombinedWorksPdfFileName,
   type CombineWorkNotesResponse,
+  type DashboardQuoteGroupDetailResponse,
+  type DashboardQuoteGroupsResponse,
   type DashboardQuotesResponse,
   type ReopenQuoteResponse,
 } from "@/lib/dashboard";
 
 export async function fetchSubmittedQuotes() {
   const response = await apiFetch<DashboardQuotesResponse>("/api/v1/dashboard/quotes");
+  return response.data;
+}
+
+export async function fetchSubmittedQuoteGroups() {
+  const response = await apiFetch<DashboardQuoteGroupsResponse>("/api/v1/dashboard/quote-groups");
+  return {
+    groups: response.data?.groups ?? [],
+    total: Number(response.meta?.total ?? response.data?.groups?.length ?? 0),
+  };
+}
+
+export async function fetchSubmittedQuoteGroupDetail(params: {
+  quote_ref?: string;
+  eworks_quote_id?: number;
+  group_key?: string;
+}) {
+  const search = new URLSearchParams();
+  if (params.group_key) search.set("group_key", params.group_key);
+  if (params.quote_ref) search.set("quote_ref", params.quote_ref);
+  if (params.eworks_quote_id != null) search.set("eworks_quote_id", String(params.eworks_quote_id));
+  const response = await apiFetch<DashboardQuoteGroupDetailResponse>(
+    `/api/v1/dashboard/quote-groups/detail?${search.toString()}`,
+  );
   return response.data;
 }
 

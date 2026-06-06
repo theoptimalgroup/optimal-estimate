@@ -24,6 +24,7 @@ from app.services.quote_assignment_service import (
     list_assignments_for_user,
     revoke_assignment,
     start_assignment_estimate,
+    start_public_assignment_estimate,
     submit_public_assignment,
     update_assignment_status,
 )
@@ -101,3 +102,9 @@ def submit_public_assignment_endpoint(
 ):
     data = submit_public_assignment(db, assignment_token, body.notes)
     return success_response(AssignmentPublicRead.model_validate(data).model_dump())
+
+
+@router.post("/public/{assignment_token}/start-estimate")
+def start_public_assignment_estimate_endpoint(assignment_token: str, db: DbSession):
+    data = start_public_assignment_estimate(db, assignment_token)
+    return success_response(AssignmentStartEstimateRead.model_validate(data).model_dump())

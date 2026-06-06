@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,7 +16,7 @@ from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
-from app.models.eworks_sync import EworksAttachment, EworksJob, EworksQuote, EworksSyncRun
+from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksQuote, EworksSyncRun
 from app.models.support import AuditLog
 from app.models.user import User
 
@@ -38,6 +38,7 @@ def db_session():
         AuditLog.__table__,
         EworksQuote.__table__,
         EworksJob.__table__,
+        EworksCustomer.__table__,
         EworksAttachment.__table__,
         EworksSyncRun.__table__,
         CalculationSession.__table__,
@@ -340,6 +341,8 @@ def test_status_endpoint_returns_counts(mock_settings, api_client, db_session):
     data = resp.json()["data"]
     assert data["quotes_count"] >= 1
     assert data["jobs_count"] >= 1
+    assert "customers_count" in data
+    assert "last_customers_sync" in data
     assert "eworks_api_enabled" in data
 
 
@@ -412,6 +415,115 @@ def test_manager_can_list_local_quotes(mock_settings, api_client, db_session):
     assert data["total"] >= 1
     for item in data["items"]:
         assert "raw_payload" not in item
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_uses_raw_payload_customer_fallback(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=801,
+            quote_ref="Q-801",
+            raw_payload={
+                "customer": {"full_name": "Payload Customer Ltd"},
+                "session_token": "must-not-leak",
+            },
+        )
+    )
+    db_session.commit()
+    resp = api_client.get("/api/v1/eworks-sync/quotes?search=Q-801")
+    assert resp.status_code == 200
+    item = resp.json()["data"]["items"][0]
+    assert item["customer_name"] == "Payload Customer Ltd"
+    assert item["display_customer_name"] == "Payload Customer Ltd"
+    assert "raw_payload" not in item
+    assert "session_token" not in resp.text
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_uses_raw_payload_status_fallback(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=802,
+            quote_ref="Q-802",
+            raw_payload={"Status_Name": "Awaiting Approval"},
+        )
+    )
+    db_session.commit()
+    resp = api_client.get("/api/v1/eworks-sync/quotes?search=Q-802")
+    item = resp.json()["data"]["items"][0]
+    assert item["status_name"] == "Awaiting Approval"
+    assert item["display_status"] == "Awaiting Approval"
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_maps_status_id_one_to_new_quote(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=803,
+            quote_ref="Q-803",
+            status="1",
+            raw_payload={"status": "1"},
+        )
+    )
+    db_session.commit()
+    resp = api_client.get("/api/v1/eworks-sync/quotes?search=Q-803")
+    item = resp.json()["data"]["items"][0]
+    assert item["status_name"] == "New Quote"
+    assert item["display_status"] == "New Quote"
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_uses_raw_payload_tags_fallback(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=804,
+            quote_ref="Q-804",
+            raw_payload={"tag_names": ["electrical", "urgent"]},
+        )
+    )
+    db_session.commit()
+    resp = api_client.get("/api/v1/eworks-sync/quotes?search=Q-804")
+    item = resp.json()["data"]["items"][0]
+    assert item["tags"] == ["electrical", "urgent"]
+    assert item["display_tags"] == ["electrical", "urgent"]
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_uses_raw_payload_total_fallback(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=805,
+            quote_ref="Q-805",
+            raw_payload={"grand_total": 2500.5},
+        )
+    )
+    db_session.commit()
+    resp = api_client.get("/api/v1/eworks-sync/quotes?search=Q-805")
+    item = resp.json()["data"]["items"][0]
+    assert item["total"] == 2500.5
+    assert item["display_total"] == 2500.5
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_uses_raw_payload_quote_date_fallback(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=806,
+            quote_ref="Q-806",
+            raw_payload={"Quote_Date": "2026-03-15"},
+        )
+    )
+    db_session.commit()
+    resp = api_client.get("/api/v1/eworks-sync/quotes?search=Q-806")
+    item = resp.json()["data"]["items"][0]
+    assert item["quote_date"] == "2026-03-15"
+    assert item["display_quote_date"] == "2026-03-15"
 
 
 @patch("app.auth.dependencies.settings")
@@ -615,7 +727,12 @@ def test_admin_can_get_sync_run_detail(mock_settings, api_client, db_session):
 def test_cannot_start_second_sync_while_running(mock_settings, api_client, db_session):
     _patch_dev_user(mock_settings, role="admin")
     db_session.add(
-        EworksSyncRun(id=uuid.uuid4(), sync_type="quotes", status="running")
+        EworksSyncRun(
+            id=uuid.uuid4(),
+            sync_type="quotes",
+            status="running",
+            started_at=datetime.now(timezone.utc),
+        )
     )
     db_session.commit()
 
@@ -632,6 +749,7 @@ def test_status_includes_active_sync(mock_settings, api_client, db_session):
             id=run_id,
             sync_type="all",
             status="running",
+            started_at=datetime.now(timezone.utc),
             metadata_={"phase": "quotes"},
         )
     )
@@ -649,17 +767,125 @@ def test_sync_all_uses_single_run(db_session):
     from app.services.eworks_sync_service import sync_all_eworks
 
     with (
+        patch("app.services.eworks_sync_service.fetch_all_customers", return_value=[]),
         patch("app.services.eworks_sync_service.fetch_all_quotes", return_value=[{"id": 1, "quote_ref": "Q-1"}]),
         patch("app.services.eworks_sync_service.fetch_all_jobs", return_value=[{"id": 2, "job_ref": "J-2"}]),
     ):
         result = sync_all_eworks(db_session)
 
+    assert result.customers.fetched == 0
     assert result.quotes.fetched == 1
     assert result.jobs.fetched == 1
     runs = db_session.query(EworksSyncRun).all()
     assert len(runs) == 1
     assert runs[0].sync_type == "all"
     assert runs[0].status == "success"
+
+
+def test_update_sync_run_progress_persists_counts(db_session):
+    from app.services.eworks_sync_run_state import update_sync_run_progress
+
+    run = EworksSyncRun(id=uuid.uuid4(), sync_type="quotes", status="running")
+    db_session.add(run)
+    db_session.commit()
+
+    update_sync_run_progress(
+        db_session,
+        run,
+        phase="upserting",
+        fetched=250,
+        created=0,
+        updated=250,
+        failed=0,
+    )
+
+    db_session.refresh(run)
+    assert run.fetched_count == 250
+    assert run.updated_count == 250
+    assert run.metadata_["phase"] == "upserting"
+
+
+def test_recover_stale_sync_runs_on_startup(db_session):
+    from app.services.eworks_sync_run_state import (
+        STALE_SYNC_TIMEOUT_MESSAGE,
+        clear_stale_running_sync_locks,
+        is_running_lock_stale,
+    )
+
+    stale_started = datetime.now(timezone.utc) - timedelta(minutes=45)
+    run = EworksSyncRun(
+        id=uuid.uuid4(),
+        sync_type="quotes",
+        status="running",
+        started_at=stale_started,
+    )
+    db_session.add(run)
+    db_session.commit()
+
+    assert is_running_lock_stale(run) is True
+    cleared = clear_stale_running_sync_locks(db_session)
+    assert cleared == 1
+    db_session.refresh(run)
+    assert run.status == "failed"
+    assert run.finished_at is not None
+    assert run.error_message == STALE_SYNC_TIMEOUT_MESSAGE
+
+
+def test_clear_stale_running_lock_preserves_recent_run(db_session):
+    from app.services.eworks_sync_run_state import clear_stale_running_sync_locks
+
+    run = EworksSyncRun(
+        id=uuid.uuid4(),
+        sync_type="quotes",
+        status="running",
+        started_at=datetime.now(timezone.utc),
+    )
+    db_session.add(run)
+    db_session.commit()
+
+    cleared = clear_stale_running_sync_locks(db_session)
+    assert cleared == 0
+    db_session.refresh(run)
+    assert run.status == "running"
+    assert run.finished_at is None
+
+
+@patch("app.services.eworks_sync_runner.threading.Thread")
+@patch("app.auth.dependencies.settings")
+def test_stale_running_lock_cleared_before_new_sync(mock_settings, mock_thread, api_client, db_session):
+    _patch_dev_user(mock_settings, role="admin")
+    mock_thread.return_value.start = lambda: None
+
+    stale_started = datetime.now(timezone.utc) - timedelta(minutes=45)
+    db_session.add(
+        EworksSyncRun(
+            id=uuid.uuid4(),
+            sync_type="quotes",
+            status="running",
+            started_at=stale_started,
+        )
+    )
+    db_session.commit()
+
+    resp = api_client.post("/api/v1/eworks-sync/jobs", json={})
+
+    assert resp.status_code == 200
+    stale = db_session.query(EworksSyncRun).filter(EworksSyncRun.sync_type == "quotes").one()
+    assert stale.status == "failed"
+    assert stale.finished_at is not None
+    assert stale.error_message == "Marked failed automatically after stale sync timeout"
+
+
+@patch("app.auth.dependencies.settings")
+def test_admin_can_cancel_running_sync(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="admin")
+    run_id = uuid.uuid4()
+    db_session.add(EworksSyncRun(id=run_id, sync_type="quotes", status="running"))
+    db_session.commit()
+
+    resp = api_client.post(f"/api/v1/eworks-sync/runs/{run_id}/cancel")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "failed"
 
 
 @patch("app.auth.dependencies.settings")
@@ -742,6 +968,221 @@ def test_quote_sync_extracts_tags_from_multiple_formats():
     )
     assert fields["tags"] == ["urgent", "vip", "Electrical", "Rewire", "Commercial"]
     assert fields["raw_payload"]["tags"] == ["urgent", "vip"]
+
+
+def test_extract_customer_name_from_raw_customer_name():
+    from app.services.eworks_sync_service import extract_customer_name_from_raw
+
+    assert extract_customer_name_from_raw({"customer_name": "Top Level Co"}) == "Top Level Co"
+
+
+def test_extract_customer_name_from_raw_customer_full_name():
+    from app.services.eworks_sync_service import extract_customer_name_from_raw
+
+    assert (
+        extract_customer_name_from_raw({"customer": {"id": 9, "full_name": "Nested Full Name Ltd"}})
+        == "Nested Full Name Ltd"
+    )
+
+
+def test_extract_customer_name_from_raw_customer_customer_name():
+    from app.services.eworks_sync_service import extract_customer_name_from_raw
+
+    assert (
+        extract_customer_name_from_raw({"customer": {"customer_name": "Nested Customer Ltd"}})
+        == "Nested Customer Ltd"
+    )
+
+
+def test_extract_customer_name_from_raw_client_name():
+    from app.services.eworks_sync_service import extract_customer_name_from_raw
+
+    assert (
+        extract_customer_name_from_raw(
+            {
+                "customer_id": 12,
+                "client_name": "Lambert Chartered Surveyors",
+                "site": {"address_1": "10 High Street", "city": "London"},
+            }
+        )
+        == "Lambert Chartered Surveyors"
+    )
+
+
+def test_extract_customer_name_from_raw_site_client_name():
+    from app.services.eworks_sync_service import extract_customer_name_from_raw
+
+    assert (
+        extract_customer_name_from_raw(
+            {
+                "customer_id": 15,
+                "site": {"client_name": "Site Client Ltd", "address_1": "1 Nile Street"},
+            }
+        )
+        == "Site Client Ltd"
+    )
+
+
+def test_extract_customer_name_null_when_only_customer_id():
+    from app.services.eworks_sync_service import extract_customer_name_from_raw
+
+    assert extract_customer_name_from_raw({"customer_id": 99, "customer": {"id": 99}}) is None
+
+
+def test_quote_sync_extracts_customer_name_from_raw_payload():
+    from app.services.eworks_sync_service import _extract_quote_fields
+
+    fields = _extract_quote_fields(
+        {
+            "id": 22104,
+            "quote_ref": "Q22104",
+            "client_name": "Linked Co",
+            "customer": {"id": 44},
+            "site": {"address_1": "The Factory", "city": "London"},
+        }
+    )
+    assert fields["customer_name"] == "Linked Co"
+    assert fields["customer_id"] == 44
+
+
+Q22114_STYLE_PAYLOAD = {
+    "id": "29218",
+    "quote_ref": "Q22114",
+    "customer_id": "20",
+    "customer_contact_id": "506",
+    "customer_site_id": "0",
+    "customer_ref": "IS22497543",
+    "site": {
+        "city": "London",
+        "postcode": "W6 8NX",
+        "company_name": "",
+        "full_name": "",
+    },
+    "billing": {
+        "full_name": "Patrycja Gimenez",
+        "email_address": "p.gimenez@portico.com",
+    },
+    "delivery": {"company_name": ""},
+}
+
+
+def test_extract_customer_id_from_top_level_when_no_nested_customer():
+    from app.services.eworks_sync_service import extract_customer_id_from_raw
+
+    assert extract_customer_id_from_raw(Q22114_STYLE_PAYLOAD) == 20
+    assert extract_customer_id_from_raw({"customer": {}, "customer_id": "20"}) == 20
+
+
+def test_extract_quote_fields_q22114_style_payload():
+    from app.services.eworks_sync_service import _extract_quote_fields
+
+    fields = _extract_quote_fields(Q22114_STYLE_PAYLOAD)
+    assert fields["eworks_quote_id"] == 29218
+    assert fields["quote_ref"] == "Q22114"
+    assert fields["customer_id"] == 20
+    assert fields["customer_contact_id"] == 506
+    assert fields["customer_site_id"] is None
+    assert fields["customer_name"] is None
+
+
+def test_q22114_customer_name_enriched_from_synced_customers(db_session):
+    from app.models.eworks_sync import EworksCustomer, EworksQuote
+    from app.services.eworks_sync_service import (
+        _extract_quote_fields,
+        backfill_existing_quotes_customer_fields,
+        enrich_customer_name_on_fields,
+    )
+
+    db_session.add(
+        EworksCustomer(
+            eworks_customer_id=20,
+            customer_name="Portico Grace Conlon",
+            raw_payload={"id": 20},
+        )
+    )
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=29218,
+            quote_ref="Q22114",
+            customer_id=None,
+            customer_name=None,
+            raw_payload=Q22114_STYLE_PAYLOAD,
+        )
+    )
+    db_session.commit()
+
+    updated = backfill_existing_quotes_customer_fields(db_session)
+    db_session.commit()
+
+    quote = db_session.query(EworksQuote).filter(EworksQuote.quote_ref == "Q22114").one()
+    assert updated == 1
+    assert quote.customer_id == 20
+    assert quote.customer_name == "Portico Grace Conlon"
+    assert quote.customer_contact_id == 506
+    assert quote.customer_site_id is None
+
+    fields = _extract_quote_fields(Q22114_STYLE_PAYLOAD)
+    enrich_customer_name_on_fields(db_session, fields)
+    assert fields["customer_name"] == "Portico Grace Conlon"
+
+
+def test_log_unresolved_quote_customer_logs_payload_keys(caplog):
+    import logging
+
+    from app.services.eworks_sync_service import log_unresolved_quote_customer
+
+    with caplog.at_level(logging.DEBUG):
+        log_unresolved_quote_customer(
+            {"id": 1, "quote_ref": "Q-UNRES", "site": {"address": "1 Main St"}},
+            {"quote_ref": "Q-UNRES", "eworks_quote_id": 1, "customer_id": None, "customer_name": None},
+        )
+
+    assert "Q-UNRES" in caplog.text
+    assert "payload_keys" in caplog.text
+    assert "raw_payload" not in caplog.text.lower() or "payload_keys" in caplog.text
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_list_shows_display_customer_from_raw_payload_fallback(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=807,
+            quote_ref="Q-807",
+            raw_payload={
+                "client_name": "Payload Client Ltd",
+                "customer": {"id": 3},
+                "site": {"address_1": "1 Main St"},
+            },
+        )
+    )
+    db_session.commit()
+    resp = api_client.get("/api/v1/eworks-sync/quotes?search=Q-807")
+    item = resp.json()["data"]["items"][0]
+    assert item["display_customer_name"] == "Payload Client Ltd"
+    assert item["customer_name"] == "Payload Client Ltd"
+    assert "raw_payload" not in item
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_quote_safe_detail_uses_raw_payload_customer_fallback(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=808,
+            quote_ref="Q-808",
+            raw_payload={
+                "customer": {"full_name": "Detail Fallback Ltd"},
+                "site": {"address_1": "2 High Street"},
+            },
+        )
+    )
+    db_session.commit()
+    q = db_session.query(EworksQuote).filter(EworksQuote.eworks_quote_id == 808).one()
+    resp = api_client.get(f"/api/v1/eworks-sync/quotes/{q.id}/safe")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["customer"]["customer_name"] == "Detail Fallback Ltd"
+    assert "raw_payload" not in resp.json()["data"]
 
 
 def test_job_sync_extracts_tags():

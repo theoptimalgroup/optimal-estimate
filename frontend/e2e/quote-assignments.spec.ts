@@ -488,21 +488,49 @@ test.describe("Quote assignments", () => {
     expect(page.url()).toContain("token=engineer-session-token");
   });
 
-  test("public assignment link page loads without AppShell", async ({ page }) => {
-    await page.route("**/api/v1/quote-assignments/public/public-assignment-token-abc", async (route) => {
+  test("public assignment link auto-redirects to estimate questionnaire", async ({ page }) => {
+    let startEstimateCalled = false;
+    await page.route("**/api/v1/quote-assignments/public/public-assignment-token-abc/start-estimate", async (route) => {
+      startEstimateCalled = true;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(MOCK_PUBLIC_ASSIGNMENT),
+        body: JSON.stringify({
+          success: true,
+          data: {
+            session_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            session_token: "public-session-token",
+            resume_url:
+              "/eworks/calculate?session_id=cccccccc-cccc-cccc-cccc-cccccccccccc&token=public-session-token",
+            assignment_id: 2,
+            quote_ref: "Q-101",
+          },
+        }),
       });
     });
 
     await page.goto("/assignment/public-assignment-token-abc");
-    await expect(page.getByTestId("public-assignment-page")).toBeVisible();
-    await expect(page.getByTestId("assignment-summary-section")).toBeVisible();
-    await expect(page.getByText("Q-101")).toBeVisible();
+    await expect(page.getByText("Preparing estimate questionnaire…")).toBeVisible();
+    await page.waitForURL("**/eworks/calculate?session_id=**");
+    expect(startEstimateCalled).toBe(true);
+    expect(page.url()).toContain("token=public-session-token");
+    await expect(page.getByTestId("assignment-summary-section")).toHaveCount(0);
     await expect(page.locator('[data-testid="app-shell"]')).toHaveCount(0);
     await expect(page.getByText("raw_payload")).toHaveCount(0);
-    await expect(page.getByText("session_token")).toHaveCount(0);
+  });
+
+  test("expired public assignment shows error state", async ({ page }) => {
+    await page.route("**/api/v1/quote-assignments/public/expired-token/start-estimate", async (route) => {
+      await route.fulfill({
+        status: 410,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Assignment link has expired" }),
+      });
+    });
+
+    await page.goto("/assignment/expired-token");
+    await expect(page.getByText("This assignment link is invalid or has expired.")).toBeVisible();
+    await expect(page.getByTestId("assignment-summary-section")).toHaveCount(0);
+    await expect(page.url()).not.toContain("/eworks/calculate");
   });
 });

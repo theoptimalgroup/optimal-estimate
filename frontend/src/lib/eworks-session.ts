@@ -46,6 +46,7 @@ export type MaterialLinkRow = {
 export type MaterialSupplier = {
   links: MaterialLinkRow[];
   delivery_charge: number | string;
+  supplier_name?: string | null;
 };
 
 export type WorkBlockSnapshot = {

@@ -67,6 +67,7 @@ class MaterialLinkRow(BaseModel):
 class MaterialSupplier(BaseModel):
     links: list[MaterialLinkRow] = Field(default_factory=list)
     delivery_charge: Decimal = Decimal("0")
+    supplier_name: str | None = None
 
 
 def migrate_legacy_material_rows(rows: list | None) -> list[dict]:
@@ -429,6 +430,9 @@ class RewordScopeResponse(BaseModel):
 class DashboardWorkItem(BaseModel):
     work_index: int
     scope: str | None = None
+    product_name: str | None = None
+    product_code: str | None = None
+    display_label: str | None = None
     labour_subtotal: Decimal | None = None
     materials_subtotal: Decimal | None = None
     internal_notes: str | None = None

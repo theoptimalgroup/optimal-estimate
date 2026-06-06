@@ -26,6 +26,8 @@ from app.services.client_service import get_or_create_client_for_import
 from app.services.eworks_link_service import payload_to_step1, try_resolve_rate_rule
 from app.services.eworks_questionnaire_service import apply_questionnaire_defaults
 from app.services.manager_dashboard_service import extract_all_tags
+from app.services.eworks_sync_service import lookup_customer_name_by_id
+from app.utils.html_text import html_to_plain_text
 
 ASSIGNMENT_STATUSES = frozenset({"assigned", "in_progress", "submitted", "cancelled"})
 DEFAULT_TOKEN_DAYS = 30
@@ -503,13 +505,24 @@ def _default_trade(db: Session) -> Trade:
     return trade
 
 
+def _resolve_quote_customer_name(db: Session, quote: EworksQuote) -> str:
+    name = (quote.customer_name or "").strip()
+    if name:
+        return name
+    if quote.customer_id is not None:
+        looked_up = lookup_customer_name_by_id(db, quote.customer_id)
+        if looked_up:
+            return looked_up
+    return "Unknown Customer"
+
+
 def _create_calculation_session_for_assignment(
     db: Session,
     *,
     assignment: EworksQuoteAssignment,
     quote: EworksQuote,
 ) -> CalculationSession:
-    customer_name = (quote.customer_name or "Unknown Customer").strip()
+    customer_name = _resolve_quote_customer_name(db, quote)
     client, _, _ = get_or_create_client_for_import(db, customer_name)
     trade = _default_trade(db)
     rule = try_resolve_rate_rule(db, client.id, trade.id)
@@ -518,6 +531,7 @@ def _create_calculation_session_for_assignment(
     job_number = str(quote.eworks_quote_id)
     property_address = _quote_site_address(quote)
     description = (quote.description or "").strip() or None
+    scope_plain = html_to_plain_text(description) if description else None
     notes = (assignment.notes or "").strip() or None
 
     payload = EworksLinkPayload(
@@ -530,7 +544,7 @@ def _create_calculation_session_for_assignment(
         property_address=property_address,
         original_job_description=description,
         quote_description=description,
-        scope=description,
+        scope=scope_plain,
         other_notes=notes,
         expires_at=_quote_expires_at(quote),
     )
@@ -540,7 +554,7 @@ def _create_calculation_session_for_assignment(
     payload_dict["assignment_id"] = assignment.id
     payload_dict["synced_quote_id"] = quote.id
 
-    initial_step2 = Step2Snapshot(scope=description) if description else Step2Snapshot()
+    initial_step2 = Step2Snapshot(scope=scope_plain) if scope_plain else Step2Snapshot()
     initial_step2 = apply_questionnaire_defaults(initial_step2, trade_name=trade.name, default_skill=True)
 
     session = CalculationSession(
@@ -568,6 +582,58 @@ def _get_linked_session(db: Session, row: EworksQuoteAssignment) -> CalculationS
     return db.get(CalculationSession, row.calculation_session_id)
 
 
+def _build_start_estimate_response(row: EworksQuoteAssignment, session: CalculationSession) -> dict[str, Any]:
+    return {
+        "session_id": str(session.id),
+        "session_token": session.session_token,
+        "resume_url": _build_resume_url(session.id, session.session_token),
+        "assignment_id": row.id,
+        "quote_ref": row.quote_ref,
+    }
+
+
+def _ensure_assignment_calculation_session(
+    db: Session,
+    row: EworksQuoteAssignment,
+    *,
+    actor: AuthenticatedUser | None,
+    audit_action: str,
+    audit_metadata: dict[str, Any] | None = None,
+) -> tuple[CalculationSession, bool]:
+    quote = _get_quote_or_404(db, row.synced_quote_id)
+    existing = _get_linked_session(db, row)
+    created = False
+    if existing is None:
+        existing = _create_calculation_session_for_assignment(db, assignment=row, quote=quote)
+        row.calculation_session_id = existing.id
+        if row.status == "assigned":
+            row.status = "in_progress"
+        created = True
+        metadata = {
+            "assignment_id": row.id,
+            "quote_ref": row.quote_ref,
+            "eworks_quote_id": row.eworks_quote_id,
+            "assignment_type": row.assignment_type,
+            "assigned_user_email": row.assigned_user_email,
+            **(audit_metadata or {}),
+        }
+        record_audit(
+            db,
+            actor=actor,
+            action=audit_action,
+            entity_type="quote_assignment",
+            entity_id=row.id,
+            after={
+                "assignment_id": row.id,
+                "calculation_session_id": str(existing.id),
+                "quote_ref": row.quote_ref,
+                "status": row.status,
+            },
+            metadata=metadata,
+        )
+    return existing, created
+
+
 def start_assignment_estimate(
     db: Session,
     assignment_id: int,
@@ -578,46 +644,39 @@ def start_assignment_estimate(
         raise HTTPException(status_code=404, detail="Assignment not found")
 
     _assert_user_can_start_assignment(current_user, row)
-    quote = _get_quote_or_404(db, row.synced_quote_id)
-
-    existing = _get_linked_session(db, row)
-    created = False
-    if existing is None:
-        existing = _create_calculation_session_for_assignment(db, assignment=row, quote=quote)
-        row.calculation_session_id = existing.id
-        if row.status == "assigned":
-            row.status = "in_progress"
-        created = True
-        record_audit(
-            db,
-            actor=current_user,
-            action="quote_assignment_started",
-            entity_type="quote_assignment",
-            entity_id=row.id,
-            after={
-                "assignment_id": row.id,
-                "calculation_session_id": str(existing.id),
-                "quote_ref": row.quote_ref,
-                "status": row.status,
-            },
-            metadata={
-                "assignment_id": row.id,
-                "quote_ref": row.quote_ref,
-                "eworks_quote_id": row.eworks_quote_id,
-                "assignment_type": row.assignment_type,
-                "assigned_user_email": row.assigned_user_email,
-            },
-        )
+    session, created = _ensure_assignment_calculation_session(
+        db,
+        row,
+        actor=current_user,
+        audit_action="quote_assignment_started",
+    )
 
     db.commit()
     db.refresh(row)
-    db.refresh(existing)
+    db.refresh(session)
 
-    return {
-        "session_id": str(existing.id),
-        "session_token": existing.session_token,
-        "resume_url": _build_resume_url(existing.id, existing.session_token),
-        "assignment_id": row.id,
-        "quote_ref": row.quote_ref,
-        "created": created,
-    }
+    response = _build_start_estimate_response(row, session)
+    response["created"] = created
+    return response
+
+
+def start_public_assignment_estimate(db: Session, assignment_token: str) -> dict[str, Any]:
+    row = get_assignment_by_token(db, assignment_token)
+    if row.assignee_kind != "external":
+        raise HTTPException(
+            status_code=403,
+            detail="Public estimate start is only available for external assignments",
+        )
+
+    session, _created = _ensure_assignment_calculation_session(
+        db,
+        row,
+        actor=None,
+        audit_action="quote_assignment_public_started",
+        audit_metadata={"assignee_kind": "external"},
+    )
+
+    db.commit()
+    db.refresh(row)
+    db.refresh(session)
+    return _build_start_estimate_response(row, session)

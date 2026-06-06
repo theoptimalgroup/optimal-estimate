@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FromLinkResponse } from "@/lib/eworks-session";
 import { EworksSectionTitle, EworksTextarea, cn } from "@/components/eworks-ui";
+import { SafeRichText } from "@/components/ui/safe-rich-text";
 
 function displayValue(value?: string | number | null) {
   if (value === undefined || value === null || value === "") return "—";
@@ -55,20 +56,23 @@ function ReadOnlyTextBlock({
   value,
   className,
   rows = 6,
+  testId,
 }: {
   label: string;
   value?: string | null;
   className?: string;
   rows?: number;
+  testId?: string;
 }) {
   return (
     <div className={cn("space-y-2", className)}>
       <dt className="text-sm font-semibold text-optimal-orange">{label}</dt>
       <dd
-        className="whitespace-pre-wrap rounded-lg bg-optimal-field px-3.5 py-3 text-sm leading-relaxed text-optimal-field-text"
+        className="rounded-lg bg-optimal-field px-3.5 py-3 text-optimal-field-text"
         style={{ minHeight: `${rows * 1.25}rem` }}
+        data-testid={testId}
       >
-        {displayValue(value)}
+        <SafeRichText value={value} emptyText="—" variant="inline" />
       </dd>
     </div>
   );
@@ -105,10 +109,6 @@ export function EworksEstimationFormStep({ step1, resolved, onFindingsReportChan
 
   return (
     <section className="space-y-6">
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3.5 text-sm leading-relaxed text-optimal-muted">
-        This estimation form is supplied by your eWorks link. You can edit the Findings Report below.
-      </div>
-
       <dl className="space-y-5">
         <div className="grid gap-5 sm:grid-cols-3">
           <ReadOnlyField label="Engineer Name" value={step1.engineer_name} className="sm:col-span-1" />
@@ -121,7 +121,12 @@ export function EworksEstimationFormStep({ step1, resolved, onFindingsReportChan
           <ReadOnlyField label="PM" value={step1.property_manager_name} />
           <ReadOnlyField label="Date visited / Form completed" value={formatDateVisited(step1.date_visited)} />
         </div>
-        <ReadOnlyTextBlock label="Description of what quoting for" value={step1.quote_description} rows={10} />
+        <ReadOnlyTextBlock
+          label="Description of what quoting for"
+          value={step1.quote_description}
+          rows={10}
+          testId="quote-description-rich-text"
+        />
 
         <div className="space-y-2">
           <dt className="flex items-center gap-2 text-sm font-semibold text-optimal-orange">

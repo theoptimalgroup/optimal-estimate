@@ -10,16 +10,27 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.models.eworks_sync import EworksJob, EworksQuote, EworksSyncRun
+from app.core.config import settings
+from app.models.eworks_sync import EworksCustomer, EworksJob, EworksQuote, EworksSyncRun
 from app.schemas.eworks_sync_api import EworksSyncBucketSummary, EworksSyncSummary
 from app.services.eworks_attachment_sync_service import sync_parent_attachments
+from app.services.eworks_customers_api_service import fetch_all_customers
 from app.services.eworks_quotes_jobs_api_service import fetch_all_jobs, fetch_all_quotes
+from app.services.eworks_sync_run_state import (
+    _PROGRESS_COMMIT_EVERY,
+    update_sync_run_progress,
+)
 
 logger = logging.getLogger(__name__)
 
 SYNC_DEFAULT_DAYS = 7
+
+
+def default_sync_lookback_days() -> int:
+    return max(1, int(settings.eworks_sync_lookback_days or SYNC_DEFAULT_DAYS))
 
 
 def resolve_sync_filters(filters: dict | None = None, *, full: bool = False) -> dict:
@@ -31,7 +42,8 @@ def resolve_sync_filters(filters: dict | None = None, *, full: bool = False) -> 
         return resolved
 
     today = datetime.now(timezone.utc).date()
-    resolved["date_from"] = (today - timedelta(days=SYNC_DEFAULT_DAYS)).isoformat()
+    lookback_days = default_sync_lookback_days()
+    resolved["date_from"] = (today - timedelta(days=lookback_days)).isoformat()
     resolved["date_to"] = today.isoformat()
     return resolved
 
@@ -66,6 +78,415 @@ def _safe_str(val: Any, max_len: int | None = None) -> str | None:
     if s and max_len:
         s = s[:max_len]
     return s
+
+
+def _coerce_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _pick_first_positive_int(*values: Any) -> int | None:
+    """Return the first coercible positive integer (treats 0 as unset for eWorks IDs)."""
+    for value in values:
+        parsed = _safe_int(value)
+        if parsed is not None and parsed > 0:
+            return parsed
+    return None
+
+
+def _payload_top_level_keys(raw: dict[str, Any]) -> list[str]:
+    if not isinstance(raw, dict):
+        return []
+    return sorted(str(key) for key in raw.keys())
+
+
+def _first_customer_name(*values: Any, max_len: int = 500) -> str | None:
+    for value in values:
+        name = _safe_str(value, max_len)
+        if name:
+            return name
+    return None
+
+
+def extract_customer_id_from_raw(raw: dict[str, Any]) -> int | None:
+    """Extract eWorks customer_id from quote/job payloads with flexible key variants."""
+    if not isinstance(raw, dict):
+        return None
+
+    customer = _coerce_dict(raw.get("customer"))
+    quote_customer = _coerce_dict(raw.get("quote_customer"))
+    customer_details = _coerce_dict(raw.get("customer_details"))
+    billing_customer = _coerce_dict(raw.get("billing_customer"))
+    site = _coerce_dict(raw.get("site"))
+    contact = _coerce_dict(raw.get("customer_contact") or raw.get("contact"))
+    customer_site = _coerce_dict(raw.get("customer_site"))
+    property_obj = _coerce_dict(raw.get("property"))
+
+    customer_value = raw.get("customer")
+    if not isinstance(customer_value, dict) and customer_value not in (None, ""):
+        scalar_id = _pick_first_positive_int(customer_value)
+        if scalar_id is not None:
+            return scalar_id
+
+    return _pick_first_positive_int(
+        customer.get("id"),
+        customer.get("customer_id"),
+        customer.get("customerId"),
+        quote_customer.get("id"),
+        quote_customer.get("customer_id"),
+        raw.get("customer_id"),
+        raw.get("customerId"),
+        raw.get("customerID"),
+        raw.get("CustomerID"),
+        raw.get("Customer_Id"),
+        raw.get("Customer"),
+        raw.get("client_id"),
+        raw.get("clientId"),
+        raw.get("client"),
+        contact.get("customer_id"),
+        site.get("customer_id"),
+        property_obj.get("customer_id"),
+        customer_site.get("customer_id"),
+        customer_details.get("customer_id"),
+        customer_details.get("id"),
+        billing_customer.get("customer_id"),
+        billing_customer.get("id"),
+    )
+
+
+def extract_customer_contact_id_from_raw(raw: dict[str, Any]) -> int | None:
+    if not isinstance(raw, dict):
+        return None
+
+    contact = _coerce_dict(raw.get("customer_contact") or raw.get("contact"))
+    return _pick_first_positive_int(
+        raw.get("customer_contact_id"),
+        raw.get("customerContactId"),
+        raw.get("Customer_Contact_Id"),
+        contact.get("id"),
+        contact.get("customer_contact_id"),
+    )
+
+
+def extract_customer_site_id_from_raw(raw: dict[str, Any]) -> int | None:
+    if not isinstance(raw, dict):
+        return None
+
+    site = _coerce_dict(raw.get("site"))
+    customer_site = _coerce_dict(raw.get("customer_site"))
+    return _pick_first_positive_int(
+        raw.get("customer_site_id"),
+        raw.get("customerSiteId"),
+        raw.get("Customer_Site_Id"),
+        site.get("id"),
+        site.get("customer_site_id"),
+        customer_site.get("id"),
+        customer_site.get("customer_site_id"),
+    )
+
+
+def extract_customer_name_from_raw(raw: dict[str, Any]) -> str | None:
+    """Extract company/customer name from an eWorks quote/job payload.
+
+    Prefers explicit customer/company fields over site or contact names.
+    Returns None when only customer_id is present (no usable name fields).
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    customer = _coerce_dict(raw.get("customer"))
+    quote_customer = _coerce_dict(raw.get("quote_customer"))
+    customer_details = _coerce_dict(raw.get("customer_details"))
+    billing_customer = _coerce_dict(raw.get("billing_customer"))
+    site = _coerce_dict(raw.get("site"))
+    delivery = _coerce_dict(raw.get("delivery"))
+    billing = _coerce_dict(raw.get("billing"))
+    contact = _coerce_dict(raw.get("customer_contact") or raw.get("contact"))
+
+    company_name = _first_customer_name(
+        raw.get("customer_name"),
+        customer.get("customer_name"),
+        quote_customer.get("customer_name"),
+        quote_customer.get("full_name"),
+        quote_customer.get("name"),
+        raw.get("client_name"),
+        customer.get("full_name"),
+        customer.get("name"),
+        customer.get("display_name"),
+        raw.get("full_name"),
+        raw.get("name"),
+        customer_details.get("customer_name"),
+        customer_details.get("name"),
+        customer_details.get("full_name"),
+        billing_customer.get("customer_name"),
+        billing_customer.get("name"),
+        billing_customer.get("full_name"),
+        site.get("customer_name"),
+        site.get("client_name"),
+        site.get("company_name"),
+        delivery.get("company_name"),
+        delivery.get("customer_name"),
+        billing.get("company_name"),
+    )
+    if company_name:
+        return company_name
+
+    return _first_customer_name(
+        contact.get("full_name"),
+        contact.get("name"),
+        contact.get("contact_name"),
+    )
+
+
+def log_unresolved_quote_customer(raw: dict[str, Any], fields: dict[str, Any]) -> None:
+    """Debug-safe log when a quote's customer identity could not be resolved."""
+    if fields.get("customer_id") or fields.get("customer_name"):
+        return
+    logger.debug(
+        "eWorks quote customer unresolved: quote_ref=%s eworks_quote_id=%s payload_keys=%s",
+        fields.get("quote_ref"),
+        fields.get("eworks_quote_id"),
+        _payload_top_level_keys(raw),
+    )
+
+
+def extract_customer_name_from_customer_record(raw: dict[str, Any]) -> str | None:
+    """Resolve display name from a synced eWorks Customer record."""
+    return _first_customer_name(
+        raw.get("customer_name"),
+        raw.get("full_name"),
+        raw.get("company_name"),
+        raw.get("name"),
+        raw.get("display_name"),
+    )
+
+
+def lookup_customer_name_by_id(db: Session, customer_id: int | None) -> str | None:
+    if customer_id is None:
+        return None
+    row = (
+        db.query(EworksCustomer)
+        .filter(EworksCustomer.eworks_customer_id == customer_id)
+        .one_or_none()
+    )
+    if row is None:
+        return None
+    return _first_customer_name(row.customer_name, row.full_name, row.company_name)
+
+
+def enrich_customer_name_on_fields(db: Session, fields: dict[str, Any]) -> None:
+    """Fill customer_name on quote/job fields using synced eworks_customers when missing."""
+    if fields.get("customer_name"):
+        return
+    customer_id = fields.get("customer_id")
+    if customer_id is None:
+        return
+    name = lookup_customer_name_by_id(db, customer_id)
+    if name:
+        fields["customer_name"] = name
+
+
+def enrich_existing_quotes_customer_names(db: Session) -> int:
+    """Backfill eworks_quotes.customer_name from eworks_customers for rows missing a name."""
+    updated = 0
+    rows = (
+        db.query(EworksQuote)
+        .filter(EworksQuote.customer_id.isnot(None))
+        .filter(or_(EworksQuote.customer_name.is_(None), func.trim(EworksQuote.customer_name) == ""))
+        .all()
+    )
+    for quote in rows:
+        name = lookup_customer_name_by_id(db, quote.customer_id)
+        if name:
+            quote.customer_name = name
+            updated += 1
+    if updated:
+        db.flush()
+    return updated
+
+
+def enrich_existing_jobs_customer_names(db: Session) -> int:
+    updated = 0
+    rows = (
+        db.query(EworksJob)
+        .filter(EworksJob.customer_id.isnot(None))
+        .filter(or_(EworksJob.customer_name.is_(None), func.trim(EworksJob.customer_name) == ""))
+        .all()
+    )
+    for job in rows:
+        name = lookup_customer_name_by_id(db, job.customer_id)
+        if name:
+            job.customer_name = name
+            updated += 1
+    if updated:
+        db.flush()
+    return updated
+
+
+def _apply_extracted_customer_fields(target: EworksQuote | EworksJob, fields: dict[str, Any]) -> bool:
+    changed = False
+    for key in ("customer_id", "customer_name", "customer_contact_id", "customer_site_id"):
+        if key not in fields or not hasattr(target, key):
+            continue
+        new_value = fields[key]
+        if new_value is None:
+            if key.endswith("_id") and getattr(target, key) in (0, "0"):
+                setattr(target, key, None)
+                changed = True
+            continue
+        if getattr(target, key) != new_value:
+            setattr(target, key, new_value)
+            changed = True
+    return changed
+
+
+def backfill_existing_quotes_customer_fields(db: Session) -> int:
+    """Re-extract customer fields from stored raw_payload for quotes missing identity."""
+    updated = 0
+    rows = (
+        db.query(EworksQuote)
+        .filter(
+            or_(
+                EworksQuote.customer_id.is_(None),
+                EworksQuote.customer_name.is_(None),
+                func.trim(EworksQuote.customer_name) == "",
+                EworksQuote.customer_site_id == 0,
+                EworksQuote.customer_contact_id == 0,
+            )
+        )
+        .filter(EworksQuote.raw_payload.isnot(None))
+        .all()
+    )
+    for quote in rows:
+        raw = quote.raw_payload if isinstance(quote.raw_payload, dict) else None
+        if not raw:
+            continue
+        fields = {
+            "customer_id": extract_customer_id_from_raw(raw),
+            "customer_name": extract_customer_name_from_raw(raw),
+            "customer_contact_id": extract_customer_contact_id_from_raw(raw),
+            "customer_site_id": extract_customer_site_id_from_raw(raw),
+        }
+        enrich_customer_name_on_fields(db, fields)
+        if _apply_extracted_customer_fields(quote, fields):
+            updated += 1
+    if updated:
+        db.flush()
+    return updated
+
+
+def backfill_existing_jobs_customer_fields(db: Session) -> int:
+    updated = 0
+    rows = (
+        db.query(EworksJob)
+        .filter(
+            or_(
+                EworksJob.customer_id.is_(None),
+                EworksJob.customer_name.is_(None),
+                func.trim(EworksJob.customer_name) == "",
+            )
+        )
+        .filter(EworksJob.raw_payload.isnot(None))
+        .all()
+    )
+    for job in rows:
+        raw = job.raw_payload if isinstance(job.raw_payload, dict) else None
+        if not raw:
+            continue
+        fields = {
+            "customer_id": extract_customer_id_from_raw(raw),
+            "customer_name": extract_customer_name_from_raw(raw),
+        }
+        enrich_customer_name_on_fields(db, fields)
+        if _apply_extracted_customer_fields(job, fields):
+            updated += 1
+    if updated:
+        db.flush()
+    return updated
+
+
+def _extract_customer_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    billing = _coerce_dict(raw.get("billing_customer"))
+    address = _coerce_dict(raw.get("address") or raw.get("site"))
+    display_name = extract_customer_name_from_customer_record(raw)
+    return {
+        "eworks_customer_id": _safe_int(raw.get("id")),
+        "customer_name": display_name,
+        "full_name": _safe_str(raw.get("full_name"), 500),
+        "company_name": _safe_str(raw.get("company_name"), 500),
+        "email": _safe_str(raw.get("email") or raw.get("customer_email"), 320),
+        "phone": _safe_str(raw.get("phone") or raw.get("telephone") or raw.get("mobile"), 100),
+        "billing_email": _safe_str(billing.get("email") or raw.get("billing_email"), 320),
+        "address_1": _safe_str(address.get("address_1") or address.get("line1"), 500),
+        "address_2": _safe_str(address.get("address_2") or address.get("line2"), 500),
+        "city": _safe_str(address.get("city"), 200),
+        "county": _safe_str(address.get("county"), 200),
+        "postcode": _safe_str(address.get("postcode") or address.get("post_code"), 50),
+        "raw_payload": raw,
+    }
+
+
+def _upsert_customers(
+    db: Session,
+    records: list[dict[str, Any]],
+    *,
+    run: EworksSyncRun | None = None,
+) -> EworksSyncBucketSummary:
+    summary = EworksSyncBucketSummary(fetched=len(records))
+    now = datetime.now(timezone.utc)
+
+    if run is not None:
+        update_sync_run_progress(
+            db,
+            run,
+            phase="upserting",
+            fetched=summary.fetched,
+            created=0,
+            updated=0,
+            failed=0,
+        )
+
+    for index, raw in enumerate(records, start=1):
+        try:
+            fields = _extract_customer_fields(raw)
+            eworks_id = fields.get("eworks_customer_id")
+            if not eworks_id:
+                logger.warning("eWorks Customer record missing id; skipping: %s", raw)
+                summary.failed += 1
+                continue
+
+            existing = (
+                db.query(EworksCustomer)
+                .filter(EworksCustomer.eworks_customer_id == eworks_id)
+                .one_or_none()
+            )
+            fields["synced_at"] = now
+
+            if existing is None:
+                db.add(EworksCustomer(**fields))
+                summary.created += 1
+            else:
+                for key, val in fields.items():
+                    if key == "eworks_customer_id":
+                        continue
+                    setattr(existing, key, val)
+                summary.updated += 1
+        except Exception as exc:
+            logger.exception("Failed to upsert eWorks Customer id=%s: %s", raw.get("id"), exc)
+            summary.failed += 1
+
+        if run is not None and index % _PROGRESS_COMMIT_EVERY == 0:
+            update_sync_run_progress(
+                db,
+                run,
+                phase="upserting",
+                fetched=summary.fetched,
+                created=summary.created,
+                updated=summary.updated,
+                failed=summary.failed,
+            )
+
+    db.flush()
+    return summary
 
 
 def _normalize_tag_string(value: str) -> str | None:
@@ -138,17 +559,14 @@ def _extract_tags_from_raw(raw: dict[str, Any]) -> list[str]:
 
 def _extract_quote_fields(raw: dict[str, Any]) -> dict[str, Any]:
     """Map a raw eWorks Quote dict to local EworksQuote column values."""
-    customer = raw.get("customer") or {}
     status_obj = raw.get("quote_status") or {}
-    return {
+    fields = {
         "eworks_quote_id": _safe_int(raw.get("id")),
         "quote_ref": _safe_str(raw.get("quote_ref"), 100),
-        "customer_id": _safe_int(customer.get("id") if isinstance(customer, dict) else raw.get("customer_id")),
-        "customer_name": _safe_str(
-            customer.get("customer_name") if isinstance(customer, dict) else raw.get("customer_name"), 500
-        ),
-        "customer_contact_id": _safe_int(raw.get("customer_contact_id")),
-        "customer_site_id": _safe_int(raw.get("customer_site_id")),
+        "customer_id": extract_customer_id_from_raw(raw),
+        "customer_name": extract_customer_name_from_raw(raw),
+        "customer_contact_id": extract_customer_contact_id_from_raw(raw),
+        "customer_site_id": extract_customer_site_id_from_raw(raw),
         "project_id": _safe_int(raw.get("project_id")),
         "quote_type_id": _safe_int(raw.get("quote_type_id")),
         "quote_source_id": _safe_int(raw.get("quote_source_id")),
@@ -173,11 +591,12 @@ def _extract_quote_fields(raw: dict[str, Any]) -> dict[str, Any]:
         "tags": _extract_tags_from_raw(raw),
         "raw_payload": raw,
     }
+    log_unresolved_quote_customer(raw, fields)
+    return fields
 
 
 def _extract_job_fields(raw: dict[str, Any]) -> dict[str, Any]:
     """Map a raw eWorks Job dict to local EworksJob column values."""
-    customer = raw.get("customer") or {}
     status_obj = raw.get("job_status") or {}
     address_obj = raw.get("site") or raw.get("address") or {}
     address_parts = []
@@ -192,10 +611,8 @@ def _extract_job_fields(raw: dict[str, Any]) -> dict[str, Any]:
         "eworks_job_id": _safe_int(raw.get("id")),
         "job_ref": _safe_str(raw.get("job_ref"), 100),
         "eworks_quote_id": _safe_int(raw.get("quote_id") or raw.get("eworks_quote_id")),
-        "customer_id": _safe_int(customer.get("id") if isinstance(customer, dict) else raw.get("customer_id")),
-        "customer_name": _safe_str(
-            customer.get("customer_name") if isinstance(customer, dict) else raw.get("customer_name"), 500
-        ),
+        "customer_id": extract_customer_id_from_raw(raw),
+        "customer_name": extract_customer_name_from_raw(raw),
         "status": _safe_str(
             status_obj.get("id") if isinstance(status_obj, dict) else raw.get("status"), 100
         ),
@@ -218,11 +635,27 @@ def _extract_job_fields(raw: dict[str, Any]) -> dict[str, Any]:
 # Core upsert helpers
 # ---------------------------------------------------------------------------
 
-def _upsert_quotes(db: Session, records: list[dict[str, Any]]) -> EworksSyncBucketSummary:
+def _upsert_quotes(
+    db: Session,
+    records: list[dict[str, Any]],
+    *,
+    run: EworksSyncRun | None = None,
+) -> EworksSyncBucketSummary:
     summary = EworksSyncBucketSummary(fetched=len(records))
     now = datetime.now(timezone.utc)
 
-    for raw in records:
+    if run is not None:
+        update_sync_run_progress(
+            db,
+            run,
+            phase="upserting",
+            fetched=summary.fetched,
+            created=0,
+            updated=0,
+            failed=0,
+        )
+
+    for index, raw in enumerate(records, start=1):
         try:
             fields = _extract_quote_fields(raw)
             eworks_id = fields.get("eworks_quote_id")
@@ -230,6 +663,8 @@ def _upsert_quotes(db: Session, records: list[dict[str, Any]]) -> EworksSyncBuck
                 logger.warning("eWorks Quote record missing id; skipping: %s", raw)
                 summary.failed += 1
                 continue
+
+            enrich_customer_name_on_fields(db, fields)
 
             existing = db.query(EworksQuote).filter(EworksQuote.eworks_quote_id == eworks_id).one_or_none()
             fields["synced_at"] = now
@@ -260,15 +695,42 @@ def _upsert_quotes(db: Session, records: list[dict[str, Any]]) -> EworksSyncBuck
             logger.exception("Failed to upsert eWorks Quote id=%s: %s", raw.get("id"), exc)
             summary.failed += 1
 
+        if run is not None and index % _PROGRESS_COMMIT_EVERY == 0:
+            update_sync_run_progress(
+                db,
+                run,
+                phase="upserting",
+                fetched=summary.fetched,
+                created=summary.created,
+                updated=summary.updated,
+                failed=summary.failed,
+            )
+
     db.flush()
     return summary
 
 
-def _upsert_jobs(db: Session, records: list[dict[str, Any]]) -> EworksSyncBucketSummary:
+def _upsert_jobs(
+    db: Session,
+    records: list[dict[str, Any]],
+    *,
+    run: EworksSyncRun | None = None,
+) -> EworksSyncBucketSummary:
     summary = EworksSyncBucketSummary(fetched=len(records))
     now = datetime.now(timezone.utc)
 
-    for raw in records:
+    if run is not None:
+        update_sync_run_progress(
+            db,
+            run,
+            phase="upserting",
+            fetched=summary.fetched,
+            created=0,
+            updated=0,
+            failed=0,
+        )
+
+    for index, raw in enumerate(records, start=1):
         try:
             fields = _extract_job_fields(raw)
             eworks_id = fields.get("eworks_job_id")
@@ -276,6 +738,8 @@ def _upsert_jobs(db: Session, records: list[dict[str, Any]]) -> EworksSyncBucket
                 logger.warning("eWorks Job record missing id; skipping: %s", raw)
                 summary.failed += 1
                 continue
+
+            enrich_customer_name_on_fields(db, fields)
 
             existing = db.query(EworksJob).filter(EworksJob.eworks_job_id == eworks_id).one_or_none()
             fields["synced_at"] = now
@@ -305,6 +769,17 @@ def _upsert_jobs(db: Session, records: list[dict[str, Any]]) -> EworksSyncBucket
         except Exception as exc:
             logger.exception("Failed to upsert eWorks Job id=%s: %s", raw.get("id"), exc)
             summary.failed += 1
+
+        if run is not None and index % _PROGRESS_COMMIT_EVERY == 0:
+            update_sync_run_progress(
+                db,
+                run,
+                phase="upserting",
+                fetched=summary.fetched,
+                created=summary.created,
+                updated=summary.updated,
+                failed=summary.failed,
+            )
 
     db.flush()
     return summary
@@ -338,6 +813,8 @@ def _finish_run(
     failed: int,
     error_message: str | None = None,
 ) -> None:
+    if run.status != "running":
+        return
     run.status = status
     run.finished_at = datetime.now(timezone.utc)
     run.fetched_count = fetched
@@ -352,6 +829,86 @@ def _finish_run(
 # Public sync functions
 # ---------------------------------------------------------------------------
 
+def sync_customers_from_eworks(
+    db: Session,
+    *,
+    filters: dict | None = None,
+    user_id: uuid.UUID | None = None,
+    run: EworksSyncRun | None = None,
+) -> tuple[EworksSyncBucketSummary, EworksSyncRun]:
+    """Fetch all eWorks Customers and upsert into local DB."""
+    filters = filters or {}
+    if run is None:
+        run = _start_run(db, sync_type="customers", user_id=user_id)
+
+    summary = EworksSyncBucketSummary()
+
+    def _fetch_heartbeat(_page: int, _last_page: int, total_so_far: int) -> None:
+        update_sync_run_progress(db, run, phase="fetching", fetched=total_so_far)
+
+    try:
+        update_sync_run_progress(db, run, phase="fetching")
+        records = fetch_all_customers(
+            filters={k: v for k, v in filters.items() if k in {"page_limit"}},
+            page_limit=filters.get("page_limit"),
+            on_page_fetched=_fetch_heartbeat,
+        )
+        update_sync_run_progress(db, run, phase="upserting", fetched=len(records))
+        summary = _upsert_customers(db, records, run=run)
+        enrich_existing_quotes_customer_names(db)
+        enrich_existing_jobs_customer_names(db)
+        backfill_existing_quotes_customer_fields(db)
+        backfill_existing_jobs_customer_fields(db)
+        status = "success" if summary.failed == 0 else "partial"
+        _finish_run(
+            db,
+            run,
+            status=status,
+            fetched=summary.fetched,
+            created=summary.created,
+            updated=summary.updated,
+            failed=summary.failed,
+        )
+        run.metadata_ = {**(run.metadata_ or {}), "summary": summary.model_dump()}
+        logger.info(
+            "eWorks customers sync finished: fetched=%s created=%s updated=%s failed=%s",
+            summary.fetched,
+            summary.created,
+            summary.updated,
+            summary.failed,
+        )
+    except Exception as exc:
+        _finish_run(
+            db,
+            run,
+            status="failed",
+            fetched=summary.fetched,
+            created=summary.created,
+            updated=summary.updated,
+            failed=summary.failed,
+            error_message=str(exc),
+        )
+        run.metadata_ = {
+            **(run.metadata_ or {}),
+            "summary": summary.model_dump() if summary.fetched else {"fetched": 0, "created": 0, "updated": 0, "failed": 0},
+        }
+        raise
+    finally:
+        if run.status == "running":
+            _finish_run(
+                db,
+                run,
+                status="failed",
+                fetched=summary.fetched,
+                created=summary.created,
+                updated=summary.updated,
+                failed=summary.failed,
+                error_message="Sync ended without completing.",
+            )
+
+    return summary, run
+
+
 def sync_quotes_from_eworks(
     db: Session,
     *,
@@ -364,39 +921,71 @@ def sync_quotes_from_eworks(
     if run is None:
         run = _start_run(db, sync_type="quotes", user_id=user_id)
 
+    summary = EworksSyncBucketSummary()
+
+    def _fetch_heartbeat(_page: int, _last_page: int, total_so_far: int) -> None:
+        update_sync_run_progress(db, run, phase="fetching", fetched=total_so_far)
+
     try:
+        update_sync_run_progress(db, run, phase="fetching")
         records = fetch_all_quotes(
             date_from=filters.get("date_from"),
             date_to=filters.get("date_to"),
             status=filters.get("status"),
             page_limit=filters.get("page_limit"),
+            on_page_fetched=_fetch_heartbeat,
+        )
+        update_sync_run_progress(db, run, phase="upserting", fetched=len(records))
+        summary = _upsert_quotes(db, records, run=run)
+        backfill_existing_quotes_customer_fields(db)
+        enrich_existing_quotes_customer_names(db)
+        status = "success" if summary.failed == 0 else "partial"
+        _finish_run(
+            db,
+            run,
+            status=status,
+            fetched=summary.fetched,
+            created=summary.created,
+            updated=summary.updated,
+            failed=summary.failed,
+        )
+        run.metadata_ = {**(run.metadata_ or {}), "summary": summary.model_dump()}
+        logger.info(
+            "eWorks quotes sync finished: fetched=%s created=%s updated=%s failed=%s",
+            summary.fetched,
+            summary.created,
+            summary.updated,
+            summary.failed,
         )
     except Exception as exc:
         _finish_run(
-            db, run,
+            db,
+            run,
             status="failed",
-            fetched=0, created=0, updated=0, failed=0,
+            fetched=summary.fetched,
+            created=summary.created,
+            updated=summary.updated,
+            failed=summary.failed,
             error_message=str(exc),
         )
-        run.metadata_ = {**(run.metadata_ or {}), "summary": {"fetched": 0, "created": 0, "updated": 0, "failed": 0}}
+        run.metadata_ = {
+            **(run.metadata_ or {}),
+            "summary": summary.model_dump() if summary.fetched else {"fetched": 0, "created": 0, "updated": 0, "failed": 0},
+        }
         raise
+    finally:
+        if run.status == "running":
+            _finish_run(
+                db,
+                run,
+                status="failed",
+                fetched=summary.fetched,
+                created=summary.created,
+                updated=summary.updated,
+                failed=summary.failed,
+                error_message="Sync ended without completing.",
+            )
 
-    summary = _upsert_quotes(db, records)
-    status = "success" if summary.failed == 0 else "partial"
-    _finish_run(
-        db, run,
-        status=status,
-        fetched=summary.fetched,
-        created=summary.created,
-        updated=summary.updated,
-        failed=summary.failed,
-    )
-    run.metadata_ = {**(run.metadata_ or {}), "summary": summary.model_dump()}
-
-    logger.info(
-        "eWorks quotes sync finished: fetched=%s created=%s updated=%s failed=%s",
-        summary.fetched, summary.created, summary.updated, summary.failed,
-    )
     return summary, run
 
 
@@ -412,39 +1001,71 @@ def sync_jobs_from_eworks(
     if run is None:
         run = _start_run(db, sync_type="jobs", user_id=user_id)
 
+    summary = EworksSyncBucketSummary()
+
+    def _fetch_heartbeat(_page: int, _last_page: int, total_so_far: int) -> None:
+        update_sync_run_progress(db, run, phase="fetching", fetched=total_so_far)
+
     try:
+        update_sync_run_progress(db, run, phase="fetching")
         records = fetch_all_jobs(
             date_from=filters.get("date_from"),
             date_to=filters.get("date_to"),
             status=filters.get("status"),
             page_limit=filters.get("page_limit"),
+            on_page_fetched=_fetch_heartbeat,
+        )
+        update_sync_run_progress(db, run, phase="upserting", fetched=len(records))
+        summary = _upsert_jobs(db, records, run=run)
+        backfill_existing_jobs_customer_fields(db)
+        enrich_existing_jobs_customer_names(db)
+        status = "success" if summary.failed == 0 else "partial"
+        _finish_run(
+            db,
+            run,
+            status=status,
+            fetched=summary.fetched,
+            created=summary.created,
+            updated=summary.updated,
+            failed=summary.failed,
+        )
+        run.metadata_ = {**(run.metadata_ or {}), "summary": summary.model_dump()}
+        logger.info(
+            "eWorks jobs sync finished: fetched=%s created=%s updated=%s failed=%s",
+            summary.fetched,
+            summary.created,
+            summary.updated,
+            summary.failed,
         )
     except Exception as exc:
         _finish_run(
-            db, run,
+            db,
+            run,
             status="failed",
-            fetched=0, created=0, updated=0, failed=0,
+            fetched=summary.fetched,
+            created=summary.created,
+            updated=summary.updated,
+            failed=summary.failed,
             error_message=str(exc),
         )
-        run.metadata_ = {**(run.metadata_ or {}), "summary": {"fetched": 0, "created": 0, "updated": 0, "failed": 0}}
+        run.metadata_ = {
+            **(run.metadata_ or {}),
+            "summary": summary.model_dump() if summary.fetched else {"fetched": 0, "created": 0, "updated": 0, "failed": 0},
+        }
         raise
+    finally:
+        if run.status == "running":
+            _finish_run(
+                db,
+                run,
+                status="failed",
+                fetched=summary.fetched,
+                created=summary.created,
+                updated=summary.updated,
+                failed=summary.failed,
+                error_message="Sync ended without completing.",
+            )
 
-    summary = _upsert_jobs(db, records)
-    status = "success" if summary.failed == 0 else "partial"
-    _finish_run(
-        db, run,
-        status=status,
-        fetched=summary.fetched,
-        created=summary.created,
-        updated=summary.updated,
-        failed=summary.failed,
-    )
-    run.metadata_ = {**(run.metadata_ or {}), "summary": summary.model_dump()}
-
-    logger.info(
-        "eWorks jobs sync finished: fetched=%s created=%s updated=%s failed=%s",
-        summary.fetched, summary.created, summary.updated, summary.failed,
-    )
     return summary, run
 
 
@@ -455,77 +1076,174 @@ def sync_all_eworks(
     user_id: uuid.UUID | None = None,
     run: EworksSyncRun | None = None,
 ) -> EworksSyncSummary:
-    """Fetch all eWorks Quotes and Jobs and upsert both into local DB."""
+    """Fetch eWorks Customers, Quotes, and Jobs and upsert into local DB."""
     filters = filters or {}
     errors: list[str] = []
+    c_summary = EworksSyncBucketSummary()
     q_summary = EworksSyncBucketSummary()
     j_summary = EworksSyncBucketSummary()
 
     if run is None:
         run = _start_run(db, sync_type="all", user_id=user_id)
 
-    run.metadata_ = {**(run.metadata_ or {}), "phase": "quotes"}
-
     try:
-        records = fetch_all_quotes(
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
-            status=filters.get("status"),
-            page_limit=filters.get("page_limit"),
+        run.metadata_ = {**(run.metadata_ or {}), "phase": "customers"}
+        update_sync_run_progress(db, run, phase="fetching_customers")
+
+        def _customers_fetch_heartbeat(_page: int, _last_page: int, total_so_far: int) -> None:
+            update_sync_run_progress(db, run, phase="fetching_customers", fetched=total_so_far)
+
+        try:
+            records = fetch_all_customers(
+                page_limit=filters.get("page_limit"),
+                on_page_fetched=_customers_fetch_heartbeat,
+            )
+            update_sync_run_progress(db, run, phase="upserting_customers", fetched=len(records))
+            c_summary = _upsert_customers(db, records, run=run)
+            enrich_existing_quotes_customer_names(db)
+            enrich_existing_jobs_customer_names(db)
+            backfill_existing_quotes_customer_fields(db)
+            backfill_existing_jobs_customer_fields(db)
+        except Exception as exc:
+            logger.exception("eWorks all-sync: customers failed: %s", exc)
+            errors.append(f"Customers: {exc}")
+
+        run.metadata_ = {**(run.metadata_ or {}), "phase": "quotes", "customers": c_summary.model_dump()}
+        update_sync_run_progress(
+            db,
+            run,
+            phase="fetching_quotes",
+            fetched=c_summary.fetched,
+            created=c_summary.created,
+            updated=c_summary.updated,
+            failed=c_summary.failed,
         )
-        q_summary = _upsert_quotes(db, records)
-    except Exception as exc:
-        logger.exception("eWorks all-sync: quotes failed: %s", exc)
-        errors.append(f"Quotes: {exc}")
 
-    run.metadata_ = {**(run.metadata_ or {}), "phase": "jobs", "quotes": q_summary.model_dump()}
+        def _quotes_fetch_heartbeat(_page: int, _last_page: int, total_so_far: int) -> None:
+            update_sync_run_progress(
+                db,
+                run,
+                phase="fetching_quotes",
+                fetched=c_summary.fetched + total_so_far,
+            )
 
-    try:
-        records = fetch_all_jobs(
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
-            status=filters.get("status"),
-            page_limit=filters.get("page_limit"),
+        try:
+            records = fetch_all_quotes(
+                date_from=filters.get("date_from"),
+                date_to=filters.get("date_to"),
+                status=filters.get("status"),
+                page_limit=filters.get("page_limit"),
+                on_page_fetched=_quotes_fetch_heartbeat,
+            )
+            update_sync_run_progress(db, run, phase="upserting_quotes", fetched=c_summary.fetched + len(records))
+            q_summary = _upsert_quotes(db, records, run=run)
+            backfill_existing_quotes_customer_fields(db)
+            enrich_existing_quotes_customer_names(db)
+        except Exception as exc:
+            logger.exception("eWorks all-sync: quotes failed: %s", exc)
+            errors.append(f"Quotes: {exc}")
+
+        run.metadata_ = {**(run.metadata_ or {}), "phase": "jobs", "quotes": q_summary.model_dump()}
+        update_sync_run_progress(
+            db,
+            run,
+            phase="fetching_jobs",
+            fetched=c_summary.fetched + q_summary.fetched,
+            created=q_summary.created,
+            updated=q_summary.updated,
+            failed=q_summary.failed,
         )
-        j_summary = _upsert_jobs(db, records)
+
+        def _jobs_fetch_heartbeat(_page: int, _last_page: int, total_so_far: int) -> None:
+            update_sync_run_progress(
+                db,
+                run,
+                phase="fetching_jobs",
+                fetched=c_summary.fetched + q_summary.fetched + total_so_far,
+            )
+
+        try:
+            records = fetch_all_jobs(
+                date_from=filters.get("date_from"),
+                date_to=filters.get("date_to"),
+                status=filters.get("status"),
+                page_limit=filters.get("page_limit"),
+                on_page_fetched=_jobs_fetch_heartbeat,
+            )
+            update_sync_run_progress(
+                db,
+                run,
+                phase="upserting_jobs",
+                fetched=c_summary.fetched + q_summary.fetched + len(records),
+            )
+            j_summary = _upsert_jobs(db, records, run=run)
+            backfill_existing_jobs_customer_fields(db)
+            enrich_existing_jobs_customer_names(db)
+        except Exception as exc:
+            logger.exception("eWorks all-sync: jobs failed: %s", exc)
+            errors.append(f"Jobs: {exc}")
+
+        total_fetched = c_summary.fetched + q_summary.fetched + j_summary.fetched
+        total_created = c_summary.created + q_summary.created + j_summary.created
+        total_updated = c_summary.updated + q_summary.updated + j_summary.updated
+        total_failed = c_summary.failed + q_summary.failed + j_summary.failed
+
+        if errors and total_fetched == 0:
+            run_status = "failed"
+        elif errors or total_failed > 0:
+            run_status = "partial"
+        else:
+            run_status = "success"
+
+        _finish_run(
+            db,
+            run,
+            status=run_status,
+            fetched=total_fetched,
+            created=total_created,
+            updated=total_updated,
+            failed=total_failed,
+            error_message="; ".join(errors) if errors else None,
+        )
+        run.metadata_ = {
+            **(run.metadata_ or {}),
+            "phase": "completed",
+            "customers": c_summary.model_dump(),
+            "quotes": q_summary.model_dump(),
+            "jobs": j_summary.model_dump(),
+            "errors": errors,
+        }
+
+        logger.info(
+            "eWorks all-sync finished: customers_fetched=%s quotes_fetched=%s jobs_fetched=%s errors=%s",
+            c_summary.fetched,
+            q_summary.fetched,
+            j_summary.fetched,
+            len(errors),
+        )
     except Exception as exc:
-        logger.exception("eWorks all-sync: jobs failed: %s", exc)
-        errors.append(f"Jobs: {exc}")
+        _finish_run(
+            db,
+            run,
+            status="failed",
+            fetched=c_summary.fetched + q_summary.fetched + j_summary.fetched,
+            created=c_summary.created + q_summary.created + j_summary.created,
+            updated=c_summary.updated + q_summary.updated + j_summary.updated,
+            failed=c_summary.failed + q_summary.failed + j_summary.failed,
+            error_message=str(exc),
+        )
+        raise
+    finally:
+        if run.status == "running":
+            _finish_run(
+                db,
+                run,
+                status="failed",
+                fetched=c_summary.fetched + q_summary.fetched + j_summary.fetched,
+                created=c_summary.created + q_summary.created + j_summary.created,
+                updated=c_summary.updated + q_summary.updated + j_summary.updated,
+                failed=c_summary.failed + q_summary.failed + j_summary.failed,
+                error_message="Sync ended without completing.",
+            )
 
-    total_fetched = q_summary.fetched + j_summary.fetched
-    total_created = q_summary.created + j_summary.created
-    total_updated = q_summary.updated + j_summary.updated
-    total_failed = q_summary.failed + j_summary.failed
-
-    if errors and total_fetched == 0:
-        run_status = "failed"
-    elif errors or total_failed > 0:
-        run_status = "partial"
-    else:
-        run_status = "success"
-
-    _finish_run(
-        db,
-        run,
-        status=run_status,
-        fetched=total_fetched,
-        created=total_created,
-        updated=total_updated,
-        failed=total_failed,
-        error_message="; ".join(errors) if errors else None,
-    )
-    run.metadata_ = {
-        **(run.metadata_ or {}),
-        "phase": "completed",
-        "quotes": q_summary.model_dump(),
-        "jobs": j_summary.model_dump(),
-        "errors": errors,
-    }
-
-    logger.info(
-        "eWorks all-sync finished: quotes_fetched=%s jobs_fetched=%s errors=%s",
-        q_summary.fetched,
-        j_summary.fetched,
-        len(errors),
-    )
-    return EworksSyncSummary(quotes=q_summary, jobs=j_summary, errors=errors)
+    return EworksSyncSummary(customers=c_summary, quotes=q_summary, jobs=j_summary, errors=errors)

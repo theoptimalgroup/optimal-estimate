@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type { MaterialSupplier, Step2Snapshot, WorkBlockSnapshot } from "@/lib/eworks-session";
+import { cleanRichTextForTextarea, stripHtmlFromLabel } from "@/lib/html-text";
+import { formatProductLabel as formatProductLabelFromStrings } from "@/lib/work-label";
 
 export const materialOrderRowSchema = z
   .object({
@@ -23,6 +25,7 @@ export const materialLinkRowSchema = materialOrderRowSchema;
 export const materialSupplierSchema = z.object({
   links: z.array(materialLinkRowSchema).min(1, "Add at least one link"),
   delivery_charge: z.number({ error: "Enter delivery charge" }).min(0, "Delivery must be 0 or greater"),
+  supplier_name: z.string().optional(),
 });
 
 export const attachmentMetaSchema = z.object({
@@ -65,15 +68,18 @@ function normalizeMaterialLinkRow(row: { link?: string | null; quantity?: unknow
 function normalizeMaterialSupplier(supplier: {
   links?: Array<{ link?: string | null; quantity?: unknown; cost?: unknown }>;
   delivery_charge?: unknown;
+  supplier_name?: string | null;
 }): MaterialSupplier {
   const links =
     supplier.links && supplier.links.length > 0
       ? supplier.links.map(normalizeMaterialLinkRow)
       : [{ link: "", quantity: 0, cost: 0 }];
   const delivery = Number(supplier.delivery_charge);
+  const supplierName = toStringValue(supplier.supplier_name).trim();
   return {
     links,
     delivery_charge: Number.isFinite(delivery) && delivery >= 0 ? delivery : 0,
+    supplier_name: supplierName,
   };
 }
 
@@ -95,15 +101,23 @@ export function migrateLegacyMaterialRows(rows: unknown): MaterialSupplier[] {
     return { link: normalized.link, quantity: normalized.quantity, cost: costPerItem };
   });
   return [
-    {
+    normalizeMaterialSupplier({
       links: links.length > 0 ? links : [{ link: "", quantity: 0, cost: 0 }],
       delivery_charge: 0,
-    },
+    }),
   ];
 }
 
 export function defaultMaterialSuppliers(): MaterialSupplier[] {
-  return [{ links: [{ link: "", quantity: 0, cost: 0 }], delivery_charge: 0 }];
+  return [{ links: [{ link: "", quantity: 0, cost: 0 }], delivery_charge: 0, supplier_name: "" }];
+}
+
+export function formatSupplierDisplayName(
+  supplier: { supplier_name?: string | null },
+  index: number,
+): string {
+  const name = supplier.supplier_name?.trim();
+  return name ? name : `Supplier ${index + 1}`;
 }
 
 export function supplierMaterialsTotal(supplier: MaterialSupplier): number {
@@ -490,8 +504,7 @@ export type ProductOption = {
 };
 
 export function formatProductLabel(product: Pick<ProductOption, "product_name" | "product_code">): string {
-  const code = product.product_code?.trim();
-  return code ? `${product.product_name} — ${code}` : product.product_name;
+  return formatProductLabelFromStrings(product.product_name, product.product_code ?? undefined);
 }
 
 export function computeProductTotalPrice(quantity: number, unitPrice: number): number {
@@ -646,13 +659,21 @@ export function questionnaireToStep2(values: QuestionnaireFormValues): Step2Snap
   };
 }
 
+function cleanEditableScope(value: string | null | undefined): string {
+  return cleanRichTextForTextarea(value);
+}
+
+function cleanProductName(value: string | null | undefined): string {
+  return stripHtmlFromLabel(value);
+}
+
 function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBlockFormValues {
   const parsedEngineerTime = parseTimeFrame(step2.time_frame);
   const hasEngineers = (step2.engineers_needed ?? step2.engineers ?? 0) > 0;
   const hasLabour = (step2.labourers ?? 0) > 0;
   const labourerDays = Number(step2.labourer_days ?? 0);
   return {
-    scope: step2.scope ?? "",
+    scope: cleanEditableScope(step2.scope),
     selected_product_id: null,
     eworks_item_id: null,
     product_name: "",
@@ -706,10 +727,10 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
 function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlockFormValues {
   if (block.engineer_time_unit) {
     return {
-      scope: block.scope ?? "",
+      scope: cleanEditableScope(block.scope),
       selected_product_id: block.selected_product_id != null ? Number(block.selected_product_id) : null,
       eworks_item_id: block.eworks_item_id != null ? Number(block.eworks_item_id) : null,
-      product_name: block.product_name ?? "",
+      product_name: cleanProductName(block.product_name),
       product_code: block.product_code ?? "",
       product_quantity: Number(block.product_quantity ?? 1),
       product_unit_price: Number(block.product_unit_price ?? 0),

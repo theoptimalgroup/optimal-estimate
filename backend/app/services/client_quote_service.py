@@ -20,6 +20,7 @@ from app.schemas.client_quote import (
     PublicQuoteWorkRead,
 )
 from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot
+from app.utils.work_label import format_work_label
 from app.services.quote_acceptance_helpers import public_acceptance_from_session
 from app.services.calculation_session_pdf_service import render_session_quote_pdf
 from app.services.calculation_session_service import _dashboard_last_result, calculate_session
@@ -84,7 +85,12 @@ def _build_public_quote(
     for index, block in enumerate(step2.works):
         works.append(
             PublicQuoteWorkRead(
-                title=f"Work {index + 1}",
+                title=format_work_label(
+                    product_name=block.product_name,
+                    product_code=block.product_code,
+                    scope=block.scope,
+                    index=index,
+                ),
                 product_name=block.product_name,
                 scope=block.scope,
                 description=step1.quote_description or block.other_notes,

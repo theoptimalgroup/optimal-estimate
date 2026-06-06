@@ -17,12 +17,15 @@ from app.auth.dependencies import CurrentUser, require_roles
 from app.core.exceptions import AppError, success_response
 from app.core.security import UserRole
 from app.db.session import DbSession
-from app.models.eworks_sync import EworksAttachment, EworksJob, EworksQuote, EworksSyncRun
+from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksQuote, EworksSyncRun
 from app.schemas.quote_assignment import AssignmentCreate, AssignmentRead
 from app.schemas.eworks_sync_api import (
     EworksActiveSyncRun,
     EworksAttachmentDetailRead,
     EworksAttachmentSafeRead,
+    EworksBackgroundSyncConfigRead,
+    EworksBackgroundSyncLastRunRead,
+    EworksCustomerRead,
     EworksJobRead,
     EworksJobSafeDetailRead,
     EworksQuoteDetailRead,
@@ -34,12 +37,22 @@ from app.schemas.eworks_sync_api import (
     EworksSyncStatusResponse,
 )
 from app.services.eworks_sync_runner import get_running_sync_run, schedule_eworks_sync
+from app.services.background_sync_scheduler import (
+    build_background_sync_config,
+    get_last_background_sync_run,
+    serialize_background_sync_run,
+)
+from app.services.eworks_sync_run_state import clear_stale_running_sync_locks, fail_sync_run
 from app.services.eworks_attachment_sync_service import (
     list_attachments_for_parent,
     serialize_attachment_admin,
     serialize_attachment_safe,
 )
-from app.services.eworks_safe_detail_service import build_job_safe_detail, build_quote_safe_detail
+from app.services.eworks_safe_detail_service import (
+    build_job_safe_detail,
+    build_quote_safe_detail,
+    serialize_quote_list_item,
+)
 from app.services.quote_assignment_service import create_assignment, list_assignments_for_quote
 
 logger = logging.getLogger(__name__)
@@ -253,13 +266,23 @@ def trigger_jobs_sync(
     return _start_background_sync(db, actor, "jobs", req)
 
 
+@router.post("/customers")
+def trigger_customers_sync(
+    db: DbSession,
+    actor: AdminOnly,
+    req: EworksSyncRequest = EworksSyncRequest(),
+):
+    """Start background sync of eWorks Customers into local DB (admin only, read-only from eWorks)."""
+    return _start_background_sync(db, actor, "customers", req)
+
+
 @router.post("/all")
 def trigger_all_sync(
     db: DbSession,
     actor: AdminOnly,
     req: EworksSyncRequest = EworksSyncRequest(),
 ):
-    """Start background sync of eWorks Quotes and Jobs (admin only, read-only from eWorks)."""
+    """Start background sync of eWorks Customers, Quotes, and Jobs (admin only, read-only from eWorks)."""
     return _start_background_sync(db, actor, "all", req)
 
 
@@ -272,8 +295,10 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
     """Return counts, last sync timestamps, and any active background sync."""
     from app.core.config import settings as cfg
 
+    clear_stale_running_sync_locks(db)
     quotes_count = db.query(EworksQuote).count()
     jobs_count = db.query(EworksJob).count()
+    customers_count = db.query(EworksCustomer).count()
 
     last_q = (
         db.query(EworksQuote.synced_at)
@@ -285,16 +310,29 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
         .order_by(EworksJob.synced_at.desc())
         .first()
     )
+    last_c = (
+        db.query(EworksCustomer.synced_at)
+        .order_by(EworksCustomer.synced_at.desc())
+        .first()
+    )
     active = get_running_sync_run(db)
+    background_config = build_background_sync_config()
+    last_background = serialize_background_sync_run(get_last_background_sync_run(db))
 
     return success_response(
         EworksSyncStatusResponse(
             quotes_count=quotes_count,
             jobs_count=jobs_count,
+            customers_count=customers_count,
             last_quotes_sync=str(last_q[0]) if last_q else None,
             last_jobs_sync=str(last_j[0]) if last_j else None,
+            last_customers_sync=str(last_c[0]) if last_c else None,
             eworks_api_enabled=bool(cfg.eworks_api_enabled),
             active_sync=_serialize_active_run(active),
+            background_sync=EworksBackgroundSyncConfigRead(**background_config),
+            last_background_sync=(
+                EworksBackgroundSyncLastRunRead(**last_background) if last_background else None
+            ),
         ).model_dump()
     )
 
@@ -336,6 +374,31 @@ def get_sync_run(db: DbSession, run_id: UUID, actor: AdminOnly):
     return success_response(_serialize_run(run))
 
 
+@router.post("/runs/{run_id}/cancel")
+def cancel_sync_run(db: DbSession, run_id: UUID, actor: AdminOnly):
+    """Mark a stuck background sync as failed so a new sync can start (admin only)."""
+    from datetime import datetime, timezone
+
+    run = db.query(EworksSyncRun).filter(EworksSyncRun.id == run_id).one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Sync run not found")
+    if run.status != "running":
+        raise HTTPException(status_code=400, detail="Sync run is not active")
+
+    now = datetime.now(timezone.utc)
+    run.status = "failed"
+    run.finished_at = now
+    run.error_message = "Sync cancelled by admin."
+    run.metadata_ = {
+        **(run.metadata_ or {}),
+        "phase": "cancelled",
+        "cancelled_at": now.isoformat(),
+        "cancelled_by": actor.email,
+    }
+    db.commit()
+    return success_response(_serialize_run(run))
+
+
 # ---------------------------------------------------------------------------
 # Local data read endpoints (admin/manager/estimator)
 # ---------------------------------------------------------------------------
@@ -373,29 +436,7 @@ def list_quotes(
     rows = q.order_by(EworksQuote.eworks_quote_id.desc()).offset(offset).limit(limit).all()
 
     return success_response({
-        "items": [
-            EworksQuoteRead(
-                id=r.id,
-                eworks_quote_id=r.eworks_quote_id,
-                quote_ref=r.quote_ref,
-                customer_id=r.customer_id,
-                customer_name=r.customer_name,
-                status=r.status,
-                status_name=r.status_name,
-                quote_date=r.quote_date,
-                expiry_date=r.expiry_date,
-                description=r.description,
-                customer_ref=r.customer_ref,
-                po_ref=r.po_ref,
-                wo_ref=r.wo_ref,
-                subtotal=float(r.subtotal) if r.subtotal is not None else None,
-                vat=float(r.vat) if r.vat is not None else None,
-                total=float(r.total) if r.total is not None else None,
-                tags=_serialize_tags(r.tags),
-                synced_at=str(r.synced_at) if r.synced_at else None,
-            ).model_dump()
-            for r in rows
-        ],
+        "items": [serialize_quote_list_item(r) for r in rows],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -446,6 +487,59 @@ def get_quote_detail(db: DbSession, quote_id: int, actor: AdminOnly):
             raw_payload=row.raw_payload,
         ).model_dump()
     )
+
+
+@router.get("/customers")
+def list_customers(
+    db: DbSession,
+    actor: AdminOnly,
+    search: str | None = Query(default=None),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """List locally-synced eWorks Customers (admin only; no raw_payload)."""
+    q = db.query(EworksCustomer)
+    if search:
+        pattern = f"%{search.strip()}%"
+        numeric = _parse_optional_int(search)
+        clauses = [
+            EworksCustomer.customer_name.ilike(pattern),
+            EworksCustomer.full_name.ilike(pattern),
+            EworksCustomer.company_name.ilike(pattern),
+            EworksCustomer.email.ilike(pattern),
+            EworksCustomer.phone.ilike(pattern),
+        ]
+        if numeric is not None:
+            clauses.append(EworksCustomer.eworks_customer_id == numeric)
+        q = q.filter(or_(*clauses))
+
+    total = q.count()
+    rows = q.order_by(EworksCustomer.eworks_customer_id.desc()).offset(offset).limit(limit).all()
+
+    return success_response({
+        "items": [
+            EworksCustomerRead(
+                id=r.id,
+                eworks_customer_id=r.eworks_customer_id,
+                customer_name=r.customer_name,
+                full_name=r.full_name,
+                company_name=r.company_name,
+                email=r.email,
+                phone=r.phone,
+                billing_email=r.billing_email,
+                address_1=r.address_1,
+                address_2=r.address_2,
+                city=r.city,
+                county=r.county,
+                postcode=r.postcode,
+                synced_at=str(r.synced_at) if r.synced_at else None,
+            ).model_dump()
+            for r in rows
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 @router.get("/jobs")

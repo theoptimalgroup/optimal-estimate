@@ -61,4 +61,14 @@ def sync_eworks_products(
         logger.exception("eWorks product sync failed before completion")
         raise HTTPException(status_code=500, detail="Failed to sync products") from exc
 
+    if summary.failed > 0:
+        logger.warning(
+            "eWorks product sync completed with partial failures: fetched=%s created=%s updated=%s skipped=%s failed=%s",
+            summary.fetched,
+            summary.created,
+            summary.updated,
+            summary.skipped,
+            summary.failed,
+        )
+
     return success_response(ProductSyncResponse(summary=summary))

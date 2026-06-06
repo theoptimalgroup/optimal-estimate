@@ -91,7 +91,6 @@ function EworksDashboardContent() {
   return (
     <DashboardPageShell
       title="Submitted Quotes"
-      subtitle="Select a quote to view works, photos, and internal notes"
       footer={
         <div className="flex justify-end">
           <EworksButton variant="secondary" onClick={handleSignOut}>

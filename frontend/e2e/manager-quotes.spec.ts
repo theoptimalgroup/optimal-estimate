@@ -42,10 +42,41 @@ const MOCK_QUOTES = {
       subtotal: 1200.0,
       vat: 240.0,
       total: 1440.0,
+      tags: ["urgent", "electrical", "rewire"],
       synced_at: "2026-06-01T10:00:00Z",
+      display_customer_name: "ACME Ltd",
+      display_status: "Pending",
+      display_tags: ["urgent", "electrical", "rewire"],
+      display_total: 1440.0,
+      display_quote_date: "2026-01-15",
+    },
+    {
+      id: 3,
+      eworks_quote_id: 303,
+      quote_ref: "Q-303",
+      customer_id: null,
+      customer_name: "Fallback Customer",
+      status: "1",
+      status_name: "New Quote",
+      quote_date: "2026-02-10",
+      expiry_date: null,
+      description: null,
+      customer_ref: null,
+      po_ref: null,
+      wo_ref: null,
+      subtotal: null,
+      vat: null,
+      total: 999.99,
+      tags: ["alpha", "beta", "gamma"],
+      synced_at: "2026-06-02T09:00:00Z",
+      display_customer_name: "Fallback Customer",
+      display_status: "New Quote",
+      display_tags: ["alpha", "beta", "gamma"],
+      display_total: 999.99,
+      display_quote_date: "2026-02-10",
     },
   ],
-  total: 1,
+  total: 2,
   limit: 50,
   offset: 0,
 };
@@ -104,10 +135,12 @@ const MOCK_QUOTE_SAFE_DETAIL = {
     expiry_date: "2026-04-15",
     preferred_date: "2026-01-20",
     preferred_time: "09:00",
-    description: "Full rewire",
+    description:
+      '<span style="text-decoration: underline;"><strong>Access</strong></span>&nbsp;<br /><ol><li>Check fuse board</li><li>Replace panel</li></ol>',
     notes: "Internal note",
     customer_notes: "Call before visit",
-    terms: "30 day terms",
+    terms:
+      '<span style="font-family: Arial; color: red;">Payment due in 30 days</span><script>window.__eworksXssTest=true</script>',
   },
   financials: {
     subtotal: 1200.0,
@@ -285,6 +318,32 @@ test.describe("Manager quotes page", () => {
     await expect(page.getByTestId("quotes-search")).toBeVisible();
     await expect(page.getByRole("cell", { name: "ACME Ltd" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "Pending" })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "£1440.00" })).toBeVisible();
+    await expect(page.getByTestId("quote-row-1").getByText("+1 more")).toBeVisible();
+    await expect(page.getByText("raw_payload")).toHaveCount(0);
+    await expect(page.getByText("session_token")).toHaveCount(0);
+  });
+
+  test("quotes table columns align with headers", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockSyncedDataApi(page);
+    await page.goto("/manager/quotes");
+
+    const row = page.getByTestId("quote-row-3");
+    await expect(row).toBeVisible();
+
+    const cells = row.locator("td");
+    await expect(cells).toHaveCount(9);
+    await expect(cells.nth(0)).toHaveText("Q-303");
+    await expect(cells.nth(1)).toHaveText("303");
+    await expect(cells.nth(2)).toHaveText("Fallback Customer");
+    await expect(cells.nth(3)).toHaveText("New Quote");
+    await expect(cells.nth(4)).toContainText("alpha");
+    await expect(cells.nth(4)).toContainText("+1 more");
+    await expect(cells.nth(5)).toHaveText("2026-02-10");
+    await expect(cells.nth(6)).toHaveText("£999.99");
+    await expect(cells.nth(7)).toContainText("2026");
+    await expect(cells.nth(8)).toContainText("View Details");
   });
 
   test("switch to Jobs tab renders mocked job records", async ({ page }) => {
@@ -313,7 +372,17 @@ test.describe("Manager quotes page", () => {
     await expect(page.getByRole("cell", { name: "scope.pdf" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "Alice" })).toBeVisible();
     await expect(page.getByText("Call before visit")).toBeVisible();
-    await expect(page.getByText("urgent")).toBeVisible();
+    await expect(page.getByTestId("quote-description-rich-text")).toContainText("Access");
+    await expect(page.getByTestId("quote-description-rich-text")).toContainText("Check fuse board");
+    await expect(page.getByTestId("quote-description-rich-text")).toContainText("Replace panel");
+    await expect(page.getByTestId("quote-terms-rich-text")).toContainText("Payment due in 30 days");
+    await expect(page.getByTestId("description-notes-section")).not.toContainText("<span");
+    await expect(page.getByTestId("description-notes-section")).not.toContainText("<ol>");
+    await expect(page.getByTestId("description-notes-section")).not.toContainText("<strong>");
+    await expect(
+      page.evaluate(() => (window as Window & { __eworksXssTest?: boolean }).__eworksXssTest)
+    ).resolves.toBeUndefined();
+    await expect(page.getByTestId("tags-section").getByText("urgent")).toBeVisible();
     await expect(page.getByTestId("view-estimate-link")).toHaveAttribute(
       "href",
       "/manager/review/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"

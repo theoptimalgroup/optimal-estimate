@@ -106,6 +106,37 @@ class EworksJob(Base):
     )
 
 
+class EworksCustomer(Base):
+    """Local mirror of a Customer record from eWorks Manager API (read-only sync)."""
+
+    __tablename__ = "eworks_customers"
+    __table_args__ = (
+        Index("ix_eworks_customers_eworks_customer_id", "eworks_customer_id"),
+        Index("ix_eworks_customers_customer_name", "customer_name"),
+        Index("ix_eworks_customers_synced_at", "synced_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    eworks_customer_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    customer_name: Mapped[str | None] = mapped_column(String(500))
+    full_name: Mapped[str | None] = mapped_column(String(500))
+    company_name: Mapped[str | None] = mapped_column(String(500))
+    email: Mapped[str | None] = mapped_column(String(320))
+    phone: Mapped[str | None] = mapped_column(String(100))
+    billing_email: Mapped[str | None] = mapped_column(String(320))
+    address_1: Mapped[str | None] = mapped_column(String(500))
+    address_2: Mapped[str | None] = mapped_column(String(500))
+    city: Mapped[str | None] = mapped_column(String(200))
+    county: Mapped[str | None] = mapped_column(String(200))
+    postcode: Mapped[str | None] = mapped_column(String(50))
+    raw_payload: Mapped[dict | None] = mapped_column(_json_col())
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class EworksSyncRun(Base):
     """Tracks each admin-triggered eWorks sync run for history/audit."""
 
@@ -116,7 +147,7 @@ class EworksSyncRun(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    sync_type: Mapped[str] = mapped_column(String(20), nullable=False)  # quotes | jobs | all
+    sync_type: Mapped[str] = mapped_column(String(20), nullable=False)  # quotes | jobs | customers | all
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")  # running|success|failed|partial
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

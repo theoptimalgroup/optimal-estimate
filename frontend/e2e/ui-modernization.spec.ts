@@ -8,7 +8,7 @@ const mockPublicQuote = {
   scope_of_work: "Repaint hallway and landing",
   works: [
     {
-      title: "Work 1",
+      title: "Painting",
       product_name: "Painting",
       scope: "Repaint hallway and landing",
       description: "Two coats emulsion",
@@ -150,15 +150,14 @@ async function mockSettingsApi(page: Page) {
 }
 
 async function mockManagerReviewApi(page: Page) {
-  await page.route("**/api/v1/dashboard/quotes", async (route) => {
+  await page.route("**/api/v1/dashboard/quote-groups**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
-        data: {
-          quotes: [],
-        },
+        data: { groups: [] },
+        meta: { total: 0 },
       }),
     });
   });

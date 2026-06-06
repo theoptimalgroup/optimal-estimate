@@ -162,7 +162,7 @@ test.describe("Admin products page", () => {
 
     await page.goto("/admin/products");
     await expect(page.getByTestId("products-sync-eworks")).toBeVisible();
-    await expect(page.getByTestId("products-sync-helper")).toContainText("does not write to eWorks");
+    await expect(page.getByTestId("products-sync-helper")).toContainText("Read-only from eWorks");
     await page.getByTestId("products-sync-eworks").click();
     await expect(page.getByTestId("products-sync-summary")).toContainText("Product sync completed");
     await expect(page.getByTestId("products-table")).toBeVisible();
