@@ -417,6 +417,7 @@ def test_invalid_payload_returns_400(eworks_api_client):
 
 def test_raw_json_payload_accepted_when_sig_not_required(monkeypatch):
     monkeypatch.setattr(settings, "eworks_link_sig_required", False)
+    monkeypatch.setattr(settings, "eworks_api_enabled", False)
     session, _ = make_test_session()
     client = Client(id=uuid.uuid4(), name="Lamberts Chartered Surveyors", default_vat_rate=Decimal("20"))
     alias = ClientAlias(id=uuid.uuid4(), client_id=client.id, alias_name="Lambert Chartered Surveyors")
@@ -665,13 +666,13 @@ def test_single_work_includes_session_charges_in_internal_notes(eworks_api_clien
                 materials_to_order=[{"link": "", "quantity": 1, "cost": 100}],
                 unit_cost=100,
                 quantity=1,
-                parking_required=True,
-                parking_type="fixed",
-                parking_fixed_amount=100,
-                congestion_required=True,
-                congestion_amount=100,
             ),
         ],
+        "parking_required": True,
+        "parking_type": "fixed",
+        "parking_fixed_amount": 100,
+        "congestion_required": True,
+        "congestion_amount": 100,
         "travel_charge": 0,
         "other_charge": 0,
     }
@@ -699,59 +700,212 @@ def test_single_work_includes_session_charges_in_internal_notes(eworks_api_clien
     assert abs(Decimal(str(breakdown["profit_pct"])) - Decimal("37")) <= PCT_TOLERANCE
 
 
+def test_quote_level_parking_applied_once(eworks_api_client):
+    """Quote-level parking is counted once even with multiple works."""
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(congestion_required=False, congestion_amount=0)).json()["data"]
+    headers = {"X-Session-Token": created["session_token"]}
+    step2 = {
+        "works": [
+            _alex_work_block(scope="Work one"),
+            _alex_work_block(scope="Work two"),
+        ],
+        "parking_required": True,
+        "parking_type": "fixed",
+        "parking_fixed_amount": 100,
+        "congestion_required": False,
+        "congestion_amount": 0,
+        "travel_charge": 0,
+        "other_charge": 0,
+    }
+    response = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={"step2": step2},
+    )
+    assert response.status_code == 200
+    notes = response.json()["data"]["internal_notes"] or ""
+    assert "Parking: £100" in notes
+    assert "BUDGET:" in notes
+    without_parking = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={
+            "step2": {
+                "works": step2["works"],
+                "congestion_required": False,
+                "congestion_amount": 0,
+                "travel_charge": 0,
+                "other_charge": 0,
+            }
+        },
+    ).json()["data"]["breakdown"]
+    with_parking = response.json()["data"]["breakdown"]
+    assert Decimal(str(with_parking["materials_parking_cc_charge"])) > Decimal(
+        str(without_parking["materials_parking_cc_charge"])
+    )
+
+
+def test_quote_level_congestion_applied_once(eworks_api_client):
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(congestion_required=False, congestion_amount=0)).json()["data"]
+    headers = {"X-Session-Token": created["session_token"]}
+    step2 = {
+        "works": [_alex_work_block(scope="Work one"), _alex_work_block(scope="Work two")],
+        "congestion_required": True,
+        "congestion_amount": 18,
+        "travel_charge": 0,
+        "other_charge": 0,
+    }
+    response = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={"step2": step2},
+    )
+    assert response.status_code == 200
+    notes = response.json()["data"]["internal_notes"] or ""
+    assert "CC: £18" in notes
+    without_cc = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={
+            "step2": {
+                "works": step2["works"],
+                "congestion_required": False,
+                "congestion_amount": 0,
+                "travel_charge": 0,
+                "other_charge": 0,
+            }
+        },
+    ).json()["data"]["breakdown"]
+    with_cc = response.json()["data"]["breakdown"]
+    assert Decimal(str(with_cc["materials_parking_cc_charge"])) > Decimal(
+        str(without_cc["materials_parking_cc_charge"])
+    )
+
+
+def test_legacy_ulez_and_waste_charges_are_ignored(eworks_api_client):
+    """ULEZ and waste disposal are hidden from UI; legacy step2 values must not affect totals."""
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(congestion_required=False, congestion_amount=0)).json()["data"]
+    headers = {"X-Session-Token": created["session_token"]}
+    without_legacy = {
+        "works": [_alex_work_block(scope="Baseline")],
+        "congestion_required": False,
+        "congestion_amount": 0,
+        "travel_charge": 0,
+        "other_charge": 0,
+    }
+    with_legacy = {
+        **without_legacy,
+        "ulez_required": True,
+        "ulez_amount": 50,
+        "waste_disposal_required": True,
+        "waste_disposal_amount": 75,
+    }
+    baseline = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={"step2": without_legacy},
+    ).json()["data"]["breakdown"]
+    legacy = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={"step2": with_legacy},
+    ).json()["data"]["breakdown"]
+    assert Decimal(str(legacy["final_total"])) == Decimal(str(baseline["final_total"]))
+
+
+def test_legacy_work_level_charges_are_ignored(eworks_api_client):
+    test_client, _ = eworks_api_client
+    created = _from_link(test_client, _base_payload(congestion_required=False, congestion_amount=0)).json()["data"]
+    headers = {"X-Session-Token": created["session_token"]}
+    without_legacy = {
+        "works": [_alex_work_block(scope="Baseline")],
+        "congestion_required": False,
+        "congestion_amount": 0,
+        "travel_charge": 0,
+        "other_charge": 0,
+    }
+    with_legacy = {
+        "works": [
+            _alex_work_block(
+                scope="Legacy work charges",
+                parking_required=True,
+                parking_type="fixed",
+                parking_fixed_amount=500,
+                congestion_required=True,
+                congestion_amount=500,
+                travel_charge=500,
+                other_charge=500,
+            ),
+        ],
+        "congestion_required": False,
+        "congestion_amount": 0,
+        "travel_charge": 0,
+        "other_charge": 0,
+    }
+    baseline = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={"step2": without_legacy},
+    ).json()["data"]["breakdown"]
+    legacy = test_client.post(
+        f"/api/v1/calculation-session/{created['session_id']}/calculate",
+        headers=headers,
+        json={"step2": with_legacy},
+    ).json()["data"]["breakdown"]
+    assert Decimal(str(legacy["final_total"])) == Decimal(str(baseline["final_total"]))
+
+
 def test_parking_vehicle_count_multiplies_materials_charge(eworks_api_client):
-    """Two vehicles doubles raw parking before XLSX uplift."""
+    """Quote-level fixed parking amount is multiplied by vehicle count in XLSX materials charge."""
     test_client, _ = eworks_api_client
     created = _from_link(test_client, _base_payload(congestion_required=False, congestion_amount=0)).json()["data"]
     headers = {"X-Session-Token": created["session_token"]}
 
-    one_vehicle = {
-        "works": [
-            _alex_work_block(
-                parking_required=True,
-                parking_type="fixed",
-                parking_fixed_amount=100,
-                parking_vehicles=1,
-                congestion_required=False,
-                congestion_amount=0,
-            ),
-        ],
-        "travel_charge": 0,
-        "other_charge": 0,
-    }
-    two_vehicles = {
-        "works": [
-            _alex_work_block(
-                parking_required=True,
-                parking_type="fixed",
-                parking_fixed_amount=100,
-                parking_vehicles=2,
-                congestion_required=False,
-                congestion_amount=0,
-            ),
-        ],
+    base_step2 = {
+        "works": [_alex_work_block()],
+        "congestion_required": False,
+        "congestion_amount": 0,
         "travel_charge": 0,
         "other_charge": 0,
     }
 
-    one_response = test_client.post(
-        f"/api/v1/calculation-session/{created['session_id']}/calculate",
-        headers=headers,
-        json={"step2": one_vehicle},
-    )
-    assert one_response.status_code == 200
-    one_materials = Decimal(str(one_response.json()["data"]["breakdown"]["materials_parking_cc_charge"]))
+    def materials_charge(step2_payload: dict) -> Decimal:
+        response = test_client.post(
+            f"/api/v1/calculation-session/{created['session_id']}/calculate",
+            headers=headers,
+            json={"step2": step2_payload},
+        )
+        assert response.status_code == 200
+        return Decimal(str(response.json()["data"]["breakdown"]["materials_parking_cc_charge"]))
 
-    two_response = test_client.post(
-        f"/api/v1/calculation-session/{created['session_id']}/calculate",
-        headers=headers,
-        json={"step2": two_vehicles},
+    without_parking = materials_charge(base_step2)
+    one_vehicle = materials_charge(
+        {
+            **base_step2,
+            "parking_required": True,
+            "parking_type": "fixed",
+            "parking_fixed_amount": 100,
+            "parking_vehicles": 1,
+        }
     )
-    assert two_response.status_code == 200
-    two_materials = Decimal(str(two_response.json()["data"]["breakdown"]["materials_parking_cc_charge"]))
+    two_vehicles = materials_charge(
+        {
+            **base_step2,
+            "parking_required": True,
+            "parking_type": "fixed",
+            "parking_fixed_amount": 100,
+            "parking_vehicles": 2,
+        }
+    )
 
-    # Doubling parking raw (£100 → £200) adds £125 uplifted at 20% material denominator.
-    assert abs(two_materials - one_materials - Decimal("125")) <= CURRENCY_TOLERANCE
+    one_delta = one_vehicle - without_parking
+    two_delta = two_vehicles - without_parking
+    assert one_delta > 0
+    assert two_delta > one_delta
+    assert abs(two_delta - one_delta * 2) <= CURRENCY_TOLERANCE
 
 
 def test_calculate_persists_ui_state(eworks_api_client):
@@ -896,6 +1050,7 @@ def test_attachment_view_and_delete(eworks_api_client, tmp_path, monkeypatch):
 def test_submit_marks_session_and_lists_on_dashboard(eworks_api_client, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "eworks_attachment_path", str(tmp_path))
     monkeypatch.setattr(settings, "dashboard_password", "test-dashboard-pass")
+    monkeypatch.setattr(settings, "dev_auth_enabled", False)
     test_client, _ = eworks_api_client
     created = _from_link(test_client, _base_payload(quote_number="Q-SUBMIT", job_number="JOB-SUBMIT")).json()["data"]
     session_id = created["session_id"]
@@ -1358,9 +1513,6 @@ def test_multi_work_mixed_skills_includes_parking_in_xlsx_materials_charge(ework
             _alex_work_block(
                 scope="Work one",
                 skill_required="Plumber",
-                parking_required=True,
-                parking_type="fixed",
-                parking_fixed_amount=100,
                 congestion_required=True,
                 congestion_amount=18,
             ),
@@ -1371,6 +1523,9 @@ def test_multi_work_mixed_skills_includes_parking_in_xlsx_materials_charge(ework
                 congestion_amount=18,
             ),
         ],
+        "parking_required": True,
+        "parking_type": "fixed",
+        "parking_fixed_amount": 100,
         "travel_charge": 0,
         "other_charge": 0,
     }

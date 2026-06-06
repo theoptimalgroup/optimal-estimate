@@ -108,6 +108,68 @@ const MOCK_GROUP_DETAIL = {
       is_latest: false,
     },
   ],
+  assignment_submissions: [
+    {
+      assignment_id: null,
+      assignment_type: "unknown",
+      assignee_kind: "unknown",
+      assignee_name: "Unknown",
+      assignee_email: null,
+      assignment_status: "submitted",
+      assigned_at: null,
+      started_at: null,
+      submitted_at: "2026-06-05T16:04:00Z",
+      linked_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      submitted_by_name: "Unknown submitter",
+      submitted_by_email: null,
+      submitted_by_role: null,
+      final_total: "174.24",
+      works_count: 1,
+      is_latest: true,
+      can_view_details: true,
+      can_reopen: true,
+    },
+    {
+      assignment_id: 2,
+      assignment_type: "engineer",
+      assignee_kind: "registered",
+      assignee_name: "Engineer User",
+      assignee_email: "engineer@example.com",
+      assignment_status: "submitted",
+      assigned_at: "2026-06-05T11:00:00Z",
+      started_at: "2026-06-05T12:00:00Z",
+      submitted_at: "2026-06-05T15:48:00Z",
+      linked_session_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      submitted_by_name: "Engineer User",
+      submitted_by_email: "engineer@example.com",
+      submitted_by_role: "engineer",
+      final_total: "0",
+      works_count: 1,
+      is_latest: false,
+      can_view_details: true,
+      can_reopen: true,
+    },
+    {
+      assignment_id: 1,
+      assignment_type: "estimator",
+      assignee_kind: "registered",
+      assignee_name: "Estimator User",
+      assignee_email: "estimator@example.com",
+      assignment_status: "assigned",
+      assigned_at: "2026-06-05T10:00:00Z",
+      started_at: null,
+      submitted_at: null,
+      linked_session_id: null,
+      submitted_by_name: null,
+      submitted_by_email: null,
+      submitted_by_role: null,
+      final_total: null,
+      works_count: null,
+      is_latest: false,
+      can_view_details: false,
+      can_reopen: false,
+    },
+  ],
 };
 
 const MOCK_QUOTE_GROUPS = {
@@ -162,19 +224,22 @@ test.describe("Manager grouped quote review", () => {
     await expect(page.getByText("raw_payload")).toHaveCount(0);
   });
 
-  test("view submissions opens group detail with assignments and submissions", async ({ page }) => {
+  test("view submissions opens group detail with combined assignment submissions table", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await mockQuoteGroupsApi(page);
     await page.goto("/manager/review");
     await page.getByTestId("view-quote-group-quote_ref:Q22100").click();
     await expect(page.getByTestId("manager-review-group-page")).toBeVisible();
-    await expect(page.getByTestId("quote-group-assignments")).toBeVisible();
-    await expect(page.getByTestId("quote-group-assignments-table")).toBeVisible();
-    await expect(page.getByTestId("quote-group-assignment-1")).toBeVisible();
-    await expect(page.getByTestId("assignment-status-1")).toContainText("Pending");
-    await expect(page.getByTestId("quote-group-submissions-table")).toBeVisible();
-    await expect(page.getByTestId("quote-group-session-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
-    await expect(page.getByTestId("quote-group-session-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toBeVisible();
+    await expect(page.getByTestId("quote-group-assignment-submissions")).toBeVisible();
+    await expect(page.getByTestId("quote-group-assignment-submissions-table")).toBeVisible();
+    await expect(page.getByTestId("quote-group-assignments")).toHaveCount(0);
+    await expect(page.getByTestId("quote-group-submissions")).toHaveCount(0);
+    await expect(page.getByTestId("assignment-submission-row-1")).toBeVisible();
+    await expect(page.getByTestId("assignment-submission-status-1")).toContainText("Pending");
+    await expect(page.getByTestId("assignment-submission-row-2")).toBeVisible();
+    await expect(
+      page.getByTestId("assignment-submission-row-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+    ).toBeVisible();
     await expect(page.getByTestId("quote-group-submissions-notice")).toContainText("2 submissions received");
   });
 
@@ -191,6 +256,50 @@ test.describe("Manager grouped quote review", () => {
     await expect(page.getByTestId("submission-latest-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
     await expect(page.getByTestId("quote-group-review-status")).toContainText("Ready for Review");
     await expect(page.getByText("assignment_token")).toHaveCount(0);
+    await expect(page.getByTestId("assignment-submission-row-1")).toContainText("—");
+  });
+
+  test("assignment submissions section precedes compare section in DOM order", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await page.route("**/api/v1/dashboard/quote-groups/detail**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            group: {
+              ...MOCK_GROUP_DETAIL,
+              assignment_submissions: MOCK_GROUP_DETAIL.assignment_submissions.map((row) =>
+                row.linked_session_id
+                  ? { ...row, can_assign_job: true, is_job_assigned: false, works_count: 1 }
+                  : row,
+              ),
+            },
+          },
+        }),
+      });
+    });
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    await expect(page.getByTestId("quote-group-summary")).toBeVisible();
+    await expect(page.getByTestId("quote-group-assignment-submissions")).toBeVisible();
+    await expect(page.getByTestId("quote-group-compare-submissions")).toHaveCount(0);
+
+    await page.getByTestId("compare-select-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").check();
+
+    await expect(page.getByTestId("quote-group-compare-submissions")).toBeVisible();
+
+    const isDomAfter = await page.evaluate(
+      ([earlier, later]) => {
+        const a = document.querySelector(`[data-testid="${earlier}"]`);
+        const b = document.querySelector(`[data-testid="${later}"]`);
+        return Boolean(a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      },
+      ["quote-group-assignment-submissions", "quote-group-compare-submissions"],
+    );
+
+    expect(isDomAfter).toBe(true);
   });
 
   test("group detail view details links to session detail page", async ({ page }) => {
@@ -222,6 +331,13 @@ test.describe("Manager grouped quote review", () => {
                 pending_assignments: 1,
                 submitted_assignments: 0,
               },
+              assignment_submissions: MOCK_GROUP_DETAIL.assignment_submissions.filter(
+                (row) => row.assignment_status !== "submitted" || row.assignment_id === 1,
+              ).map((row) =>
+                row.assignment_id === 1
+                  ? row
+                  : { ...row, submitted_at: null, final_total: null, is_latest: false, can_view_details: false, can_reopen: false },
+              ),
             },
           },
         }),
@@ -230,5 +346,6 @@ test.describe("Manager grouped quote review", () => {
     await page.goto("/manager/review/group?quote_ref=Q22100");
     await expect(page.getByTestId("quote-group-pending-notice")).toContainText("No estimate has been submitted yet");
     await expect(page.getByTestId("quote-group-review-status")).toContainText("Pending");
+    await expect(page.getByTestId("quote-group-assignment-submissions-table")).toBeVisible();
   });
 });

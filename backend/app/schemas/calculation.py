@@ -45,6 +45,7 @@ class ChargeInput(BaseModel):
     parking_rate_per_hour: Decimal | None = None
     parking_hours: Decimal | None = None
     parking_fixed_amount: Decimal | None = None
+    parking_vehicles: int = 1
     congestion_required: bool = False
     congestion_amount: Decimal = Decimal("0")
     ulez_required: bool = False

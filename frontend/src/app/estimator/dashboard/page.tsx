@@ -54,7 +54,7 @@ export default function EstimatorDashboardPage() {
         description="Create and track estimates before manager review"
         actions={
           <>
-            <Link href="/eworks/calculate">
+            <Link href="/new-estimate">
               <PrimaryButton data-testid="new-estimate-button">New Estimate</PrimaryButton>
             </Link>
             <SecondaryButton onClick={() => void loadDashboard()} disabled={loading}>

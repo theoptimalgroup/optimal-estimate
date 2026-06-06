@@ -19,9 +19,9 @@ export function DataTable({ children, className, testId }: DataTableProps) {
   );
 }
 
-export function DataTableHead({ children }: { children: ReactNode }) {
+export function DataTableHead({ children, sticky }: { children: ReactNode; sticky?: boolean }) {
   return (
-    <thead className="bg-slate-50">
+    <thead className={cn("bg-slate-50", sticky && "sticky top-0 z-10 shadow-[0_1px_0_0_rgb(226_232_240)]")}>
       <tr className="text-left text-xs font-medium uppercase tracking-wide text-slate-600">{children}</tr>
     </thead>
   );
@@ -55,14 +55,18 @@ export function DataTableCell({
   className,
   header,
   align = "left",
+  numeric,
 }: {
   children: ReactNode;
   className?: string;
   header?: boolean;
   align?: "left" | "right" | "center";
+  /** @deprecated Prefer align="right" */
+  numeric?: boolean;
 }) {
+  const resolvedAlign = numeric ? "right" : align;
   const alignClass =
-    align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+    resolvedAlign === "right" ? "text-right" : resolvedAlign === "center" ? "text-center" : "text-left";
 
   if (header) {
     return <th className={cn("px-4 py-3 font-medium", alignClass, className)}>{children}</th>;

@@ -1,24 +1,17 @@
 "use client";
 
-import Image from "next/image";
 import { forwardRef } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
+
+import { CompanyLogo } from "@/components/ui/company-logo";
 
 export function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+/** @deprecated Use CompanyLogo from @/components/ui */
 export function OptimalGroupLogo({ className }: { className?: string }) {
-  return (
-    <Image
-      src="/optimal-group-logo-light.png"
-      alt="Optimal Group"
-      width={320}
-      height={92}
-      priority
-      className={cn("h-9 w-auto object-contain sm:h-11", className)}
-    />
-  );
+  return <CompanyLogo className={className} priority />;
 }
 
 export function EworksFormHeader({
@@ -29,10 +22,10 @@ export function EworksFormHeader({
   subtitle?: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-gray-200 pb-5">
+    <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-5">
       <div className="min-w-0 space-y-1">
-        <h2 className="text-xl font-bold uppercase tracking-wide text-optimal-orange sm:text-2xl">{title}</h2>
-        {subtitle && <p className="text-sm text-optimal-muted">{subtitle}</p>}
+        <h2 className="text-xl font-bold uppercase tracking-wide text-slate-900 sm:text-2xl">{title}</h2>
+        {subtitle && <p className="text-sm text-slate-600">{subtitle}</p>}
       </div>
       <OptimalGroupLogo className="shrink-0" />
     </div>
@@ -58,23 +51,23 @@ export function EworksFieldError({ message }: { message?: string }) {
 export function EworksSectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="space-y-0.5">
-      <h3 className="text-sm font-semibold text-optimal-orange">{title}</h3>
-      {subtitle && <p className="text-xs text-optimal-muted">{subtitle}</p>}
+      <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+      {subtitle && <p className="text-xs text-slate-600">{subtitle}</p>}
     </div>
   );
 }
 
 export function EworksLabel({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <label className={cn("block space-y-2 text-sm font-semibold text-optimal-orange", className)}>{children}</label>
+    <label className={cn("block space-y-2 text-sm font-medium text-slate-700", className)}>{children}</label>
   );
 }
 
 export function eworksInputClass(hasError?: boolean) {
   return cn(
-    "w-full min-h-[44px] rounded-lg border border-gray-300 bg-optimal-field px-3.5 py-2.5 text-base text-optimal-field-text shadow-sm",
-    "placeholder:text-gray-400 transition-all duration-200 ease-out",
-    "focus:border-optimal-orange focus:outline-none focus:ring-2 focus:ring-optimal-orange/30",
+    "w-full min-h-[44px] rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-base text-slate-900 shadow-sm",
+    "placeholder:text-slate-400 transition-all duration-200 ease-out",
+    "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20",
     hasError && "border-red-400 ring-2 ring-red-400/30",
   );
 }
@@ -112,12 +105,12 @@ type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 const buttonVariants: Record<ButtonVariant, string> = {
   primary:
-    "bg-optimal-orange text-gray-900 shadow-sm hover:bg-optimal-orange-dark active:brightness-95 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none",
+    "border border-transparent bg-blue-600 text-white shadow-sm hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none",
   secondary:
-    "border border-gray-300 bg-white text-gray-900 hover:border-gray-400 hover:bg-gray-50 active:bg-gray-100 disabled:text-gray-400",
-  ghost: "text-optimal-orange hover:bg-gray-100 active:bg-gray-200 disabled:text-gray-400",
+    "border border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 active:bg-slate-100 disabled:text-slate-400",
+  ghost: "text-blue-600 hover:bg-slate-100 active:bg-slate-200 disabled:text-slate-400",
   danger:
-    "border border-red-300 bg-red-50 text-red-700 hover:border-red-400 hover:bg-red-100 active:bg-red-200 disabled:opacity-50",
+    "border border-red-200 bg-red-50 text-red-700 hover:border-red-300 hover:bg-red-100 active:bg-red-100 disabled:opacity-50",
 };
 
 export function EworksButton({
@@ -132,7 +125,7 @@ export function EworksButton({
       className={cn(
         "inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold",
         "transition-all duration-200 ease-out active:scale-[0.98] disabled:cursor-not-allowed disabled:active:scale-100",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-optimal-orange/50 focus-visible:ring-offset-2 focus-visible:ring-offset-white",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white",
         buttonVariants[variant],
         className,
       )}
@@ -151,17 +144,17 @@ export const EworksCheckbox = forwardRef<
     <label
       className={cn(
         "flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg px-1 py-2",
-        "transition-colors duration-200 hover:bg-gray-50",
+        "transition-colors duration-200 hover:bg-slate-50",
         className,
       )}
     >
       <input
         ref={ref}
         type="checkbox"
-        className="size-5 shrink-0 rounded border-gray-300 bg-white text-optimal-orange transition-transform duration-150 focus:ring-optimal-orange/40 active:scale-95"
+        className="size-5 shrink-0 rounded border-slate-300 bg-white text-blue-600 transition-transform duration-150 focus:ring-blue-500/30 active:scale-95"
         {...props}
       />
-      <span className="text-sm font-medium text-gray-900">{label}</span>
+      <span className="text-sm font-medium text-slate-900">{label}</span>
     </label>
   );
 });
@@ -250,16 +243,20 @@ export function EworksSaveStatus({ status }: { status: "idle" | "saving" | "save
 
   const copy =
     status === "saving"
-      ? { text: "Saving…", className: "text-optimal-muted animate-pulse-soft" }
+      ? { text: "Saving…", className: "text-slate-500" }
       : status === "saved"
-        ? { text: "All changes saved", className: "text-emerald-600" }
+        ? { text: "Saved", className: "text-slate-500" }
         : { text: "Save failed", className: "text-red-600" };
 
   return (
-    <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium transition-opacity duration-300", copy.className)}>
-      {status === "saved" && (
-        <span className="flex size-4 items-center justify-center rounded-full bg-emerald-100 text-[10px] text-emerald-700">✓</span>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-xs text-slate-500 transition-opacity duration-300",
+        copy.className,
+        status === "saving" && "animate-pulse",
       )}
+      aria-live="polite"
+    >
       {copy.text}
     </span>
   );
@@ -269,9 +266,9 @@ export function EworksLoadingScreen({ message = "Opening calculation link…" }:
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6">
       <div className="relative size-12">
-        <div className="absolute inset-0 animate-spin rounded-full border-2 border-gray-200 border-t-optimal-orange" />
+        <div className="absolute inset-0 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
       </div>
-      <p className="text-sm font-medium text-optimal-muted animate-pulse-soft">{message}</p>
+      <p className="text-sm font-medium text-slate-600 animate-pulse-soft">{message}</p>
     </div>
   );
 }
@@ -297,8 +294,8 @@ export function DashboardPageShell({
           <div className="flex items-start justify-between gap-6">
             <div className="min-w-0 flex-1 space-y-1.5">
               <h1 className="text-2xl font-bold uppercase tracking-wide text-slate-900 lg:text-3xl">{title}</h1>
-              {subtitle && <p className="text-sm text-optimal-muted lg:text-base">{subtitle}</p>}
-              {meta && <div className="pt-0.5 text-xs text-optimal-muted">{meta}</div>}
+              {subtitle && <p className="text-sm text-slate-600 lg:text-base">{subtitle}</p>}
+              {meta && <div className="pt-0.5 text-xs text-slate-500">{meta}</div>}
             </div>
             <div className="shrink-0">
               <OptimalGroupLogo className="h-11 lg:h-12" />
@@ -346,8 +343,8 @@ export function EworksPageShell({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-1.5">
               <h1 className="truncate text-xl font-bold uppercase tracking-wide text-slate-900 sm:text-2xl">{title}</h1>
-              {subtitle && <p className="text-sm text-optimal-muted">{subtitle}</p>}
-              {meta && <div className="pt-0.5 text-xs text-optimal-muted">{meta}</div>}
+              {subtitle && <p className="text-sm text-slate-600">{subtitle}</p>}
+              {meta && <div className="pt-0.5 text-xs text-slate-500">{meta}</div>}
               {badge}
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2">

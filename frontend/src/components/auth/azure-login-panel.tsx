@@ -1,11 +1,11 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useMsal } from "@azure/msal-react";
 
 import { PrimaryButton } from "@/components/ui/buttons";
+import { CompanyLogo } from "@/components/ui/company-logo";
 import { LoadingState } from "@/components/ui/states";
 import { useCurrentUser } from "@/lib/auth/auth-context";
 import { getDashboardForRole, isRegistrationError } from "@/lib/auth/dashboard-routes";
@@ -79,20 +79,13 @@ export function AzureLoginPanel() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-app-bg px-4">
-      <div className="w-full max-w-md space-y-6 rounded-xl border border-app-border bg-app-card p-8 shadow-sm">
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+      <div className="w-full max-w-md space-y-6 rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="space-y-4 text-center">
-          <Image
-            src="/optimal-group-logo-light.png"
-            alt="Optimal Group"
-            width={200}
-            height={58}
-            className="mx-auto h-9 w-auto object-contain"
-            priority
-          />
+          <CompanyLogo className="mx-auto h-9" priority />
           <div className="space-y-1">
-            <h1 className="text-page-title text-app-text">Sign in</h1>
-            <p className="text-body text-app-muted">Sign in with your company Microsoft account</p>
+            <h1 className="text-2xl font-semibold text-slate-900">Sign in</h1>
+            <p className="text-sm text-slate-600">Sign in with your company Microsoft account</p>
           </div>
         </div>
 
@@ -116,7 +109,7 @@ export function AzureLoginPanel() {
           Sign in with Microsoft
         </PrimaryButton>
 
-        <p className="text-center text-helper text-app-muted">
+        <p className="text-center text-xs text-slate-500">
           After sign-in, your app role comes from the users table — not from Microsoft groups.
         </p>
 

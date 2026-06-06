@@ -2,6 +2,8 @@ import { apiFetch, getApiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth/token-provider";
 import {
   buildCombinedWorksPdfFileName,
+  type AssignQuoteJobRequest,
+  type AssignQuoteJobResponse,
   type CombineWorkNotesResponse,
   type DashboardQuoteGroupDetailResponse,
   type DashboardQuoteGroupsResponse,
@@ -41,6 +43,17 @@ export async function reopenQuoteForRefill(sessionId: string) {
   const response = await apiFetch<ReopenQuoteResponse>(`/api/v1/dashboard/quotes/${sessionId}/reopen`, {
     method: "POST",
   });
+  return response.data;
+}
+
+export async function assignQuoteJob(quoteRef: string, payload: AssignQuoteJobRequest) {
+  const response = await apiFetch<AssignQuoteJobResponse>(
+    `/api/v1/manager/quotes/${encodeURIComponent(quoteRef)}/assign-job`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
   return response.data;
 }
 

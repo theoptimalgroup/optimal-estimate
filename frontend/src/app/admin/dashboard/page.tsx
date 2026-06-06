@@ -26,7 +26,7 @@ import { listAuditLogs, type AuditLog } from "@/lib/audit-logs";
 import { getSettings, getSettingsStatus, type SettingsStatus, type SystemSettings } from "@/lib/settings";
 
 const quickLinks = [
-  { href: "/eworks/calculate", label: "New Estimate", icon: Calculator },
+  { href: "/new-estimate", label: "New Estimate", icon: Calculator },
   { href: "/manager/review", label: "Quote Review", icon: ClipboardCheck },
   { href: "/manager/reports", label: "Reports", icon: BarChart3 },
   { href: "/admin/users", label: "Users & Roles", icon: Users },

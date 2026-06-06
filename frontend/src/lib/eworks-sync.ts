@@ -46,9 +46,11 @@ export type EworksSyncStatus = {
   quotes_count: number;
   jobs_count: number;
   customers_count: number;
+  products_count: number;
   last_quotes_sync: string | null;
   last_jobs_sync: string | null;
   last_customers_sync: string | null;
+  last_products_sync: string | null;
   eworks_api_enabled: boolean;
   active_sync?: EworksActiveSync | null;
   background_sync: EworksBackgroundSyncConfig;

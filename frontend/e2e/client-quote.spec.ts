@@ -171,7 +171,7 @@ test.describe("Client public quote page", () => {
 });
 
 test.describe("Manager eWorks acceptance sync", () => {
-  test("accepted quote shows eWorks sync status on manager review", async ({ page }) => {
+  test("manager review hides acceptance and eWorks sync panels", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await page.route("**/api/v1/dashboard/quotes", async (route) => {
       await route.fulfill({
@@ -213,80 +213,15 @@ test.describe("Manager eWorks acceptance sync", () => {
     });
 
     await page.goto("/manager/review/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-    await expect(page.getByTestId("eworks-sync-panel")).toBeVisible();
-    await expect(page.getByTestId("eworks-sync-badge")).toContainText("Sync failed");
-    await expect(page.getByTestId("eworks-sync-error")).toContainText("eWorks unavailable");
-    await expect(page.getByTestId("eworks-sync-retry-button")).toBeVisible();
+    await expect(page.getByTestId("quote-acceptance-panel")).toHaveCount(0);
+    await expect(page.getByTestId("eworks-sync-panel")).toHaveCount(0);
     await expect(page.getByText("secret-session-token")).toHaveCount(0);
     await expect(page.getByText("api_key")).toHaveCount(0);
-  });
-
-  test("retry button calls mocked API and updates status", async ({ page }) => {
-    await mockAuthMe(page, "manager");
-    let syncStatus = "failed";
-
-    await page.route("**/api/v1/dashboard/quotes", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: {
-            quotes: [
-              {
-                session_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                session_token: "secret-session-token",
-                quote_number: "Q-1001",
-                job_number: "JOB-1",
-                client_name: "Atkinson McLeod",
-                trade_name: "Painter",
-                submitted_at: "2026-06-01T12:00:00Z",
-                final_total: 1260,
-                works: [],
-                acceptance: {
-                  accepted: true,
-                  accepted_at: "2026-06-02T14:30:00Z",
-                  name: "Jane Client",
-                  email: "client@example.com",
-                  eworks_sync: {
-                    status: syncStatus,
-                    synced_at: syncStatus === "success" ? "2026-06-02T15:00:00Z" : null,
-                    error: syncStatus === "failed" ? "eWorks unavailable" : null,
-                    attempts: 1,
-                  },
-                },
-              },
-            ],
-          },
-        }),
-      });
-    });
-
-    await page.route("**/api/v1/client-quotes/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/sync-acceptance-eworks", async (route) => {
-      syncStatus = "success";
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: {
-            status: "success",
-            synced_at: "2026-06-02T15:00:00Z",
-            error: null,
-            attempts: 2,
-          },
-        }),
-      });
-    });
-
-    await page.goto("/manager/review/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-    await page.getByTestId("eworks-sync-retry-button").click();
-    await expect(page.getByTestId("eworks-sync-badge")).toContainText("Synced to eWorks");
   });
 });
 
 test.describe("Manager client link", () => {
-  test("manager review page shows client link panel and acceptance badge", async ({ page }) => {
+  test("manager review page hides client link and acceptance panels", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await page.route("**/api/v1/dashboard/quotes", async (route) => {
       await route.fulfill({
@@ -336,11 +271,9 @@ test.describe("Manager client link", () => {
     });
 
     await page.goto("/manager/review/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-    await expect(page.getByTestId("client-link-panel")).toBeVisible();
-    await expect(page.getByTestId("quote-acceptance-panel")).toBeVisible();
-    await expect(page.getByTestId("quote-accepted-badge")).toBeVisible();
-    await page.getByRole("button", { name: "Create client link" }).click();
-    await expect(page.getByTestId("client-link-url")).toContainText("/client/quote/test-public-token");
+    await expect(page.getByTestId("client-link-panel")).toHaveCount(0);
+    await expect(page.getByTestId("quote-acceptance-panel")).toHaveCount(0);
+    await expect(page.getByTestId("quote-accepted-badge")).toHaveCount(0);
     await expect(page.getByText("secret-session-token")).toHaveCount(0);
   });
 });

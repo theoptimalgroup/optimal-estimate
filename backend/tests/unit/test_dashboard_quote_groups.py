@@ -20,6 +20,7 @@ from app.models.client import Client
 from app.models.client_alias import ClientAlias
 from app.models.eworks_sync import EworksQuote
 from app.models.quote_assignment import EworksQuoteAssignment
+from app.models.quote_job_assignment import QuoteJobAssignment
 from app.models.support import AuditLog
 from app.models.trade import Trade
 from app.models.user import User
@@ -66,7 +67,7 @@ def review_db_session():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    for model in (User, Client, ClientAlias, Trade, CalculationSession, AuditLog, EworksQuote, EworksQuoteAssignment):
+    for model in (User, Client, ClientAlias, Trade, CalculationSession, AuditLog, EworksQuote, EworksQuoteAssignment, QuoteJobAssignment):
         model.__table__.create(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -390,3 +391,57 @@ def test_group_detail_submitted_assignment_count(mock_settings, review_api_clien
     assert summary["submitted_assignments"] == 1
     assert summary["estimator_assignments"] == 1
     assert summary["engineer_assignments"] == 2
+
+
+@patch("app.auth.dependencies.settings")
+def test_group_detail_includes_assignment_submission_rows(mock_settings, review_api_client, review_detail_db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    response = review_api_client.get("/api/v1/dashboard/quote-groups/detail", params={"quote_ref": "Q22100"})
+    group = response.json()["data"]["group"]
+    rows = group["assignment_submissions"]
+    assert len(rows) == 4
+    assert len(group["assignments"]) == 3
+    assert len(group["sessions"]) == 2
+
+    assignment_ids = {row["assignment_id"] for row in rows if row["assignment_id"] is not None}
+    assert assignment_ids == {1, 2, 3}
+
+    submitted_rows = [row for row in rows if row["assignment_status"] == "submitted"]
+    assert len(submitted_rows) == 2
+    engineer_row = next(row for row in rows if row["assignment_id"] == 2)
+    assert engineer_row["linked_session_id"] is not None
+    assert engineer_row["final_total"] is not None
+    assert engineer_row["submitted_by_name"] == "Engineer User"
+    assert engineer_row["can_view_details"] is True
+    assert engineer_row["can_reopen"] is True
+
+    pending_row = next(row for row in rows if row["assignment_id"] == 1)
+    assert pending_row["assignment_status"] == "assigned"
+    assert pending_row["final_total"] is None
+    assert pending_row["can_view_details"] is False
+
+    unlinked_row = next(row for row in rows if row["assignment_id"] is None)
+    assert unlinked_row["assignment_type"] == "unknown"
+    assert unlinked_row["assignee_name"] == "Unknown"
+    assert unlinked_row["submitted_by_name"] == "Unknown submitter"
+
+
+@patch("app.auth.dependencies.settings")
+def test_group_detail_assignment_submissions_latest_badge(mock_settings, review_api_client, review_detail_db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    response = review_api_client.get("/api/v1/dashboard/quote-groups/detail", params={"quote_ref": "Q22100"})
+    rows = response.json()["data"]["group"]["assignment_submissions"]
+    latest_rows = [row for row in rows if row["is_latest"]]
+    assert len(latest_rows) == 1
+    assert latest_rows[0]["linked_session_id"] == response.json()["data"]["group"]["latest_session_id"]
+
+
+@patch("app.auth.dependencies.settings")
+def test_group_detail_assignment_submissions_exclude_tokens(mock_settings, review_api_client, review_detail_db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    response = review_api_client.get("/api/v1/dashboard/quote-groups/detail", params={"quote_ref": "Q22100"})
+    body = response.text
+    assert "assignment_token" not in body
+    assert "session_token" not in body
+    for row in response.json()["data"]["group"]["assignment_submissions"]:
+        assert "token" not in row

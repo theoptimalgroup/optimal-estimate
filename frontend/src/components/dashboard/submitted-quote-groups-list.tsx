@@ -26,12 +26,7 @@ export function SubmittedQuoteGroupsList({
   }
 
   if (groups.length === 0) {
-    return (
-      <EmptyState
-        title="No submitted quotes"
-        description="No submitted quotes yet."
-      />
-    );
+    return <EmptyState title="No submitted quotes" />;
   }
 
   return <QuoteGroupsTable groups={groups} groupHref={groupHref} />;

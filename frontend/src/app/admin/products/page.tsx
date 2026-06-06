@@ -336,6 +336,7 @@ export default function AdminProductsPage() {
     <div className="space-y-6" data-testid="admin-products-page">
       <PageHeader
         title="Products / Scope"
+        description="Manage synced products and scope-of-work templates."
         actions={
           <div className="flex flex-wrap gap-2">
             <PrimaryButton

@@ -19,6 +19,13 @@ class UserRead(BaseModel):
     updated_at: datetime
 
 
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: str = Field(min_length=1, max_length=255)
+    role: UserRole
+    is_active: bool = True
+
+
 class UserUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     role: UserRole | None = None

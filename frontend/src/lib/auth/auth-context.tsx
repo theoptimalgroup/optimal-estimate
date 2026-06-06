@@ -9,10 +9,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 
 import { getCurrentUser } from "@/lib/auth/auth-api";
 import { isAzureAuth, isAzureAuthRequested } from "@/lib/auth/auth-config";
 import { isAzureConfigured } from "@/lib/auth/msal-config";
+import { shouldSkipAuthFetch, shouldSkipMsalInit } from "@/lib/auth/public-routes";
 import { getAccessToken, onMsalReady } from "@/lib/auth/token-provider";
 import type { CurrentUser, UserRole } from "@/lib/auth/types";
 
@@ -29,15 +31,17 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const skipAuthFetch = shouldSkipAuthFetch(pathname);
   const [user, setUser] = useState<CurrentUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!skipAuthFetch);
   const [error, setError] = useState<string | null>(null);
 
   const refetchUser = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      if (isAzureAuth()) {
+      if (isAzureAuth() && !shouldSkipMsalInit(pathname)) {
         const token = await getAccessToken();
         if (!token) {
           setUser(null);
@@ -53,9 +57,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [pathname]);
 
   useEffect(() => {
+    if (skipAuthFetch) {
+      setUser(null);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
     if (isAzureAuthRequested()) {
       if (!isAzureConfigured()) {
         setIsLoading(false);
@@ -63,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       setIsLoading(true);
-      const unsubscribe = onMsalReady(({ hasAccount, hasAccessToken }) => {
+      const handleMsalReady = ({ hasAccount, hasAccessToken }: { hasAccount: boolean; hasAccessToken: boolean }) => {
         if (!hasAccount || !hasAccessToken) {
           setUser(null);
           setError(null);
@@ -71,12 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         void refetchUser();
-      });
+      };
+      const unsubscribe = onMsalReady(handleMsalReady);
       return unsubscribe;
     }
 
     void refetchUser();
-  }, [refetchUser]);
+  }, [skipAuthFetch, refetchUser]);
 
   const hasRole = useCallback(
     (...roles: UserRole[]) => {

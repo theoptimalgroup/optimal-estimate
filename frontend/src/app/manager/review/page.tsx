@@ -34,7 +34,6 @@ export default function ManagerReviewPage() {
     <div className="space-y-6" data-testid="manager-review-page">
       <PageHeader
         title="Approvals & Quotes"
-        description="Review submitted estimates by quote. Each quote appears once; open a quote to see all submissions."
         actions={
           <SecondaryButton onClick={() => void loadGroups()} disabled={loading}>
             Refresh

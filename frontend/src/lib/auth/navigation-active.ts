@@ -7,7 +7,9 @@ export function getActiveNavHref(pathname: string, navItems: NavItem[]): string 
   for (const item of navItems) {
     const matches =
       pathname === item.href ||
-      (item.href !== "/eworks/calculate" && pathname.startsWith(`${item.href}/`));
+      (item.href !== "/eworks/calculate" &&
+        item.href !== "/new-estimate" &&
+        pathname.startsWith(`${item.href}/`));
 
     if (matches && (!best || item.href.length > best.href.length)) {
       best = item;

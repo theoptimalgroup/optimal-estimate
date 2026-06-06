@@ -7,9 +7,9 @@ from app.core.exceptions import success_response
 from app.core.security import UserRole
 from app.db.session import DbSession
 from app.models.user import User
-from app.schemas.user import UserRead, UserUpdate
+from app.schemas.user import UserCreate, UserRead, UserUpdate
 from app.services.audit_helpers import record_audit, snapshot_model
-from app.services.user_service import get_user, list_users, update_user
+from app.services.user_service import create_user, get_user, list_users, update_user
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -33,6 +33,36 @@ def list_users_endpoint(
         offset=offset,
     )
     return success_response(users, meta={"total": total, "limit": limit, "offset": offset})
+
+
+@router.post("")
+def create_user_endpoint(
+    body: UserCreate,
+    db: DbSession,
+    actor: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    try:
+        user = create_user(
+            db,
+            email=str(body.email),
+            name=body.name,
+            role=body.role,
+            is_active=body.is_active,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    record_audit(
+        db,
+        actor=actor,
+        action="user_created",
+        entity_type="user",
+        entity_id=user.id,
+        before=None,
+        after=user.model_dump(mode="json"),
+    )
+    db.commit()
+    return success_response(user)
 
 
 @router.get("/{user_id}")

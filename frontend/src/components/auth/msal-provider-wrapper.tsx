@@ -2,11 +2,13 @@
 
 import { PublicClientApplication } from "@azure/msal-browser";
 import { MsalProvider } from "@azure/msal-react";
+import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { AzureAuthBootstrap } from "@/components/auth/azure-auth-bootstrap";
 import { isAzureAuthRequested } from "@/lib/auth/auth-config";
 import { getLoginRequest, getMissingAzureEnvVars, getMsalConfig, isAzureConfigured } from "@/lib/auth/msal-config";
+import { shouldSkipMsalInit } from "@/lib/auth/public-routes";
 import { notifyMsalReady } from "@/lib/auth/token-provider";
 
 let msalInstance: PublicClientApplication | null = null;
@@ -67,13 +69,20 @@ type MsalProviderWrapperProps = {
 };
 
 export function MsalProviderWrapper({ children }: MsalProviderWrapperProps) {
+  const pathname = usePathname();
   const [instance, setInstance] = useState<PublicClientApplication | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
 
+  const skipMsal = shouldSkipMsalInit(pathname);
   const missingVars = isAzureAuthRequested() && !isAzureConfigured() ? getMissingAzureEnvVars() : [];
 
   useEffect(() => {
-    if (!isAzureAuthRequested() || !isAzureConfigured()) {
+    if (skipMsal || !isAzureAuthRequested() || !isAzureConfigured()) {
+      if (skipMsal) {
+        setInstance(null);
+        setInitError(null);
+        notifyMsalReady({ hasAccount: false, hasAccessToken: false });
+      }
       return;
     }
 
@@ -98,6 +107,13 @@ export function MsalProviderWrapper({ children }: MsalProviderWrapperProps) {
           if (!account) {
             if (!cancelled) {
               notifyMsalReady({ hasAccount: false, hasAccessToken: false });
+            }
+            return;
+          }
+
+          if (result?.accessToken) {
+            if (!cancelled) {
+              notifyMsalReady({ hasAccount: true, hasAccessToken: true });
             }
             return;
           }
@@ -136,10 +152,11 @@ export function MsalProviderWrapper({ children }: MsalProviderWrapperProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [skipMsal]);
 
   const initValue: MsalInitContextValue = {
     ready:
+      skipMsal ||
       !isAzureAuthRequested() ||
       !isAzureConfigured() ||
       instance !== null ||
@@ -152,7 +169,7 @@ export function MsalProviderWrapper({ children }: MsalProviderWrapperProps) {
     return <AzureConfigError missing={missingVars} />;
   }
 
-  if (!isAzureAuthRequested() || !isAzureConfigured()) {
+  if (skipMsal || !isAzureAuthRequested() || !isAzureConfigured()) {
     return <MsalInitContext.Provider value={initValue}>{children}</MsalInitContext.Provider>;
   }
 

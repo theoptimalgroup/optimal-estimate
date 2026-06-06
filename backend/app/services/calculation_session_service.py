@@ -5,11 +5,13 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.utils.work_label import format_work_label
+from app.core.config import settings
 from app.core.exceptions import AppError
 from app.models.calculation_session import CalculationSession
-from app.schemas.calculation import CalculationBreakdown, CalculationPreviewRequest
+from app.schemas.calculation import CalculationBreakdown, CalculationPreviewRequest, ChargeInput
 from app.schemas.dashboard_quote_groups import (
     DashboardQuoteGroupAssignmentItem,
+    DashboardQuoteGroupAssignmentSubmissionRow,
     DashboardQuoteGroupAssignmentSummary,
     DashboardQuoteGroupDetailItem,
     DashboardQuoteGroupDetailResponse,
@@ -17,6 +19,7 @@ from app.schemas.dashboard_quote_groups import (
     DashboardQuoteGroupSessionDetailItem,
     DashboardQuoteGroupSessionItem,
     DashboardQuoteGroupsResponse,
+    DashboardQuoteJobAssignmentDecision,
 )
 from app.schemas.eworks_link import (
     AggregatedQuoteSummary,
@@ -24,6 +27,7 @@ from app.schemas.eworks_link import (
     CalculationSessionRead,
     CombineWorkNotesResponse,
     DashboardQuoteItem,
+    DashboardQuoteSummaryBreakdown,
     DashboardQuotesResponse,
     DashboardWorkItem,
     ReopenQuoteResponse,
@@ -36,6 +40,7 @@ from app.schemas.eworks_link import (
     WorkBlockSnapshot,
     WorkBreakdownResult,
     aggregate_work_charges,
+    quote_additional_charge_lines,
     flatten_supplier_links,
     step2_to_calculation_inputs,
 )
@@ -156,6 +161,27 @@ def _work_subtotals_from_breakdown(breakdown: dict):
     if materials_subtotal is None and breakdown.get("materials_parking_cc_charge") is not None:
         materials_subtotal = Decimal(str(breakdown["materials_parking_cc_charge"]))
     return labour_subtotal, materials_subtotal
+
+
+def _dashboard_quote_summary_breakdown(breakdown: dict) -> DashboardQuoteSummaryBreakdown | None:
+    if breakdown.get("final_total") is None:
+        return None
+    labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(breakdown)
+    works_subtotal = (labour_subtotal or Decimal("0")) + (materials_subtotal or Decimal("0"))
+    charge_lines = breakdown.get("charges") or []
+    additional_charges = sum(
+        (Decimal(str(line["total"])) for line in charge_lines if line.get("total") is not None),
+        Decimal("0"),
+    )
+    vat_total = breakdown.get("vat_total")
+    if vat_total is None:
+        return None
+    return DashboardQuoteSummaryBreakdown(
+        works_subtotal=works_subtotal,
+        additional_charges=additional_charges,
+        vat_total=Decimal(str(vat_total)),
+        final_total=Decimal(str(breakdown["final_total"])),
+    )
 
 
 def _dashboard_last_result(db: Session, session: CalculationSession) -> dict | None:
@@ -428,8 +454,7 @@ def calculate_session(
             trade_id=work_trade.id,
             include_charges=False,
         )
-        # Each work block uses its own charges so parking/CC set per-work appear in that work's breakdown.
-        work_charges = aggregate_work_charges(step1, [block])
+        # Work breakdowns include labour and materials only; additional charges are quote-level.
         breakdown = preview_calculation(
             db,
             _eworks_preview_request(
@@ -439,7 +464,7 @@ def calculate_session(
                 trade_id=work_trade.id,
                 labour_items=labour,
                 material_items=materials,
-                charges=work_charges,
+                charges=ChargeInput(),
                 internal_notes_context=build_internal_notes_context(step1, block),
             ),
         )
@@ -454,10 +479,7 @@ def calculate_session(
 
     skill_group_results: list[SkillGroupBreakdown] = []
 
-    if single_work:
-        breakdown = work_results[0].breakdown
-        aggregated_summary_payload: AggregatedQuoteSummary | None = None
-    elif uniform_skills:
+    if single_work or uniform_skills:
         combined_trade_id = resolve_skill_trade(db, work_skills[0], fallback_trade_name=step1.trade_name).id
         labour, materials, combined_charges, aggregated = build_combined_calculation_inputs(
             step1,
@@ -477,40 +499,29 @@ def calculate_session(
                 internal_notes_context=build_combined_internal_notes_context(step1, step2_data.works),
             ),
         )
-        aggregated_summary_payload = AggregatedQuoteSummary.model_validate(
-            aggregated_quote_summary(aggregated, len(step2_data.works), skills=work_skills)
+        aggregated_summary_payload = (
+            None
+            if single_work
+            else AggregatedQuoteSummary.model_validate(
+                aggregated_quote_summary(aggregated, len(step2_data.works), skills=work_skills)
+            )
         )
     else:
-        # Group works by skill — compute one combined breakdown per trade group.
-        skill_group_results: list[SkillGroupBreakdown] = []
-        for skill, group_works in group_works_by_skill(step2_data.works, step1.trade_name):
-            trade = resolve_skill_trade(db, skill, fallback_trade_name=step1.trade_name)
-            group_charges = aggregate_work_charges(step1, group_works)
-            group_labour, _group_agg = build_skill_group_labour_inputs(group_works, trade_id=trade.id)
-            group_materials = build_combined_material_inputs(step1, Step2Snapshot(works=group_works))
-            group_breakdown = preview_calculation(
-                db,
-                _eworks_preview_request(
-                    db,
-                    session=session,
-                    step1=step1,
-                    trade_id=trade.id,
-                    labour_items=group_labour,
-                    material_items=group_materials,
-                    charges=group_charges,
-                    internal_notes_context=build_combined_internal_notes_context(step1, group_works),
-                ),
-            )
-            skill_group_results.append(SkillGroupBreakdown(skill=skill, breakdown=group_breakdown))
+        from app.services.calculation_aggregate_service import build_mixed_skill_combined_breakdown
 
-        breakdown = _merge_skill_group_breakdowns(
-            skill_group_results,
+        breakdown, aggregated, _skills = build_mixed_skill_combined_breakdown(
+            db,
+            client_id=session.client_id,
+            step1=step1,
+            step2=step2_data,
+            fallback_trade_name=step1.trade_name,
+            charges=charges,
             vat_rate=vat_rate,
             formula_version=settings.formula_version,
             formula_source=formula_source,
             xlsx_formula_version=xlsx_formula_version,
         )
-        aggregated = aggregate_work_blocks(step2_data.works)
+        skill_group_results = []
         aggregated_summary_payload = AggregatedQuoteSummary.model_validate(
             aggregated_quote_summary(aggregated, len(step2_data.works), skills=work_skills)
         )
@@ -673,11 +684,13 @@ def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
 
         final_total = None
         internal_notes = None
+        summary_breakdown = None
         if last_result:
             breakdown = last_result.get("breakdown") or {}
             if breakdown.get("final_total") is not None:
                 final_total = Decimal(str(breakdown["final_total"]))
             internal_notes = last_result.get("internal_notes")
+            summary_breakdown = _dashboard_quote_summary_breakdown(breakdown)
 
         works: list[DashboardWorkItem] = []
         for index, block in enumerate(step2.works):
@@ -709,6 +722,8 @@ def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
                 submitted_at=session.submitted_at,
                 final_total=final_total,
                 internal_notes=internal_notes,
+                additional_charges=quote_additional_charge_lines(step2),
+                breakdown=summary_breakdown,
                 works=works,
                 acceptance=staff_acceptance_from_session(session),
             )
@@ -1017,6 +1032,187 @@ def _resolve_session_submitter(
     return assignment.assigned_user_id, name, assignment.assigned_user_email, role
 
 
+def _assignee_display_name(
+    *,
+    assigned_user_name: str | None,
+    assigned_user_email: str | None,
+) -> str:
+    name = (assigned_user_name or "").strip()
+    if name:
+        return name
+    email = (assigned_user_email or "").strip()
+    if email:
+        return email
+    return "Unassigned"
+
+
+def _can_assign_job_row(
+    *,
+    assignment_status: str,
+    linked_session_id: UUID | None,
+    assignee_name: str,
+) -> bool:
+    if assignment_status != "submitted" or linked_session_id is None:
+        return False
+    normalized_name = (assignee_name or "").strip().lower()
+    return normalized_name not in {"", "unknown", "unassigned"}
+
+
+def _enrich_assignment_submission_row(
+    db: Session,
+    row: DashboardQuoteGroupAssignmentSubmissionRow,
+    *,
+    raw_sessions_by_id: dict[UUID, CalculationSession],
+    assigned_session_id: UUID | None,
+) -> DashboardQuoteGroupAssignmentSubmissionRow:
+    updates: dict = {
+        "can_assign_job": _can_assign_job_row(
+            assignment_status=row.assignment_status,
+            linked_session_id=row.linked_session_id,
+            assignee_name=row.assignee_name,
+        ),
+        "is_job_assigned": assigned_session_id is not None and row.linked_session_id == assigned_session_id,
+    }
+    if row.linked_session_id is not None:
+        raw_session = raw_sessions_by_id.get(row.linked_session_id)
+        if raw_session is not None:
+            from app.services.quote_job_assignment_service import _session_comparison_summary
+
+            updates["comparison_summary"] = _session_comparison_summary(db, raw_session)
+    return row.model_copy(update=updates)
+
+
+def _build_assignment_submission_rows(
+    db: Session,
+    group: DashboardQuoteGroupItem,
+    assignments: list[DashboardQuoteGroupAssignmentItem],
+    detail_sessions: list[DashboardQuoteGroupSessionDetailItem],
+    *,
+    raw_sessions_by_id: dict[UUID, CalculationSession],
+    job_assignment_decision: DashboardQuoteJobAssignmentDecision | None = None,
+) -> list[DashboardQuoteGroupAssignmentSubmissionRow]:
+    sessions_by_id = {item.session_id: item for item in detail_sessions}
+    linked_session_ids: set[UUID] = set()
+    assigned_session_id = (
+        job_assignment_decision.selected_session_id if job_assignment_decision is not None else None
+    )
+
+    rows: list[DashboardQuoteGroupAssignmentSubmissionRow] = []
+    for assignment in assignments:
+        session = (
+            sessions_by_id.get(assignment.calculation_session_id)
+            if assignment.calculation_session_id is not None
+            else None
+        )
+        if assignment.calculation_session_id is not None:
+            linked_session_ids.add(assignment.calculation_session_id)
+
+        is_submitted = assignment.status == "submitted"
+        linked_session_id = assignment.calculation_session_id
+        if is_submitted and session is not None:
+            linked_session_id = session.session_id
+
+        rows.append(
+            _enrich_assignment_submission_row(
+                db,
+                DashboardQuoteGroupAssignmentSubmissionRow(
+                    assignment_id=assignment.id,
+                    assignment_type=assignment.assignment_type,
+                    assignee_kind=assignment.assignee_kind,
+                    assignee_name=_assignee_display_name(
+                        assigned_user_name=assignment.assigned_user_name,
+                        assigned_user_email=assignment.assigned_user_email,
+                    ),
+                    assignee_email=assignment.assigned_user_email,
+                    assignment_status=assignment.status,
+                    assigned_at=assignment.assigned_at,
+                    started_at=assignment.started_at,
+                    submitted_at=session.submitted_at if session is not None else assignment.submitted_at,
+                    linked_session_id=linked_session_id,
+                    submitted_by_name=session.submitted_by_name if session is not None else None,
+                    submitted_by_email=session.submitted_by_email if session is not None else None,
+                    submitted_by_role=session.submitted_by_role if session is not None else None,
+                    final_total=session.final_total if session is not None else None,
+                    works_count=session.works_count if session is not None else None,
+                    can_view_details=is_submitted and linked_session_id is not None,
+                    can_reopen=is_submitted and linked_session_id is not None,
+                ),
+                raw_sessions_by_id=raw_sessions_by_id,
+                assigned_session_id=assigned_session_id,
+            )
+        )
+
+    for session in detail_sessions:
+        if session.session_id in linked_session_ids:
+            continue
+        rows.append(
+            _enrich_assignment_submission_row(
+                db,
+                DashboardQuoteGroupAssignmentSubmissionRow(
+                    assignment_id=None,
+                    assignment_type="unknown",
+                    assignee_kind="unknown",
+                    assignee_name="Unknown",
+                    assignee_email=None,
+                    assignment_status="submitted",
+                    assigned_at=None,
+                    started_at=None,
+                    submitted_at=session.submitted_at,
+                    linked_session_id=session.session_id,
+                    submitted_by_name=session.submitted_by_name,
+                    submitted_by_email=session.submitted_by_email,
+                    submitted_by_role=session.submitted_by_role,
+                    final_total=session.final_total,
+                    works_count=session.works_count,
+                    can_view_details=True,
+                    can_reopen=True,
+                ),
+                raw_sessions_by_id=raw_sessions_by_id,
+                assigned_session_id=assigned_session_id,
+            )
+        )
+
+    latest_submitted_at: datetime | None = None
+    latest_row_indexes: list[int] = []
+    for index, row in enumerate(rows):
+        if row.submitted_at is None:
+            continue
+        if latest_submitted_at is None or row.submitted_at > latest_submitted_at:
+            latest_submitted_at = row.submitted_at
+            latest_row_indexes = [index]
+        elif row.submitted_at == latest_submitted_at:
+            latest_row_indexes.append(index)
+
+    if len(latest_row_indexes) == 1:
+        row = rows[latest_row_indexes[0]]
+        rows[latest_row_indexes[0]] = _enrich_assignment_submission_row(
+            db,
+            row.model_copy(update={"is_latest": True}),
+            raw_sessions_by_id=raw_sessions_by_id,
+            assigned_session_id=assigned_session_id,
+        )
+    elif len(latest_row_indexes) > 1:
+        preferred_index = next(
+            (index for index in latest_row_indexes if rows[index].linked_session_id == group.latest_session_id),
+            latest_row_indexes[0],
+        )
+        row = rows[preferred_index]
+        rows[preferred_index] = _enrich_assignment_submission_row(
+            db,
+            row.model_copy(update={"is_latest": True}),
+            raw_sessions_by_id=raw_sessions_by_id,
+            assigned_session_id=assigned_session_id,
+        )
+
+    def _row_sort_key(row: DashboardQuoteGroupAssignmentSubmissionRow) -> tuple:
+        submitted_rank = row.submitted_at.timestamp() if row.submitted_at is not None else float("-inf")
+        assigned_rank = row.assigned_at.timestamp() if row.assigned_at is not None else float("-inf")
+        return (-submitted_rank, -assigned_rank, row.assignment_id or 0)
+
+    rows.sort(key=_row_sort_key)
+    return rows
+
+
 def _build_quote_group_detail(
     db: Session,
     group: DashboardQuoteGroupItem,
@@ -1037,6 +1233,18 @@ def _build_quote_group_detail(
 
     session_ids = [item.session_id for item in group.sessions]
     sessions_by_id = _load_linked_sessions(db, session_ids)
+
+    from app.services.quote_job_assignment_service import (
+        build_dashboard_job_assignment_decision,
+        get_job_assignment_for_quote,
+    )
+
+    job_assignment_row = get_job_assignment_for_quote(
+        db,
+        quote_ref=group.quote_ref,
+        eworks_quote_id=group.eworks_quote_id,
+    )
+    job_assignment_decision = build_dashboard_job_assignment_decision(db, job_assignment_row)
 
     detail_sessions: list[DashboardQuoteGroupSessionDetailItem] = []
     for item in group.sessions:
@@ -1065,6 +1273,15 @@ def _build_quote_group_detail(
         assignment_summary=assignment_summary,
         assignments=assignments,
         sessions=detail_sessions,
+        assignment_submissions=_build_assignment_submission_rows(
+            db,
+            group,
+            assignments,
+            detail_sessions,
+            raw_sessions_by_id=sessions_by_id,
+            job_assignment_decision=job_assignment_decision,
+        ),
+        job_assignment_decision=job_assignment_decision,
     )
 
 
@@ -1086,7 +1303,7 @@ def _preview_internal_notes_for_works(
             trade_id=trade.id,
             include_charges=False,
         )
-        work_charges = aggregate_work_charges(step1, [block])
+        work_charges = ChargeInput()
         breakdown = preview_calculation(
             db,
             _eworks_preview_request(
@@ -1235,7 +1452,7 @@ def _breakdown_for_work_block(
         trade_id=trade.id,
         include_charges=False,
     )
-    work_charges = aggregate_work_charges(step1, [block])
+    work_charges = ChargeInput()
     return preview_calculation(
         db,
         _eworks_preview_request(

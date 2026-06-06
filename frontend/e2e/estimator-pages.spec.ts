@@ -80,6 +80,14 @@ const mockQuotes = {
 };
 
 async function mockEstimatorApi(page: Page) {
+  await page.route("**/api/v1/quote-assignments/my**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: [] }),
+    });
+  });
+
   await page.route("**/api/v1/estimator/dashboard", async (route) => {
     await route.fulfill({
       status: 200,
@@ -167,13 +175,13 @@ test.describe("Estimator pages", () => {
     await expect(page.getByText("You do not have access to this page.")).toBeVisible();
   });
 
-  test("New Estimate button points to /eworks/calculate", async ({ page }) => {
+  test("New Estimate button points to /new-estimate", async ({ page }) => {
     await mockAuthMe(page, "estimator");
     await mockEstimatorApi(page);
     await page.goto("/estimator/dashboard");
     await expect(page.getByTestId("new-estimate-button").locator("xpath=ancestor::a")).toHaveAttribute(
       "href",
-      "/eworks/calculate",
+      "/new-estimate",
     );
   });
 });

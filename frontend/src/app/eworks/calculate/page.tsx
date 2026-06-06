@@ -6,7 +6,7 @@ import { useForm, type FieldErrors } from "react-hook-form";
 import { questionnaireResolver } from "@/lib/eworks-questionnaire-resolver";
 import { EworksInternalNavBar } from "@/components/eworks/eworks-internal-nav-bar";
 import { EworksEstimationFormStep } from "@/components/eworks-estimation-form-step";
-import { EworksQuestionnaireStep } from "@/components/eworks-questionnaire-step";
+import { EworksQuestionnaireStep, type QuestionnaireStepActions } from "@/components/eworks-questionnaire-step";
 import {
   EworksButton,
   EworksCard,
@@ -15,6 +15,7 @@ import {
   EworksSaveStatus,
   EworksSectionTitle,
   EworksStepIndicator,
+  cn,
 } from "@/components/eworks-ui";
 import {
   createDevTestSession,
@@ -34,8 +35,8 @@ import {
   coerceQuestionnaireValues,
   defaultQuestionnaireValues,
   EWORKS_STEPS,
+  CHARGES_FIELDS,
   questionnaireToStep2,
-  QUESTIONNAIRE_FIELDS,
   step2ToQuestionnaire,
   type QuestionnaireFormValues,
 } from "@/lib/eworks-calculate-schema";
@@ -117,7 +118,7 @@ function questionnaireValidationMessage(
   if (workIndex === null) return null;
   const workErrors = errors.works?.[workIndex];
   const message = firstErrorMessage(workErrors) ?? "complete all required fields";
-  const label = formatWorkLabel(works[workIndex], workIndex);
+  const label = formatWorkLabel(works[workIndex]);
   return `${label}: ${message}`;
 }
 
@@ -189,6 +190,7 @@ function EworksCalculateContent() {
   const autosaveInFlightKeyRef = useRef<string | null>(null);
   const lastSavedStep2Ref = useRef<string | null>(null);
   const lastSavedUiRef = useRef<string | null>(null);
+  const questionnaireActionsRef = useRef<QuestionnaireStepActions | null>(null);
   const isDev = process.env.NODE_ENV === "development";
 
   const form = useForm<QuestionnaireFormValues>({
@@ -218,14 +220,6 @@ function EworksCalculateContent() {
         data.session_token,
       );
       const questionnaire = step2ToQuestionnaire(data.step2, data.step1.trade_name, undefined, data.step1);
-      // Seed link-level congestion/travel into work 0 only when no saved step2 charges exist
-      if (!data.step2?.works?.[0]?.congestion_required && data.step1.congestion_required) {
-        questionnaire.works[0].congestion_required = true;
-        questionnaire.works[0].congestion_amount = Number(data.step1.congestion_amount ?? 0);
-      }
-      if (!data.step2?.works?.[0]?.travel_charge && Number(data.step1.travel ?? 0) > 0) {
-        questionnaire.works[0].travel_charge = Number(data.step1.travel ?? 0);
-      }
       reset(questionnaire);
       restoreUiState(data.ui_state, { setStep, setMaxReachableStep, setSubmitted });
       autoSaveReady.current = false;
@@ -318,7 +312,7 @@ function EworksCalculateContent() {
 
   const autosave = useCallback(
     async (formValues: QuestionnaireFormValues) => {
-      if (!session || !autoSaveReady.current || step === 0 || step === 2 || submitting) return;
+      if (!session || !autoSaveReady.current || step === 2 || submitting) return;
       const step2 = questionnaireToStep2(coerceQuestionnaireValues(formValues));
       const step2Key = JSON.stringify(step2);
       if (step2Key === lastSavedStep2Ref.current) return;
@@ -370,7 +364,7 @@ function EworksCalculateContent() {
   }, [session, step, maxReachableStep, submitted]);
 
   useEffect(() => {
-    if (!session || step === 0 || step === 2 || submitting) return;
+    if (!session || step === 2 || submitting) return;
     const timer = window.setTimeout(() => {
       void autosave(getValues());
     }, 800);
@@ -450,9 +444,18 @@ function EworksCalculateContent() {
   );
 
   const validateCurrentStep = useCallback(async () => {
-    if (step === 0 || step === 2) return true;
+    if (step === 2) return true;
+    if (step === 0) {
+      const valid = await trigger([...CHARGES_FIELDS]);
+      if (!valid) {
+        setValidationError(
+          firstErrorMessage(form.formState.errors) ?? "Please complete all required additional charge fields.",
+        );
+      }
+      return valid;
+    }
     if (step === 1) {
-      const valid = await trigger([...QUESTIONNAIRE_FIELDS]);
+      const valid = await trigger(["works"]);
       if (!valid) {
         const currentErrors = form.formState.errors;
         setValidationError(
@@ -480,6 +483,9 @@ function EworksCalculateContent() {
     setFocusWorkIndex(null);
     const valid = await validateCurrentStep();
     if (!valid) return;
+    if (step === 0) {
+      await autosave(getValues());
+    }
     setStep((current) => {
       const next = Math.min(current + 1, EWORKS_STEPS.length - 1);
       setMaxReachableStep((max) => Math.max(max, next));
@@ -547,7 +553,7 @@ function EworksCalculateContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-slate-50">
         <EworksLoadingScreen />
       </div>
     );
@@ -603,13 +609,13 @@ function EworksCalculateContent() {
       }
       badge={
         session.resumed ? (
-          <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-optimal-orange/15 px-3 py-1 text-xs font-medium text-optimal-orange">
-            <span className="size-1.5 rounded-full bg-optimal-orange" />
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+            <span className="size-1.5 rounded-full bg-blue-600" />
             Previous progress restored
           </p>
         ) : undefined
       }
-      saveStatus={step > 0 && step < 2 ? <EworksSaveStatus status={saveStatus} /> : undefined}
+      saveStatus={undefined}
       stepIndicator={
         <EworksStepIndicator
           steps={EWORKS_STEPS}
@@ -625,9 +631,26 @@ function EworksCalculateContent() {
               {validationError ?? calcError}
             </div>
           )}
+          {step === 0 || step === 1 ? (
+            <div className={cn("flex items-center justify-between gap-3", step === 1 && "border-b border-slate-100 pb-3")}>
+              {step === 1 ? (
+                <EworksButton
+                  variant="secondary"
+                  className="min-h-[44px] flex-1 sm:flex-none"
+                  onClick={() => questionnaireActionsRef.current?.addWork()}
+                  data-testid="add-work-button"
+                >
+                  + Add Work
+                </EworksButton>
+              ) : (
+                <span />
+              )}
+              <EworksSaveStatus status={saveStatus} />
+            </div>
+          ) : null}
           <div className="flex gap-3">
             <EworksButton variant="secondary" className="flex-1 sm:flex-none sm:min-w-[120px]" disabled={step === 0} onClick={goBack}>
-              Back
+              {step === 1 ? "Previous" : "Back"}
             </EworksButton>
             {step < 1 && (
               <EworksButton className="flex-[2] sm:flex-1" onClick={() => void goNext()}>
@@ -644,7 +667,20 @@ function EworksCalculateContent() {
       }
     >
       <EworksCard key={step}>
-        {step === 0 && <EworksEstimationFormStep step1={step1} resolved={session.resolved} onFindingsReportChange={handleFindingsReportChange} findingsReportSaving={findingsReportSaving} submitted={submitted} />}
+        {step === 0 && (
+          <EworksEstimationFormStep
+            step1={step1}
+            resolved={session.resolved}
+            control={control}
+            register={register}
+            watch={watch}
+            setValue={setValue}
+            errors={errors}
+            onFindingsReportChange={handleFindingsReportChange}
+            findingsReportSaving={findingsReportSaving}
+            submitted={submitted}
+          />
+        )}
 
         {step === 1 && (
           <EworksQuestionnaireStep
@@ -662,6 +698,9 @@ function EworksCalculateContent() {
             uploading={uploading}
             deletingAttachmentId={deletingAttachmentId}
             focusWorkIndex={focusWorkIndex}
+            onActionsReady={(actions) => {
+              questionnaireActionsRef.current = actions;
+            }}
           />
         )}
 
@@ -687,7 +726,7 @@ export default function EworksCalculatePage() {
       <EworksInternalNavBar />
       <Suspense
         fallback={
-          <div className="min-h-screen bg-gray-50">
+          <div className="min-h-screen bg-slate-50">
             <EworksLoadingScreen />
           </div>
         }

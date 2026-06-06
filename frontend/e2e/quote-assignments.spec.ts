@@ -488,6 +488,32 @@ test.describe("Quote assignments", () => {
     expect(page.url()).toContain("token=engineer-session-token");
   });
 
+  test("public assignment start-estimate sends no Authorization header", async ({ page }) => {
+    let requestHeaders: Record<string, string> = {};
+    await page.route("**/api/v1/quote-assignments/public/public-assignment-token-abc/start-estimate", async (route) => {
+      requestHeaders = route.request().headers();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            session_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            session_token: "public-session-token",
+            resume_url:
+              "/eworks/calculate?session_id=cccccccc-cccc-cccc-cccc-cccccccccccc&token=public-session-token",
+            assignment_id: 2,
+            quote_ref: "Q-101",
+          },
+        }),
+      });
+    });
+
+    await page.goto("/assignment/public-assignment-token-abc");
+    await page.waitForURL("**/eworks/calculate?session_id=**");
+    expect(requestHeaders.authorization).toBeUndefined();
+  });
+
   test("public assignment link auto-redirects to estimate questionnaire", async ({ page }) => {
     let startEstimateCalled = false;
     await page.route("**/api/v1/quote-assignments/public/public-assignment-token-abc/start-estimate", async (route) => {

@@ -102,13 +102,13 @@ export function ProductCombobox({
         <div
           id={listboxId}
           role="listbox"
-          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
         >
           <button
             type="button"
             role="option"
             aria-selected={selectedProductId == null}
-            className="block w-full px-3 py-2 text-left text-sm text-optimal-muted hover:bg-gray-50"
+            className="block w-full px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
             onClick={() => {
               onSelect(null);
               setQuery("");
@@ -131,8 +131,8 @@ export function ProductCombobox({
                 role="option"
                 aria-selected={product.id === selectedProductId}
                 className={cn(
-                  "block w-full px-3 py-2 text-left text-sm hover:bg-gray-50",
-                  product.id === selectedProductId && "bg-optimal-orange/10 font-medium",
+                  "block w-full px-3 py-2 text-left text-sm hover:bg-slate-50",
+                  product.id === selectedProductId && "border border-blue-200 bg-blue-50 font-medium text-blue-700",
                 )}
                 onClick={() => {
                   onSelect(product);

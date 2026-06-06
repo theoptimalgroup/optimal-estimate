@@ -31,7 +31,6 @@ export default function ManagerReviewSessionPage({
       listHref="/manager/review"
       onUnlockSuccess={handleUnlockSuccess}
       shell="embedded"
-      enableClientLink
     />
   );
 }

@@ -278,6 +278,10 @@ class Step2Snapshot(BaseModel):
     parking_rate_per_hour: Decimal | None = None
     parking_hours: Decimal | None = None
     parking_fixed_amount: Decimal | None = None
+    parking_vehicles: int = 1
+    parking_notes: str | None = None
+    parking_latitude: Decimal | None = None
+    parking_longitude: Decimal | None = None
     congestion_required: bool = False
     congestion_amount: Decimal = Decimal("0")
     travel_charge: Decimal = Decimal("0")
@@ -369,6 +373,19 @@ class CalculationSessionFromLinkResponse(BaseModel):
     resumed: bool = False
 
 
+class ManualCalculationSessionRequest(BaseModel):
+    quote_ref: str | None = Field(default=None, max_length=255)
+    job_ref: str | None = Field(default=None, max_length=255)
+    client_name: str | None = Field(default=None, max_length=255)
+    trade_name: str | None = Field(default=None, max_length=255)
+
+
+class ManualCalculationSessionResponse(BaseModel):
+    session_id: UUID
+    session_token: str
+    resume_url: str
+
+
 class UpdateCalculationSessionRequest(BaseModel):
     step2: Step2Snapshot | None = None
     ui_state: SessionUiState | None = None
@@ -440,6 +457,42 @@ class DashboardWorkItem(BaseModel):
     details: WorkBlockSnapshot | None = None
 
 
+def quote_additional_charge_lines(step2: Step2Snapshot) -> list[str]:
+    """Format quote-level additional charges for review surfaces. Work-level charges are ignored."""
+    lines: list[str] = []
+    if step2.parking_required:
+        vehicles = max(1, step2.parking_vehicles or 1)
+        vehicle_suffix = f" × {vehicles} vehicles" if vehicles > 1 else ""
+        if (step2.parking_type or "fixed").strip().lower() == "hourly":
+            lines.append(
+                f"Parking: £{step2.parking_rate_per_hour or 0}/hr × {step2.parking_hours or 0} hrs{vehicle_suffix}"
+            )
+        else:
+            lines.append(f"Parking: £{step2.parking_fixed_amount or 0}{vehicle_suffix}")
+        if step2.parking_latitude is not None and step2.parking_longitude is not None:
+            lines.append(
+                f"GPS snapshot: https://www.google.com/maps?q={step2.parking_latitude},{step2.parking_longitude}"
+            )
+    if step2.congestion_required and step2.congestion_amount > 0:
+        lines.append(f"Congestion: £{step2.congestion_amount}")
+    if step2.travel_charge > 0:
+        lines.append(f"Travel: £{step2.travel_charge}")
+    if step2.other_charge > 0:
+        reason = (step2.other_charge_reason or "").strip()
+        suffix = f" ({reason})" if reason else ""
+        lines.append(f"Other: £{step2.other_charge}{suffix}")
+    if step2.parking_notes and step2.parking_notes.strip():
+        lines.append(f"Parking notes: {step2.parking_notes.strip()}")
+    return lines
+
+
+class DashboardQuoteSummaryBreakdown(BaseModel):
+    works_subtotal: Decimal
+    additional_charges: Decimal
+    vat_total: Decimal
+    final_total: Decimal
+
+
 class DashboardQuoteItem(BaseModel):
     session_id: UUID
     session_token: str
@@ -450,6 +503,8 @@ class DashboardQuoteItem(BaseModel):
     submitted_at: datetime
     final_total: Decimal | None = None
     internal_notes: str | None = None
+    additional_charges: list[str] = Field(default_factory=list)
+    breakdown: DashboardQuoteSummaryBreakdown | None = None
     works: list[DashboardWorkItem] = Field(default_factory=list)
     acceptance: QuoteAcceptanceStatusRead = Field(default_factory=QuoteAcceptanceStatusRead)
 
@@ -522,17 +577,26 @@ def step2_to_calculation_inputs(
         parking_rate_per_hour=step2.parking_rate_per_hour,
         parking_hours=step2.parking_hours,
         parking_fixed_amount=step2.parking_fixed_amount,
+        parking_vehicles=max(1, step2.parking_vehicles or 1),
         congestion_required=congestion_required,
         congestion_amount=congestion_amount,
         travel_charge=travel,
         other_charge=step2.other_charge,
         other_charge_reason=step2.other_charge_reason,
-        ulez_required=step2.ulez_required,
-        ulez_amount=step2.ulez_amount,
-        waste_disposal_required=step2.waste_disposal_required,
-        waste_disposal_amount=step2.waste_disposal_amount,
     )
     return [labour], materials, charges
+
+
+def quote_parking_raw(step2: Step2Snapshot) -> Decimal:
+    """Raw quote-level parking cost, including vehicle multiplier (same rule as work_parking_raw)."""
+    if not step2.parking_required:
+        return Decimal("0")
+    vehicles = max(1, step2.parking_vehicles or 1)
+    if step2.parking_type == "hourly" and step2.parking_rate_per_hour and step2.parking_hours:
+        return step2.parking_rate_per_hour * step2.parking_hours * Decimal(vehicles)
+    if step2.parking_fixed_amount:
+        return step2.parking_fixed_amount * Decimal(vehicles)
+    return Decimal("0")
 
 
 def work_parking_raw(block: WorkBlockSnapshot) -> Decimal:
@@ -553,39 +617,29 @@ def aggregate_work_charges(
     *,
     step2: Step2Snapshot | None = None,
 ) -> ChargeInput:
-    """Aggregate per-work charges from individual WorkBlockSnapshot entries.
+    """Return quote-level additional charges from the Step2 snapshot.
 
-    Falls back to step1 link-level values when no per-work values are set.
+    Additional charges are quote-level only. Work-level charges are intentionally not supported.
+    Legacy work-level charge fields on WorkBlockSnapshot entries are ignored.
+    ULEZ and waste disposal fields on Step2Snapshot are ignored (hidden from UI).
     """
-    has_parking = any(b.parking_required for b in works)
-    parking_total = sum((work_parking_raw(b) for b in works), Decimal("0"))
-    has_congestion = any(b.congestion_required for b in works) or step1.congestion_required
-    congestion_total = sum((b.congestion_amount for b in works if b.congestion_required), Decimal("0"))
-    if not congestion_total and step1.congestion_required:
-        congestion_total = step1.congestion_amount
-    travel_total = sum((b.travel_charge for b in works), Decimal("0")) or step1.travel
-    other_total = sum((b.other_charge for b in works), Decimal("0"))
-    other_reasons = " / ".join(
-        b.other_charge_reason for b in works if b.other_charge_reason and b.other_charge_reason.strip()
-    )
-    ulez_required = step2.ulez_required if step2 else False
-    ulez_total = step2.ulez_amount if step2 and step2.ulez_required else Decimal("0")
-    waste_required = step2.waste_disposal_required if step2 else False
-    waste_total = step2.waste_disposal_amount if step2 and step2.waste_disposal_required else Decimal("0")
-
+    _ = works  # retained for call-site compatibility; work blocks no longer contribute charges
+    snapshot = step2 or Step2Snapshot()
+    congestion_required = snapshot.congestion_required or step1.congestion_required
+    congestion_amount = snapshot.congestion_amount if snapshot.congestion_amount > 0 else step1.congestion_amount
+    travel = snapshot.travel_charge if snapshot.travel_charge > 0 else step1.travel
     return ChargeInput(
-        parking_required=has_parking,
-        parking_type="fixed" if has_parking else None,
-        parking_fixed_amount=parking_total if has_parking else None,
-        congestion_required=has_congestion,
-        congestion_amount=congestion_total,
-        travel_charge=travel_total,
-        other_charge=other_total,
-        other_charge_reason=other_reasons or None,
-        ulez_required=ulez_required,
-        ulez_amount=ulez_total,
-        waste_disposal_required=waste_required,
-        waste_disposal_amount=waste_total,
+        parking_required=snapshot.parking_required,
+        parking_type=snapshot.parking_type if snapshot.parking_required else None,
+        parking_rate_per_hour=snapshot.parking_rate_per_hour,
+        parking_hours=snapshot.parking_hours,
+        parking_fixed_amount=snapshot.parking_fixed_amount,
+        parking_vehicles=max(1, snapshot.parking_vehicles or 1),
+        congestion_required=congestion_required,
+        congestion_amount=congestion_amount,
+        travel_charge=travel,
+        other_charge=snapshot.other_charge,
+        other_charge_reason=snapshot.other_charge_reason,
     )
 
 
@@ -599,6 +653,7 @@ def step2_session_charges(step1: Step1Snapshot, step2: Step2Snapshot) -> ChargeI
         parking_rate_per_hour=step2.parking_rate_per_hour,
         parking_hours=step2.parking_hours,
         parking_fixed_amount=step2.parking_fixed_amount,
+        parking_vehicles=max(1, step2.parking_vehicles or 1),
         congestion_required=congestion_required,
         congestion_amount=congestion_amount,
         travel_charge=travel,

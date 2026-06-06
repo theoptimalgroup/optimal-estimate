@@ -70,6 +70,69 @@ class DashboardQuoteGroupItem(BaseModel):
     sessions: list[DashboardQuoteGroupSessionItem] = Field(default_factory=list)
 
 
+class DashboardQuoteGroupComparisonChargeLine(BaseModel):
+    label: str
+    amount: Decimal
+
+
+class DashboardQuoteGroupComparisonWorkBreakdown(BaseModel):
+    product_name: str | None = None
+    product_code: str | None = None
+    scope_preview: str | None = None
+    labour_subtotal: Decimal | None = None
+    materials_subtotal: Decimal | None = None
+    work_subtotal: Decimal | None = None
+
+
+class DashboardQuoteGroupComparisonSummary(BaseModel):
+    final_total: Decimal | None = None
+    works_subtotal: Decimal | None = None
+    labour_subtotal: Decimal | None = None
+    materials_subtotal: Decimal | None = None
+    additional_charges_total: Decimal | None = None
+    vat_total: Decimal | None = None
+    vat_rate: Decimal | None = None
+    scope_preview: str | None = None
+    product_preview: str | None = None
+    works: list[DashboardQuoteGroupComparisonWorkBreakdown] = Field(default_factory=list)
+    additional_charges: list[DashboardQuoteGroupComparisonChargeLine] = Field(default_factory=list)
+
+
+class DashboardQuoteJobAssignmentDecision(BaseModel):
+    id: int
+    selected_session_id: UUID
+    assignee_name: str
+    assignee_email: str | None = None
+    assignment_id: int | None = None
+    assigned_at: datetime
+    assigned_by_name: str | None = None
+    assigned_by_email: str | None = None
+
+
+class DashboardQuoteGroupAssignmentSubmissionRow(BaseModel):
+    assignment_id: int | None = None
+    assignment_type: str
+    assignee_kind: str
+    assignee_name: str
+    assignee_email: str | None = None
+    assignment_status: str
+    assigned_at: datetime | None = None
+    started_at: datetime | None = None
+    submitted_at: datetime | None = None
+    linked_session_id: UUID | None = None
+    submitted_by_name: str | None = None
+    submitted_by_email: str | None = None
+    submitted_by_role: str | None = None
+    final_total: Decimal | None = None
+    works_count: int | None = None
+    is_latest: bool = False
+    can_view_details: bool = False
+    can_reopen: bool = False
+    can_assign_job: bool = False
+    is_job_assigned: bool = False
+    comparison_summary: DashboardQuoteGroupComparisonSummary | None = None
+
+
 class DashboardQuoteGroupDetailItem(DashboardQuoteGroupItem):
     review_status: str = "pending"
     assignment_summary: DashboardQuoteGroupAssignmentSummary = Field(
@@ -77,6 +140,8 @@ class DashboardQuoteGroupDetailItem(DashboardQuoteGroupItem):
     )
     assignments: list[DashboardQuoteGroupAssignmentItem] = Field(default_factory=list)
     sessions: list[DashboardQuoteGroupSessionDetailItem] = Field(default_factory=list)
+    assignment_submissions: list[DashboardQuoteGroupAssignmentSubmissionRow] = Field(default_factory=list)
+    job_assignment_decision: DashboardQuoteJobAssignmentDecision | None = None
 
 
 class DashboardQuoteGroupsResponse(BaseModel):

@@ -25,6 +25,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://estimate:estimate_dev@postgres:5432/estimate_tool
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-dev}
     ports:
       - "8000:8000"
     volumes:
@@ -44,6 +45,10 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_AUTH_PROVIDER: ${NEXT_PUBLIC_AUTH_PROVIDER:-dev}
+        NEXT_PUBLIC_AZURE_TENANT_ID: ${NEXT_PUBLIC_AZURE_TENANT_ID:-}
+        NEXT_PUBLIC_AZURE_CLIENT_ID: ${NEXT_PUBLIC_AZURE_CLIENT_ID:-}
+        NEXT_PUBLIC_AZURE_API_SCOPE: ${NEXT_PUBLIC_AZURE_API_SCOPE:-}
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       HOSTNAME: "0.0.0.0"

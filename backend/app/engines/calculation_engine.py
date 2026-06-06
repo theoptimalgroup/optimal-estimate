@@ -146,14 +146,19 @@ def calculate_charges(charges: ChargeInput | None) -> ChargeResult:
     breakdown: list[tuple[str, str, Decimal]] = []
     parking_total = Decimal("0")
     if charges.parking_required:
+        # Parking cost multiplies by vehicle count (same rule as work_parking_raw / quote_parking_raw).
+        vehicles = Decimal(max(1, charges.parking_vehicles or 1))
         if charges.parking_type == "hourly":
             rate = charges.parking_rate_per_hour or Decimal("0")
             hours = charges.parking_hours or Decimal("0")
-            parking_total = round_money(rate * hours)
-            breakdown.append(("Parking", f"{rate} × {hours}", parking_total))
+            parking_total = round_money(rate * hours * vehicles)
+            vehicle_note = f" × {int(vehicles)} vehicles" if vehicles > 1 else ""
+            breakdown.append(("Parking", f"{rate} × {hours}{vehicle_note}", parking_total))
         elif charges.parking_type == "fixed":
-            parking_total = round_money(charges.parking_fixed_amount or Decimal("0"))
-            breakdown.append(("Parking", f"Fixed {parking_total}", parking_total))
+            base = charges.parking_fixed_amount or Decimal("0")
+            parking_total = round_money(base * vehicles)
+            vehicle_note = f" × {int(vehicles)} vehicles" if vehicles > 1 else ""
+            breakdown.append(("Parking", f"Fixed {base}{vehicle_note}", parking_total))
         elif charges.parking_type == "included":
             breakdown.append(("Parking", "Included", Decimal("0")))
         elif charges.parking_type == "not_chargeable":

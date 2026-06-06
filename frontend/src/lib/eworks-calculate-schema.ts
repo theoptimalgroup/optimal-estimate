@@ -129,6 +129,51 @@ export function supplierMaterialsTotal(supplier: MaterialSupplier): number {
   return linksTotal + (Number(supplier.delivery_charge) || 0);
 }
 
+export function formatCurrency(amount: number): string {
+  return `£${amount.toFixed(2)}`;
+}
+
+export function supplierMaterialsSubtotal(suppliers: MaterialSupplier[] | undefined): number {
+  return (suppliers ?? []).reduce((sum, supplier) => sum + supplierMaterialsTotal(supplier), 0);
+}
+
+export function shelfMaterialsTotal(rows: WorkBlockFormValues["shelf_materials_rows"] | undefined): number {
+  return (rows ?? []).reduce((sum, row) => {
+    const qty = Number(row.quantity) || 0;
+    const cost = Number(row.cost) || 0;
+    return sum + qty * cost;
+  }, 0);
+}
+
+export function grandTotalMaterials(
+  work: Pick<WorkBlockFormValues, "materials_to_order" | "shelf_materials_rows">,
+): number {
+  return supplierMaterialsSubtotal(work.materials_to_order) + shelfMaterialsTotal(work.shelf_materials_rows);
+}
+
+export function workMaterialsSummary(
+  work: Pick<WorkBlockFormValues, "materials_to_order" | "shelf_materials_rows">,
+) {
+  const suppliers = work.materials_to_order ?? [];
+  const orderTotal = suppliers.reduce((sum, supplier) => sum + supplierMaterialsTotal(supplier), 0);
+  const shelfTotal = shelfMaterialsTotal(work.shelf_materials_rows);
+  const total = orderTotal + shelfTotal;
+  const hasSupplierContent = suppliers.some(
+    (supplier) =>
+      Boolean(supplier.supplier_name?.trim()) ||
+      supplier.links.some((row) => Boolean(row.link?.trim()) || Number(row.cost) > 0),
+  );
+  const hasShelfContent = (work.shelf_materials_rows ?? []).some(
+    (row) => Boolean(row.link?.trim()) || Number(row.cost) > 0,
+  );
+
+  return {
+    supplierCount: suppliers.length,
+    total,
+    hasMaterials: total > 0 || hasSupplierContent || hasShelfContent,
+  };
+}
+
 function toNumericValue(value: unknown): number | undefined {
   if (value === "" || value === null || value === undefined) return undefined;
   if (typeof value === "number") return Number.isNaN(value) ? undefined : value;
@@ -192,21 +237,6 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
     labour_needed: work.labour_required ? (toNumericValue(work.labour_needed) as number) : 0,
     labour_time_value: work.labour_required ? (toNumericValue(work.labour_time_value) as number) : 0,
     markup_value: Number.isFinite(Number(work.markup_value)) ? Number(work.markup_value) : 20,
-    parking_required: Boolean(work.parking_required),
-    parking_type: work.parking_type === "hourly" ? "hourly" : "fixed",
-    parking_fixed_amount: toNumericValue(work.parking_fixed_amount) ?? 0,
-    parking_rate_per_hour: toNumericValue(work.parking_rate_per_hour) ?? 0,
-    parking_hours: toNumericValue(work.parking_hours) ?? 0,
-    parking_vehicles: Math.max(1, Math.floor(toNumericValue(work.parking_vehicles) ?? 1)),
-    parking_notes: toStringValue(work.parking_notes),
-    parking_same_location_as_work1: Boolean(work.parking_same_location_as_work1),
-    parking_latitude: toNumericValue(work.parking_latitude) ?? null,
-    parking_longitude: toNumericValue(work.parking_longitude) ?? null,
-    congestion_required: Boolean(work.congestion_required),
-    congestion_amount: toNumericValue(work.congestion_amount) ?? 0,
-    travel_charge: toNumericValue(work.travel_charge) ?? 0,
-    other_charge: toNumericValue(work.other_charge) ?? 0,
-    other_charge_reason: toStringValue(work.other_charge_reason),
   };
 }
 
@@ -279,12 +309,19 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
       });
     }
   }
+}
+
+function validateQuoteCharges(data: z.infer<typeof quoteChargesFieldsSchema>, ctx: z.RefinementCtx) {
   if (data.parking_required && data.parking_type === "hourly") {
     if (!data.parking_hours || data.parking_hours <= 0) {
-      ctx.addIssue({ code: "custom", message: "Parking hours required for hourly parking", path: [path("parking_hours")] });
+      ctx.addIssue({ code: "custom", message: "Parking hours required for hourly parking", path: ["parking_hours"] });
     }
     if (!data.parking_rate_per_hour || data.parking_rate_per_hour <= 0) {
-      ctx.addIssue({ code: "custom", message: "Parking rate required for hourly parking", path: [path("parking_rate_per_hour")] });
+      ctx.addIssue({
+        code: "custom",
+        message: "Parking rate required for hourly parking",
+        path: ["parking_rate_per_hour"],
+      });
     }
   }
   if (data.parking_required) {
@@ -293,23 +330,23 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
       ctx.addIssue({
         code: "custom",
         message: "Number of vehicles must be at least 1",
-        path: [path("parking_vehicles")],
+        path: ["parking_vehicles"],
       });
     }
   }
   const lat = toNumericValue(data.parking_latitude);
   const lng = toNumericValue(data.parking_longitude);
-  if (lat !== undefined && (lat < -90 || lat > 90)) {
-    ctx.addIssue({ code: "custom", message: "Latitude must be between -90 and 90", path: [path("parking_latitude")] });
+  if (lat !== undefined && lat !== null && (lat < -90 || lat > 90)) {
+    ctx.addIssue({ code: "custom", message: "Latitude must be between -90 and 90", path: ["parking_latitude"] });
   }
-  if (lng !== undefined && (lng < -180 || lng > 180)) {
-    ctx.addIssue({ code: "custom", message: "Longitude must be between -180 and 180", path: [path("parking_longitude")] });
+  if (lng !== undefined && lng !== null && (lng < -180 || lng > 180)) {
+    ctx.addIssue({ code: "custom", message: "Longitude must be between -180 and 180", path: ["parking_longitude"] });
   }
   if (data.other_charge > 0 && !data.other_charge_reason?.trim()) {
     ctx.addIssue({
       code: "custom",
-      message: "Reason required when other charge is greater than 0",
-      path: [path("other_charge_reason")],
+      message: "Notes required when other charge is greater than 0",
+      path: ["other_charge_reason"],
     });
   }
 }
@@ -340,19 +377,24 @@ export const workBlockFieldsSchema = z.object({
   findings: z.string().optional(),
   attachments: z.array(attachmentMetaSchema),
   markup_value: z.number({ error: "Enter markup percentage" }).min(0),
-  // Per-work charges
+});
+
+export const quoteChargesFieldsSchema = z.object({
   parking_required: z.boolean(),
   parking_type: z.enum(["fixed", "hourly"]),
   parking_fixed_amount: z.number().min(0),
   parking_rate_per_hour: z.number().min(0),
   parking_hours: z.number().min(0),
   parking_vehicles: z.number().int().min(1),
-  parking_notes: z.string().optional(),
-  parking_same_location_as_work1: z.boolean().optional(),
   parking_latitude: z.number().min(-90).max(90).nullable().optional(),
   parking_longitude: z.number().min(-180).max(180).nullable().optional(),
+  parking_notes: z.string().optional(),
   congestion_required: z.boolean(),
   congestion_amount: z.number({ error: "Enter congestion amount" }).min(0),
+  ulez_required: z.boolean(),
+  ulez_amount: z.number().min(0),
+  waste_disposal_required: z.boolean(),
+  waste_disposal_amount: z.number().min(0),
   travel_charge: z.number({ error: "Enter travel charge" }).min(0),
   other_charge: z.number({ error: "Enter other charge" }).min(0),
   other_charge_reason: z.string().optional(),
@@ -366,8 +408,10 @@ export const questionnaireSchema = z
   .object({
     works: z.array(workBlockSchema).min(1, "At least one work block is required"),
   })
+  .merge(quoteChargesFieldsSchema)
   .superRefine((data, ctx) => {
     data.works.forEach((work, index) => validateWorkBlock(work, ctx, `works.${index}`));
+    validateQuoteCharges(data, ctx);
   });
 
 export type WorkBlockFormValues = z.infer<typeof workBlockSchema>;
@@ -376,10 +420,6 @@ export type MaterialOrderRow = z.infer<typeof materialOrderRowSchema>;
 export type MaterialLinkRow = z.infer<typeof materialLinkRowSchema>;
 export type MaterialSupplierFormValues = z.infer<typeof materialSupplierSchema>;
 export type AttachmentMeta = z.infer<typeof attachmentMetaSchema>;
-
-function toNumericValueOr(value: unknown, fallback: number): number {
-  return toNumericValue(value) ?? fallback;
-}
 
 /** Stable numeric defaults for autosave while the user is mid-edit. */
 function persistenceNumeric(value: unknown, fallback: number): number {
@@ -392,6 +432,7 @@ function persistenceNumeric(value: unknown, fallback: number): number {
 export function coerceQuestionnaireValues(values: QuestionnaireFormValues): QuestionnaireFormValues {
   return {
     works: values.works.map((work) => normalizeWorkBlockValues(work)),
+    ...normalizeQuoteCharges(values),
   };
 }
 
@@ -448,30 +489,131 @@ export function defaultWorkBlockValues(tradeName: string): WorkBlockFormValues {
     findings: "",
     attachments: [],
     markup_value: 20,
+  });
+}
+
+export function defaultQuoteCharges(): z.infer<typeof quoteChargesFieldsSchema> {
+  return {
     parking_required: false,
     parking_type: "fixed",
     parking_fixed_amount: 0,
     parking_rate_per_hour: 0,
     parking_hours: 0,
     parking_vehicles: 1,
-    parking_notes: "",
-    parking_same_location_as_work1: false,
     parking_latitude: null,
     parking_longitude: null,
+    parking_notes: "",
     congestion_required: false,
     congestion_amount: 0,
+    ulez_required: false,
+    ulez_amount: 0,
+    waste_disposal_required: false,
+    waste_disposal_amount: 0,
     travel_charge: 0,
     other_charge: 0,
     other_charge_reason: "",
+  };
+}
+
+function normalizeQuoteCharges(
+  values: Partial<z.infer<typeof quoteChargesFieldsSchema>>,
+): z.infer<typeof quoteChargesFieldsSchema> {
+  const defaults = defaultQuoteCharges();
+  return {
+    parking_required: Boolean(values.parking_required),
+    parking_type: values.parking_type === "hourly" ? "hourly" : "fixed",
+    parking_fixed_amount: toNumericValue(values.parking_fixed_amount) ?? defaults.parking_fixed_amount,
+    parking_rate_per_hour: toNumericValue(values.parking_rate_per_hour) ?? defaults.parking_rate_per_hour,
+    parking_hours: toNumericValue(values.parking_hours) ?? defaults.parking_hours,
+    parking_vehicles: Math.max(1, Math.floor(toNumericValue(values.parking_vehicles) ?? defaults.parking_vehicles)),
+    parking_latitude: toNumericValue(values.parking_latitude) ?? null,
+    parking_longitude: toNumericValue(values.parking_longitude) ?? null,
+    parking_notes: toStringValue(values.parking_notes),
+    congestion_required: Boolean(values.congestion_required),
+    congestion_amount: toNumericValue(values.congestion_amount) ?? defaults.congestion_amount,
+    // ULEZ and waste disposal are hidden from the UI; always zero for new calculations.
+    ulez_required: false,
+    ulez_amount: 0,
+    waste_disposal_required: false,
+    waste_disposal_amount: 0,
+    travel_charge: toNumericValue(values.travel_charge) ?? defaults.travel_charge,
+    other_charge: toNumericValue(values.other_charge) ?? defaults.other_charge,
+    other_charge_reason: toStringValue(values.other_charge_reason),
+  };
+}
+
+function quoteChargesFromStep2(
+  step2: Step2Snapshot | null | undefined,
+  step1?: { congestion_required?: boolean; congestion_amount?: number | string; travel?: number | string; parking_notes?: string | null; access_notes?: string | null } | null,
+): z.infer<typeof quoteChargesFieldsSchema> {
+  const defaults = defaultQuoteCharges();
+  if (!step2) {
+    const charges = { ...defaults };
+    if (step1?.congestion_required) {
+      charges.congestion_required = true;
+      charges.congestion_amount = Number(step1.congestion_amount ?? 0);
+    }
+    if (Number(step1?.travel ?? 0) > 0) {
+      charges.travel_charge = Number(step1?.travel ?? 0);
+    }
+    charges.parking_notes = mergeParkingAccessNotes(step1?.parking_notes, step1?.access_notes);
+    return charges;
+  }
+  return normalizeQuoteCharges({
+    parking_required: step2.parking_required ?? false,
+    parking_type: (step2.parking_type as "fixed" | "hourly") ?? "fixed",
+    parking_fixed_amount: step2.parking_fixed_amount ?? 0,
+    parking_rate_per_hour: step2.parking_rate_per_hour ?? 0,
+    parking_hours: step2.parking_hours ?? 0,
+    parking_vehicles: Math.max(1, Number(step2.parking_vehicles ?? 1)),
+    parking_latitude: step2.parking_latitude != null ? Number(step2.parking_latitude) : null,
+    parking_longitude: step2.parking_longitude != null ? Number(step2.parking_longitude) : null,
+    parking_notes: mergeParkingAccessNotes(step2.parking_notes as string | null | undefined, step1?.access_notes),
+    congestion_required: step2.congestion_required ?? step1?.congestion_required ?? false,
+    congestion_amount:
+      Number(step2.congestion_amount ?? 0) > 0
+        ? step2.congestion_amount
+        : step1?.congestion_required
+          ? step1.congestion_amount
+          : 0,
+    // Legacy step2 may contain ULEZ/waste; hidden from UI and excluded from new calculations.
+    ulez_required: false,
+    ulez_amount: 0,
+    waste_disposal_required: false,
+    waste_disposal_amount: 0,
+    travel_charge: Number(step2.travel_charge ?? 0) > 0 ? step2.travel_charge : step1?.travel ?? 0,
+    other_charge: step2.other_charge ?? 0,
+    other_charge_reason: step2.other_charge_reason ?? "",
   });
 }
 
 export const defaultQuestionnaireValues: QuestionnaireFormValues = {
   works: [defaultWorkBlockValues("")],
+  ...defaultQuoteCharges(),
 };
 
-export const CHARGES_FIELDS: never[] = [];
-export const QUESTIONNAIRE_FIELDS = ["works"] as const;
+export const CHARGES_FIELDS = [
+  "parking_required",
+  "parking_type",
+  "parking_fixed_amount",
+  "parking_rate_per_hour",
+  "parking_hours",
+  "parking_vehicles",
+  "parking_latitude",
+  "parking_longitude",
+  "parking_notes",
+  "congestion_required",
+  "congestion_amount",
+  "ulez_required",
+  "ulez_amount",
+  "waste_disposal_required",
+  "waste_disposal_amount",
+  "travel_charge",
+  "other_charge",
+  "other_charge_reason",
+] as const satisfies ReadonlyArray<keyof QuestionnaireFormValues>;
+
+export const QUESTIONNAIRE_FIELDS = ["works", ...CHARGES_FIELDS] as const;
 
 export function shelfRowsFromLegacy(
   rows: Array<{ link?: string | null; quantity: number | string; cost: number | string }> | undefined,
@@ -561,80 +703,13 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
     labour_type: primaryUnit === "hours" ? "hourly" : "day",
     hours: primaryUnit === "hours" ? primaryValue : 0,
     days: primaryUnit === "days" ? primaryValue : 0,
-    // Per-work charge fields (stored in snapshot for round-trip restore)
-    parking_required: work.parking_required,
-    parking_type: work.parking_type,
-    parking_fixed_amount: persistenceNumeric(work.parking_fixed_amount, 0),
-    parking_rate_per_hour: persistenceNumeric(work.parking_rate_per_hour, 0),
-    parking_hours: persistenceNumeric(work.parking_hours, 0),
-    parking_vehicles: Math.max(1, Math.floor(persistenceNumeric(work.parking_vehicles, 1))),
-    parking_notes: work.parking_notes?.trim() || null,
-    parking_same_location_as_work1: Boolean(work.parking_same_location_as_work1),
-    parking_latitude: work.parking_latitude ?? null,
-    parking_longitude: work.parking_longitude ?? null,
-    congestion_required: work.congestion_required,
-    congestion_amount: persistenceNumeric(work.congestion_amount, 0),
-    travel_charge: persistenceNumeric(work.travel_charge, 0),
-    other_charge: persistenceNumeric(work.other_charge, 0),
-    other_charge_reason: work.other_charge_reason || null,
-  };
-}
-
-/** Raw parking cost for one work block, including vehicle multiplier. */
-export function workParkingRaw(work: WorkBlockFormValues): number {
-  if (!work.parking_required) return 0;
-  const vehicles = Math.max(1, Math.floor(work.parking_vehicles ?? 1));
-  if (work.parking_type === "hourly") {
-    return (work.parking_rate_per_hour ?? 0) * (work.parking_hours ?? 0) * vehicles;
-  }
-  return (work.parking_fixed_amount ?? 0) * vehicles;
-}
-
-export const PARKING_COPY_FIELDS = [
-  "parking_required",
-  "parking_type",
-  "parking_fixed_amount",
-  "parking_rate_per_hour",
-  "parking_hours",
-  "parking_vehicles",
-  "parking_notes",
-  "parking_same_location_as_work1",
-  "parking_latitude",
-  "parking_longitude",
-] as const satisfies ReadonlyArray<keyof WorkBlockFormValues>;
-
-/** Aggregate per-work charges into a single set of top-level charges for the backend. */
-function aggregateCharges(works: WorkBlockFormValues[]) {
-  const hasParking = works.some((w) => w.parking_required);
-  const parkingTotal = works.reduce((sum, w) => sum + workParkingRaw(w), 0);
-
-  const hasCongestion = works.some((w) => w.congestion_required);
-  const congestionTotal = works.reduce((sum, w) => sum + (w.congestion_required ? (w.congestion_amount ?? 0) : 0), 0);
-  const travelTotal = works.reduce((sum, w) => sum + toNumericValueOr(w.travel_charge, 0), 0);
-  const otherTotal = works.reduce((sum, w) => sum + toNumericValueOr(w.other_charge, 0), 0);
-  const otherReasons = works
-    .map((w) => w.other_charge_reason?.trim() ?? "")
-    .filter(Boolean)
-    .join(" / ");
-
-  return {
-    parking_required: hasParking,
-    parking_type: "fixed" as const,
-    parking_fixed_amount: parkingTotal,
-    parking_rate_per_hour: null as null,
-    parking_hours: null as null,
-    congestion_required: hasCongestion,
-    congestion_amount: congestionTotal,
-    travel_charge: travelTotal,
-    other_charge: otherTotal,
-    other_charge_reason: otherReasons || null,
   };
 }
 
 export function questionnaireToStep2(values: QuestionnaireFormValues): Step2Snapshot {
   const works = values.works.map(workBlockToSnapshot);
   const primary = works[0];
-  const charges = aggregateCharges(values.works);
+  const charges = normalizeQuoteCharges(values);
   return {
     works,
     scope: primary.scope,
@@ -655,7 +730,24 @@ export function questionnaireToStep2(values: QuestionnaireFormValues): Step2Snap
     hours: primary.hours,
     days: primary.days,
     markup_value: primary.markup_value,
-    ...charges,
+    parking_required: charges.parking_required,
+    parking_type: charges.parking_type,
+    parking_fixed_amount: charges.parking_fixed_amount,
+    parking_rate_per_hour: charges.parking_rate_per_hour,
+    parking_hours: charges.parking_hours,
+    parking_vehicles: charges.parking_vehicles,
+    parking_latitude: charges.parking_latitude ?? null,
+    parking_longitude: charges.parking_longitude ?? null,
+    parking_notes: charges.parking_notes?.trim() || null,
+    congestion_required: charges.congestion_required,
+    congestion_amount: charges.congestion_amount,
+    ulez_required: charges.ulez_required,
+    ulez_amount: charges.ulez_amount,
+    waste_disposal_required: charges.waste_disposal_required,
+    waste_disposal_amount: charges.waste_disposal_amount,
+    travel_charge: charges.travel_charge,
+    other_charge: charges.other_charge,
+    other_charge_reason: charges.other_charge_reason || null,
   };
 }
 
@@ -705,22 +797,6 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
     other_notes: step2.other_notes ?? "",
     attachments: step2.attachments ?? [],
     markup_value: Number(step2.markup_value ?? defaultWorkBlockValues(tradeName).markup_value),
-    // Restore charges from legacy top-level Step2Snapshot for first work block
-    parking_required: step2.parking_required ?? false,
-    parking_type: (step2.parking_type as "fixed" | "hourly") ?? "fixed",
-    parking_fixed_amount: Number(step2.parking_fixed_amount ?? 0),
-    parking_rate_per_hour: Number(step2.parking_rate_per_hour ?? 0),
-    parking_hours: Number(step2.parking_hours ?? 0),
-    parking_vehicles: 1,
-    parking_notes: "",
-    parking_same_location_as_work1: false,
-    parking_latitude: null,
-    parking_longitude: null,
-    congestion_required: step2.congestion_required ?? false,
-    congestion_amount: Number(step2.congestion_amount ?? 0),
-    travel_charge: Number(step2.travel_charge ?? 0),
-    other_charge: Number(step2.other_charge ?? 0),
-    other_charge_reason: step2.other_charge_reason ?? "",
   };
 }
 
@@ -768,31 +844,6 @@ function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlo
       findings: block.findings ?? "",
       attachments: block.attachments ?? [],
       markup_value: Number(block.markup_value ?? 20),
-      // Per-work charges — restore from snapshot if present
-      parking_required: Boolean((block as WorkBlockSnapshot & Record<string, unknown>).parking_required ?? false),
-      parking_type: ((block as WorkBlockSnapshot & Record<string, unknown>).parking_type as "fixed" | "hourly") ?? "fixed",
-      parking_fixed_amount: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_fixed_amount ?? 0),
-      parking_rate_per_hour: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_rate_per_hour ?? 0),
-      parking_hours: Number((block as WorkBlockSnapshot & Record<string, unknown>).parking_hours ?? 0),
-      parking_vehicles: Math.max(1, Number((block as WorkBlockSnapshot).parking_vehicles ?? 1)),
-      parking_notes: mergeParkingAccessNotes(
-        (block as WorkBlockSnapshot).parking_notes,
-        (block as WorkBlockSnapshot & Record<string, unknown>).access_notes as string | null | undefined,
-      ),
-      parking_same_location_as_work1: Boolean((block as WorkBlockSnapshot).parking_same_location_as_work1 ?? false),
-      parking_latitude:
-        (block as WorkBlockSnapshot).parking_latitude != null
-          ? Number((block as WorkBlockSnapshot).parking_latitude)
-          : null,
-      parking_longitude:
-        (block as WorkBlockSnapshot).parking_longitude != null
-          ? Number((block as WorkBlockSnapshot).parking_longitude)
-          : null,
-      congestion_required: Boolean((block as WorkBlockSnapshot & Record<string, unknown>).congestion_required ?? false),
-      congestion_amount: Number((block as WorkBlockSnapshot & Record<string, unknown>).congestion_amount ?? 0),
-      travel_charge: Number((block as WorkBlockSnapshot & Record<string, unknown>).travel_charge ?? 0),
-      other_charge: Number((block as WorkBlockSnapshot & Record<string, unknown>).other_charge ?? 0),
-      other_charge_reason: String((block as WorkBlockSnapshot & Record<string, unknown>).other_charge_reason ?? ""),
     };
   }
   return legacyBlockFromStep2(block as Step2Snapshot, tradeName);
@@ -805,26 +856,19 @@ export function step2ToQuestionnaire(
   step1?: { parking_notes?: string | null; access_notes?: string | null } | null,
 ): QuestionnaireFormValues {
   if (!step2 && !overrides) {
-    const first = defaultWorkBlockValues(tradeName);
-    if (step1) {
-      first.parking_notes = mergeParkingAccessNotes(step1.parking_notes, step1.access_notes);
-    }
-    return { works: [first] };
+    return {
+      works: [defaultWorkBlockValues(tradeName)],
+      ...quoteChargesFromStep2(null, step1),
+    };
   }
   const works =
     step2?.works && step2.works.length > 0
       ? step2.works.map((block) => normalizeWorkBlockValues(blockFromSnapshot(block, tradeName)))
       : [normalizeWorkBlockValues(legacyBlockFromStep2(step2 ?? {}, tradeName))];
 
-  if (step1 && works.length > 0) {
-    const first = works[0];
-    if (!first.parking_notes?.trim()) {
-      first.parking_notes = mergeParkingAccessNotes(step1.parking_notes, step1.access_notes);
-    }
-  }
-
   return {
     works,
+    ...quoteChargesFromStep2(step2, step1),
     ...overrides,
   };
 }

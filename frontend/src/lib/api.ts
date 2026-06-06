@@ -1,3 +1,4 @@
+import { shouldSkipMsalInit } from "@/lib/auth/public-routes";
 import { getAccessToken } from "@/lib/auth/token-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -30,7 +31,9 @@ export async function apiFetch<T>(
 
   let authToken = token;
   if (authToken === undefined) {
-    authToken = await getAccessToken();
+    const skipAuth =
+      typeof window !== "undefined" && shouldSkipMsalInit(window.location.pathname);
+    authToken = skipAuth ? null : await getAccessToken();
   }
   if (authToken) {
     headers.Authorization = `Bearer ${authToken}`;

@@ -149,7 +149,13 @@ def test_list_submitted_quotes_includes_display_label_not_work_number():
             ).model_dump(mode="json"),
             ui_state={
                 "last_result": {
-                    "breakdown": {"final_total": "1.44"},
+                    "breakdown": {
+                        "final_total": "1.44",
+                        "labour_charge_to_client": "1.00",
+                        "materials_parking_cc_charge": "0.20",
+                        "vat_total": "0.24",
+                        "charges": [],
+                    },
                     "work_breakdowns": [
                         {
                             "work_index": 0,
@@ -181,3 +187,8 @@ def test_list_submitted_quotes_includes_display_label_not_work_number():
     work = quotes[0].works[0]
     assert work.display_label == "Carpenter · CARP-001"
     assert work.display_label != "Work 1"
+    assert quotes[0].breakdown is not None
+    assert quotes[0].breakdown.works_subtotal == Decimal("1.20")
+    assert quotes[0].breakdown.additional_charges == Decimal("0")
+    assert quotes[0].breakdown.vat_total == Decimal("0.24")
+    assert quotes[0].breakdown.final_total == Decimal("1.44")

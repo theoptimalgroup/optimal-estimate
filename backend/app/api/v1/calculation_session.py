@@ -1,10 +1,14 @@
 from uuid import UUID
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import AuthenticatedUser, require_roles
 from app.core.config import settings
+from app.core.security import UserRole
 from app.db.session import DbSession
 from app.core.exceptions import AppError, success_response
 from app.schemas.eworks_link import (
@@ -13,6 +17,7 @@ from app.schemas.eworks_link import (
     CalculationSessionFromLinkResponse,
     CalculationSessionRead,
     FromLinkRequest,
+    ManualCalculationSessionRequest,
     ResolvedRuleInfo,
     RewordScopeRequest,
     RewordScopeResponse,
@@ -23,6 +28,8 @@ from app.schemas.eworks_link import (
     SubmitSessionResponse,
     UpdateCalculationSessionRequest,
 )
+from app.services.audit_helpers import record_audit
+from app.services.manual_calculation_session_service import create_manual_calculation_session
 from app.services.calculation_session_pdf_service import render_session_quote_pdf
 from app.services.calculation_session_service import (
     add_session_attachment,
@@ -37,6 +44,11 @@ from app.services.eworks_attachment_service import read_session_attachment
 from app.services.eworks_link_service import create_dev_test_session, create_session_from_link, get_session_by_token
 
 router = APIRouter(prefix="/calculation-session", tags=["calculation-session"])
+
+StaffEstimateCreator = Annotated[
+    AuthenticatedUser,
+    Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.ESTIMATOR)),
+]
 
 
 def _session_read(db: Session, session) -> CalculationSessionRead:
@@ -84,6 +96,43 @@ def dev_bootstrap(db: DbSession):
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return success_response(CalculationSessionFromLinkResponse.model_validate(result))
+
+
+@router.post("/manual")
+def create_manual_session(
+    body: ManualCalculationSessionRequest,
+    db: DbSession,
+    actor: StaffEstimateCreator,
+):
+    try:
+        result = create_manual_calculation_session(
+            db,
+            quote_ref=body.quote_ref,
+            job_ref=body.job_ref,
+            client_name=body.client_name,
+            trade_name=body.trade_name,
+        )
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    record_audit(
+        db,
+        actor=actor,
+        action="manual_estimate_created",
+        entity_type="calculation_session",
+        entity_id=result.session_id,
+        before=None,
+        after={
+            "session_id": str(result.session_id),
+            "source": "manual",
+            "quote_ref": body.quote_ref,
+            "job_ref": body.job_ref,
+            "client_name": body.client_name or "Manual Estimate",
+            "trade_name": body.trade_name,
+        },
+    )
+    db.commit()
+    return success_response(result)
 
 
 @router.get("/{session_id}")

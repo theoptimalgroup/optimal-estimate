@@ -17,6 +17,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
 from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksQuote, EworksSyncRun
+from app.models.product import Product
 from app.models.support import AuditLog
 from app.models.user import User
 
@@ -42,6 +43,7 @@ def db_session():
         EworksAttachment.__table__,
         EworksSyncRun.__table__,
         CalculationSession.__table__,
+        Product.__table__,
     ]:
         table.create(engine)
 
@@ -334,6 +336,16 @@ def test_status_endpoint_returns_counts(mock_settings, api_client, db_session):
     _patch_dev_user(mock_settings, role="admin")
     db_session.add(EworksQuote(eworks_quote_id=1, quote_ref="Q-1"))
     db_session.add(EworksJob(eworks_job_id=1, job_ref="J-1"))
+    db_session.add(
+        Product(
+            eworks_item_id=1403,
+            product_name="Plant Room",
+            product_code="PR-0011",
+            category="Plumber",
+            type_="Products",
+            is_active=True,
+        )
+    )
     db_session.commit()
 
     resp = api_client.get("/api/v1/eworks-sync/status")
@@ -341,8 +353,11 @@ def test_status_endpoint_returns_counts(mock_settings, api_client, db_session):
     data = resp.json()["data"]
     assert data["quotes_count"] >= 1
     assert data["jobs_count"] >= 1
+    assert data["products_count"] >= 1
     assert "customers_count" in data
+    assert "products_count" in data
     assert "last_customers_sync" in data
+    assert "last_products_sync" in data
     assert "eworks_api_enabled" in data
 
 

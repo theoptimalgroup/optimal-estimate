@@ -8,20 +8,29 @@ export type MsalReadyPayload = {
 };
 
 let accessTokenGetter: AccessTokenGetter | null = null;
+let lastMsalReadyPayload: MsalReadyPayload | null = null;
 const msalReadyListeners = new Set<(payload: MsalReadyPayload) => void>();
 
 export function setAccessTokenGetter(getter: AccessTokenGetter | null): void {
   accessTokenGetter = getter;
 }
 
+export function getMsalReadyState(): MsalReadyPayload | null {
+  return lastMsalReadyPayload;
+}
+
 export function onMsalReady(listener: (payload: MsalReadyPayload) => void): () => void {
   msalReadyListeners.add(listener);
+  if (lastMsalReadyPayload) {
+    listener(lastMsalReadyPayload);
+  }
   return () => {
     msalReadyListeners.delete(listener);
   };
 }
 
 export function notifyMsalReady(payload: MsalReadyPayload): void {
+  lastMsalReadyPayload = payload;
   for (const listener of msalReadyListeners) {
     listener(payload);
   }

@@ -210,9 +210,6 @@ test.describe("Manager dashboard", () => {
 
     await expect(page.getByTestId("manager-dashboard-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Manager Dashboard" })).toBeVisible();
-    await expect(
-      page.getByText("Quote workflow overview.")
-    ).toBeVisible();
 
     await expect(page.getByTestId("kpi-new-quotes")).toBeVisible();
     await expect(page.getByTestId("kpi-awaiting-supplier")).toBeVisible();
@@ -282,7 +279,7 @@ test.describe("Manager dashboard", () => {
 
     await expect(page.getByTestId("category-awaiting-supplier-cards")).toContainText("Q-AWAIT");
     await expect(page.getByTestId("category-awaiting-supplier-cards")).toContainText(
-      AWAITING_SUPPLIER_TAG
+      "Awaiting Supplier",
     );
     await expect(page.getByTestId("category-new-quotes-cards")).not.toContainText("Q-AWAIT");
   });
@@ -295,7 +292,9 @@ test.describe("Manager dashboard", () => {
     await page.goto("/manager/dashboard");
 
     await expect(page.getByTestId("category-ready-to-send-cards")).toContainText("Q-READY");
-    await expect(page.getByTestId("category-ready-to-send-cards")).toContainText("Ready to Send");
+    await expect(page.getByTestId("category-ready-to-send-cards")).toContainText(
+      "Quote Ready to Sen",
+    );
     await expect(page.getByTestId("category-new-quotes-cards")).not.toContainText("Q-READY");
   });
 
@@ -312,9 +311,7 @@ test.describe("Manager dashboard", () => {
     await mockDashboardApi(page);
     await page.goto("/manager/dashboard");
     await expect(page.getByTestId("category-awaiting-supplier")).toContainText("Q-AWAIT");
-    await expect(page.getByTestId("category-awaiting-supplier")).toContainText(
-      AWAITING_SUPPLIER_TAG
-    );
+    await expect(page.getByTestId("category-awaiting-supplier")).toContainText("Awaiting Supplier");
   });
 
   test("ready-to-send tag appears in Ready to Send section", async ({ page }) => {
@@ -323,7 +320,7 @@ test.describe("Manager dashboard", () => {
     await page.goto("/manager/dashboard");
     await expect(page.getByTestId("category-ready-to-send")).toContainText("Q-READY");
     await expect(page.getByTestId("category-ready-to-send-cards")).toContainText(
-      "Quote Ready to Send (Quotes)"
+      "Quote Ready to Sen",
     );
   });
 
@@ -385,5 +382,156 @@ test.describe("Manager dashboard", () => {
     await mockDashboardApi(page);
     await page.goto("/manager/dashboard");
     await expect(page.getByTestId("manager-dashboard-page")).toBeVisible();
+  });
+});
+
+const MOCK_REVIEW_QUOTE = {
+  session_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+  session_token: "secret-session-token",
+  quote_number: "Q22091",
+  job_number: "29191",
+  client_name: "Unknown Customer",
+  trade_name: "Carpenter",
+  submitted_at: "2026-06-05T17:46:00Z",
+  final_total: 43.2,
+  breakdown: {
+    works_subtotal: 36,
+    additional_charges: 0,
+    vat_total: 7.2,
+    final_total: 43.2,
+  },
+  works: [
+    {
+      work_index: 0,
+      scope: "- Drill and inject damp-proof course.",
+      product_name: "Decoration - 2 Bedroom Flat",
+      product_code: "D--0001",
+      display_label: "Decoration - 2 Bedroom Flat · D--0001",
+      labour_subtotal: 30,
+      materials_subtotal: 6,
+      internal_notes: null,
+      attachments: [],
+    },
+  ],
+  acceptance: {
+    accepted: true,
+    accepted_at: "2026-06-02T14:30:00Z",
+    name: "Jane Client",
+  },
+};
+
+async function mockManagerReviewQuoteApi(page: Page) {
+  await page.route("**/api/v1/dashboard/quotes", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: { quotes: [MOCK_REVIEW_QUOTE] },
+      }),
+    });
+  });
+}
+
+test.describe("Manager quote review detail from dashboard context", () => {
+  test("hides client link and acceptance on review detail", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockManagerReviewQuoteApi(page);
+    await page.goto("/manager/review/cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+    await expect(page.getByTestId("client-link-panel")).toHaveCount(0);
+    await expect(page.getByTestId("quote-acceptance-panel")).toHaveCount(0);
+  });
+
+  test("shows quote summary breakdown on review detail", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockManagerReviewQuoteApi(page);
+    await page.goto("/manager/review/cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+    await expect(page.getByTestId("quote-summary-card").getByRole("heading", { level: 2 })).toHaveText(
+      "Submission Summary",
+    );
+    await expect(page.getByTestId("quote-summary-breakdown")).toBeVisible();
+    await expect(page.getByTestId("quote-summary-works-subtotal")).toHaveText("£36.00");
+    await expect(page.getByTestId("quote-summary-vat")).toHaveText("£7.20");
+    await expect(page.getByTestId("quote-summary-final-total")).toHaveText("£43.20");
+    await expect(page.getByTestId("work-section-label-0")).toHaveText(
+      "Decoration - 2 Bedroom Flat · D--0001",
+    );
+    await expect(page.getByTestId("work-section-subtotal-0")).toContainText("£36.00");
+    await expect(page.getByTestId("work-section-checkbox-0")).toBeVisible();
+    await expect(page.getByTestId("work-section-toggle-0")).toBeVisible();
+    await expect(page.getByText("secret-session-token")).toHaveCount(0);
+    await expect(page.getByText("profit")).toHaveCount(0);
+  });
+});
+
+const MOCK_GROUP_DETAIL = {
+  group_key: "quote_ref:Q22100",
+  quote_ref: "Q22100",
+  eworks_quote_id: 29204,
+  client_name: "ACME Ltd",
+  trade_name: "Carpenter",
+  submission_count: 1,
+  latest_submitted_at: "2026-06-05T16:04:00Z",
+  latest_total: "174.24",
+  highest_total: "174.24",
+  lowest_total: "174.24",
+  accepted: false,
+  client_accepted_at: null,
+  reopened_count: 0,
+  latest_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+  review_status: "ready_for_review",
+  assignment_summary: {
+    total_assignments: 1,
+    estimator_assignments: 0,
+    engineer_assignments: 1,
+    pending_assignments: 0,
+    in_progress_assignments: 0,
+    submitted_assignments: 1,
+    cancelled_assignments: 0,
+  },
+  assignments: [],
+  sessions: [],
+  assignment_submissions: [
+    {
+      assignment_id: 2,
+      assignment_type: "engineer",
+      assignee_kind: "registered",
+      assignee_name: "Engineer User",
+      assignment_status: "submitted",
+      submitted_at: "2026-06-05T16:04:00Z",
+      linked_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      submitted_by_name: "Engineer User",
+      final_total: "174.24",
+      is_latest: true,
+      can_view_details: true,
+      can_reopen: true,
+    },
+  ],
+};
+
+async function mockQuoteGroupDetailApi(page: Page) {
+  await page.route("**/api/v1/dashboard/quote-groups/detail**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: { group: MOCK_GROUP_DETAIL } }),
+    });
+  });
+}
+
+test.describe("Manager dashboard quote group review", () => {
+  test("assignment submissions table visible on group review page", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+    await expect(page.getByTestId("quote-group-assignment-submissions")).toBeVisible();
+    await expect(page.getByTestId("quote-group-assignment-submissions-table")).toBeVisible();
+    await expect(page.getByTestId("quote-group-assignments")).toHaveCount(0);
+    await expect(page.getByTestId("quote-group-submissions")).toHaveCount(0);
+    await expect(page.getByTestId("assignment-submission-row-2")).toContainText("Engineer User");
+    await expect(page.getByTestId("submission-latest-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(page.getByText("session_token")).toHaveCount(0);
   });
 });

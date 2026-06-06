@@ -30,6 +30,7 @@ const ICON_BY_HREF: Record<string, LucideIcon> = {
   "/manager/quotes": FileText,
   "/estimator/quotes": FileText,
   "/estimator/approvals": ClipboardCheck,
+  "/new-estimate": Calculator,
   "/eworks/calculate": Calculator,
   "/admin/clients": Briefcase,
   "/manager/clients": Briefcase,

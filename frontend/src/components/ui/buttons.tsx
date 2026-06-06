@@ -15,24 +15,40 @@ const variants: Record<ButtonVariant, string> = {
 };
 
 const baseClass =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed";
+  "inline-flex items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed";
+
+const sizeClass = {
+  default: "h-10",
+  sm: "h-9 px-3 text-xs",
+} as const;
 
 type AppButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
+  size?: keyof typeof sizeClass;
   children: ReactNode;
 };
 
-export function PrimaryButton({ className, children, ...props }: AppButtonProps) {
+export function PrimaryButton({ className, children, size = "default", ...props }: AppButtonProps) {
   return (
-    <button type="button" className={cn(baseClass, variants.primary, className)} {...props}>
+    <button type="button" className={cn(baseClass, sizeClass[size], variants.primary, className)} {...props}>
       {children}
     </button>
   );
 }
 
-export function SecondaryButton({ className, children, variant = "secondary", ...props }: AppButtonProps) {
+export function SecondaryButton({
+  className,
+  children,
+  variant = "secondary",
+  size = "default",
+  ...props
+}: AppButtonProps) {
   return (
-    <button type="button" className={cn(baseClass, variants[variant], className)} {...props}>
+    <button
+      type="button"
+      className={cn(baseClass, sizeClass[size], variants[variant], className)}
+      {...props}
+    >
       {children}
     </button>
   );

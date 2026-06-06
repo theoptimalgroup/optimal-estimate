@@ -78,7 +78,7 @@ export default function ManagerDashboardPage() {
 
   return (
     <div className="space-y-6" data-testid="manager-dashboard-page">
-      <PageHeader title="Manager Dashboard" description="Quote workflow overview." />
+      <PageHeader title="Manager Dashboard" />
 
       {loading ? (
         <LoadingState message="Loading dashboard…" />

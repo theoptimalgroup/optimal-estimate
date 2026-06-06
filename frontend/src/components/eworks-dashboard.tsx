@@ -9,7 +9,7 @@ import type { MaterialOrderRow, MaterialSupplier, WorkBlockSnapshot } from "@/li
 import { formatSupplierDisplayName, migrateLegacyMaterialRows } from "@/lib/eworks-calculate-schema";
 import { cleanRichTextForTextarea } from "@/lib/html-text";
 import { getAttachmentUrl } from "@/lib/eworks-session";
-import { formatWorkLabel } from "@/lib/work-label";
+import { formatProductLabel, formatWorkLabel, scopePreview } from "@/lib/work-label";
 
 export function money(value?: number | string | null) {
   if (value === undefined || value === null || value === "") return "—";
@@ -54,7 +54,7 @@ function WorkAttachmentsGallery({
     <div className="space-y-3">
       <EworksSectionTitle title="Photos / Videos" />
       {attachments.length === 0 ? (
-        <p className="text-sm text-optimal-muted">No photos or videos uploaded for this work.</p>
+        <p className="text-sm text-slate-600">No photos or videos uploaded for this work.</p>
       ) : (
         <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {attachments.map((attachment) => {
@@ -67,7 +67,7 @@ function WorkAttachmentsGallery({
                 href={viewUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="overflow-hidden rounded-lg border border-gray-200 bg-optimal-field transition-colors hover:border-gray-300"
+                className="overflow-hidden rounded-lg border border-slate-200 bg-white transition-colors hover:border-slate-300"
               >
                 {isPhoto ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -77,15 +77,15 @@ function WorkAttachmentsGallery({
                     className="aspect-video w-full bg-white object-cover"
                   />
                 ) : (
-                  <div className="flex aspect-video w-full items-center justify-center bg-white text-3xl text-optimal-field-text">
+                  <div className="flex aspect-video w-full items-center justify-center bg-white text-3xl text-slate-900">
                     {isVideo ? "▶" : "📄"}
                   </div>
                 )}
                 <div className="border-t border-black/10 px-3 py-2">
-                  <p className="truncate text-sm font-medium text-optimal-field-text">
+                  <p className="truncate text-sm font-medium text-slate-900">
                     {isPhoto ? "Photo" : isVideo ? "Video" : "File"}
                   </p>
-                  <p className="truncate text-xs text-optimal-muted">{attachment.file_name}</p>
+                  <p className="truncate text-xs text-slate-600">{attachment.file_name}</p>
                 </div>
               </a>
             );
@@ -108,8 +108,8 @@ function DetailRow({ label, value }: { label: string; value?: string | null }) {
   if (!hasText(value)) return null;
   return (
     <div>
-      <p className="text-xs uppercase tracking-wide text-optimal-muted">{label}</p>
-      <p className="whitespace-pre-wrap text-sm text-gray-900">{value}</p>
+      <p className="text-xs uppercase tracking-wide text-slate-600">{label}</p>
+      <p className="whitespace-pre-wrap text-sm text-slate-900">{value}</p>
     </div>
   );
 }
@@ -131,21 +131,21 @@ function ReadOnlyMaterialTable({
   return (
     <div className="space-y-2">
       <EworksSectionTitle title={title} />
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
         <table className="min-w-full text-left text-sm">
-          <thead className="bg-gray-50 text-xs uppercase tracking-wide text-optimal-muted">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
             <tr>
               <th className="px-3 py-2 font-medium">{linkLabel}</th>
               <th className="px-3 py-2 font-medium">Quantity</th>
               <th className="px-3 py-2 font-medium">Cost</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-slate-200">
             {visibleRows.map((row, index) => (
               <tr key={index}>
-                <td className="px-3 py-2 text-gray-900">{row.link || "—"}</td>
-                <td className="px-3 py-2 text-gray-900">{row.quantity ?? "—"}</td>
-                <td className="px-3 py-2 text-gray-900">{money(row.cost)}</td>
+                <td className="px-3 py-2 text-slate-900">{row.link || "—"}</td>
+                <td className="px-3 py-2 text-slate-900">{row.quantity ?? "—"}</td>
+                <td className="px-3 py-2 text-slate-900">{money(row.cost)}</td>
               </tr>
             ))}
           </tbody>
@@ -181,26 +181,26 @@ function ReadOnlySupplierMaterials({ suppliers }: { suppliers?: MaterialSupplier
           (row) => hasText(row.link) || hasNumber(row.quantity) || hasNumber(row.cost),
         );
         return (
-          <div key={supplierIndex} className="space-y-2 rounded-lg border border-gray-200 p-3">
-            <p className="text-sm font-semibold text-gray-900">
+          <div key={supplierIndex} className="space-y-2 rounded-lg border border-slate-200 p-3">
+            <p className="text-sm font-semibold text-slate-900">
               {formatSupplierDisplayName(supplier, supplierIndex)}
             </p>
             {linkRows.length > 0 && (
-              <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <table className="min-w-full text-left text-sm">
-                  <thead className="bg-gray-50 text-xs uppercase tracking-wide text-optimal-muted">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
                     <tr>
                       <th className="px-3 py-2 font-medium">Link</th>
                       <th className="px-3 py-2 font-medium">Quantity</th>
                       <th className="px-3 py-2 font-medium">Cost per item</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-200">
+                  <tbody className="divide-y divide-slate-200">
                     {linkRows.map((row, index) => (
                       <tr key={index}>
-                        <td className="px-3 py-2 text-gray-900">{row.link || "—"}</td>
-                        <td className="px-3 py-2 text-gray-900">{row.quantity ?? "—"}</td>
-                        <td className="px-3 py-2 text-gray-900">{money(row.cost)}</td>
+                        <td className="px-3 py-2 text-slate-900">{row.link || "—"}</td>
+                        <td className="px-3 py-2 text-slate-900">{row.quantity ?? "—"}</td>
+                        <td className="px-3 py-2 text-slate-900">{money(row.cost)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -208,8 +208,8 @@ function ReadOnlySupplierMaterials({ suppliers }: { suppliers?: MaterialSupplier
               </div>
             )}
             <div className="grid gap-2 text-sm sm:grid-cols-2">
-              <p className="text-gray-700">Delivery: {money(supplier.delivery_charge)}</p>
-              <p className="font-semibold text-gray-900">Total: {money(supplierTotal(supplier))}</p>
+              <p className="text-slate-700">Delivery: {money(supplier.delivery_charge)}</p>
+              <p className="font-semibold text-slate-900">Total: {money(supplierTotal(supplier))}</p>
             </div>
           </div>
         );
@@ -229,35 +229,13 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
       ? `${details.labour_needed} labour · ${details.labour_time_value ?? details.labourer_days ?? "—"} days`
       : null;
 
-  const chargeLines: string[] = [];
-  if (details.parking_required) {
-    const vehicles = Math.max(1, Number(details.parking_vehicles ?? 1));
-    const vehicleSuffix = vehicles > 1 ? ` × ${vehicles} vehicles` : "";
-    if (details.parking_type === "hourly") {
-      chargeLines.push(
-        `Parking: ${money(details.parking_rate_per_hour)}/hr × ${details.parking_hours ?? 0} hrs${vehicleSuffix}`,
-      );
-    } else {
-      chargeLines.push(`Parking: ${money(details.parking_fixed_amount)}${vehicleSuffix}`);
-    }
-  }
-  if (details.congestion_required && hasNumber(details.congestion_amount)) {
-    chargeLines.push(`Congestion: ${money(details.congestion_amount)}`);
-  }
-  if (hasNumber(details.travel_charge)) {
-    chargeLines.push(`Travel: ${money(details.travel_charge)}`);
-  }
-  if (hasNumber(details.other_charge)) {
-    const reason = details.other_charge_reason?.trim();
-    chargeLines.push(`Other: ${money(details.other_charge)}${reason ? ` (${reason})` : ""}`);
-  }
 
   return (
     <div className="space-y-4">
       {hasText(details.scope) && (
         <div className="space-y-2">
           <EworksSectionTitle title="Scope of Works" />
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
             {cleanRichTextForTextarea(details.scope)}
           </p>
         </div>
@@ -273,16 +251,16 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
       </div>
 
       {engineerDuration && (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-          <p className="text-xs uppercase tracking-wide text-optimal-muted">Engineer</p>
-          <p className="mt-1 text-sm text-gray-900">{engineerDuration}</p>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-600">Engineer</p>
+          <p className="mt-1 text-sm text-slate-900">{engineerDuration}</p>
         </div>
       )}
 
       {labourDuration && (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-          <p className="text-xs uppercase tracking-wide text-optimal-muted">Labour</p>
-          <p className="mt-1 text-sm text-gray-900">{labourDuration}</p>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-600">Labour</p>
+          <p className="mt-1 text-sm text-slate-900">{labourDuration}</p>
         </div>
       )}
 
@@ -290,33 +268,6 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
         <DetailRow label="Time frame" value={details.time_frame} />
         <DetailRow label="Markup" value={details.markup_value != null ? `${details.markup_value}%` : null} />
       </div>
-
-      {chargeLines.length > 0 && (
-        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
-          <EworksSectionTitle title="Charges" />
-          <ul className="space-y-1 text-sm text-gray-900">
-            {chargeLines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {hasText(details.parking_notes) && (
-        <DetailRow label="Parking and access notes" value={details.parking_notes} />
-      )}
-      {details.parking_latitude != null && details.parking_longitude != null && (
-        <p className="text-sm">
-          <a
-            href={`https://www.google.com/maps?q=${details.parking_latitude},${details.parking_longitude}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-medium text-optimal-orange underline-offset-2 hover:underline"
-          >
-            View parking location on Google Maps
-          </a>
-        </p>
-      )}
 
       <DetailRow label="Any other notes" value={details.other_notes} />
       <DetailRow label="Findings" value={details.findings} />
@@ -343,16 +294,18 @@ export function WorkSection({
 }) {
   const attachments = workAttachments(work);
   const attachmentLabel = attachmentSummary(attachments);
+  const resolvedProductName = work.product_name ?? work.details?.product_name ?? null;
+  const resolvedProductCode = work.product_code ?? work.details?.product_code ?? null;
+  const resolvedScope = work.scope ?? work.details?.scope ?? null;
   const workLabel =
     work.display_label ??
-    formatWorkLabel(
-      {
-        product_name: work.product_name ?? work.details?.product_name ?? null,
-        product_code: work.product_code ?? work.details?.product_code ?? null,
-        scope: work.scope ?? work.details?.scope ?? null,
-      },
-      work.work_index,
-    );
+    formatWorkLabel({
+      product_name: resolvedProductName,
+      product_code: resolvedProductCode,
+      scope: resolvedScope,
+    });
+  const hasProductLabel = Boolean(formatProductLabel(resolvedProductName, resolvedProductCode));
+  const collapsedScopePreview = scopePreview(resolvedScope);
   const workTotal =
     work.labour_subtotal != null || work.materials_subtotal != null
       ? Number(work.labour_subtotal ?? 0) + Number(work.materials_subtotal ?? 0)
@@ -360,32 +313,42 @@ export function WorkSection({
 
   return (
     <section
+      data-testid={`work-section-${work.work_index}`}
       className={cn(
-        "overflow-hidden rounded-lg border bg-gray-50 transition-colors",
-        selected ? "border-optimal-orange/60 ring-1 ring-optimal-orange/30" : "border-gray-200",
+        "overflow-hidden rounded-lg border bg-slate-50 transition-colors",
+        selected ? "border-blue-200 ring-1 ring-blue-200" : "border-slate-200",
       )}
     >
       <div className="flex items-stretch">
         {selectable && onSelect && (
-          <label className="flex shrink-0 cursor-pointer items-center px-4">
+          <label
+            className="flex shrink-0 cursor-pointer items-center px-4"
+            onClick={(event) => event.stopPropagation()}
+          >
             <input
               type="checkbox"
+              data-testid={`work-section-checkbox-${work.work_index}`}
               checked={selected ?? false}
-              onChange={(event) => onSelect(event.target.checked)}
-              className="size-5 rounded border-gray-300 bg-optimal-field text-optimal-orange focus:ring-optimal-orange/40"
+              onChange={(event) => {
+                event.stopPropagation();
+                onSelect(event.target.checked);
+              }}
+              onClick={(event) => event.stopPropagation()}
+              className="size-5 rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500/30"
               aria-label={`Select ${workLabel}`}
             />
           </label>
         )}
         <button
           type="button"
+          data-testid={`work-section-toggle-${work.work_index}`}
           onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left transition-colors hover:bg-gray-50"
+          className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left transition-colors hover:bg-slate-50"
           aria-expanded={open}
         >
           <span
             className={cn(
-              "shrink-0 text-optimal-muted transition-transform duration-200",
+              "shrink-0 text-slate-600 transition-transform duration-200",
               open && "rotate-90",
             )}
             aria-hidden
@@ -393,50 +356,60 @@ export function WorkSection({
             ▶
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-gray-900">{workLabel}</p>
-            {!open && work.scope && work.details?.product_name?.trim() && (
-              <p className="mt-1 truncate text-sm text-optimal-muted">{cleanRichTextForTextarea(work.scope)}</p>
+            <p className="font-semibold text-slate-900" data-testid={`work-section-label-${work.work_index}`}>
+              {workLabel}
+            </p>
+            {!open && collapsedScopePreview && hasProductLabel && (
+              <p
+                className="mt-1 truncate text-sm text-slate-600"
+                data-testid={`work-section-scope-preview-${work.work_index}`}
+              >
+                {collapsedScopePreview}
+              </p>
             )}
             {attachmentLabel && (
-              <p className="mt-1 text-xs text-optimal-orange">{attachmentLabel}</p>
+              <p className="mt-1 text-xs text-slate-600">{attachmentLabel}</p>
             )}
           </div>
-          <div className="shrink-0 text-right text-sm">
-            <p className="text-xs uppercase tracking-wide text-optimal-muted">Subtotal</p>
-            <p className="font-semibold text-gray-900">{money(workTotal)}</p>
+          <div className="shrink-0 text-right text-sm" data-testid={`work-section-subtotal-${work.work_index}`}>
+            <p className="text-xs uppercase tracking-wide text-slate-600">Work subtotal</p>
+            <p className="font-semibold text-slate-900">{money(workTotal)}</p>
           </div>
         </button>
       </div>
 
       {open && (
-        <div className="space-y-4 border-t border-gray-200 px-4 pb-4 pt-3">
+        <div
+          className="space-y-4 border-t border-slate-200 px-4 pb-4 pt-3"
+          data-testid={`work-section-details-${work.work_index}`}
+        >
           {work.details ? (
             <WorkDetailsReadonly details={work.details} />
           ) : (
             work.scope && (
-              <p className="text-sm leading-relaxed text-gray-800">{cleanRichTextForTextarea(work.scope)}</p>
+              <p className="text-sm leading-relaxed text-slate-800">{cleanRichTextForTextarea(work.scope)}</p>
             )
           )}
 
           <WorkAttachmentsGallery quote={quote} attachments={attachments} />
 
           <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-4">
-            <p className="text-optimal-muted">
-              Labour subtotal: <span className="font-semibold text-gray-900">{money(work.labour_subtotal)}</span>
+            <p className="text-slate-600">
+              Labour subtotal: <span className="font-semibold text-slate-900">{money(work.labour_subtotal)}</span>
             </p>
-            <p className="text-optimal-muted">
-              Materials subtotal: <span className="font-semibold text-gray-900">{money(work.materials_subtotal)}</span>
+            <p className="text-slate-600">
+              Materials subtotal: <span className="font-semibold text-slate-900">{money(work.materials_subtotal)}</span>
             </p>
           </div>
 
           <div className="space-y-2">
             <EworksSectionTitle title="Internal notes" />
             {work.internal_notes ? (
-              <pre className="whitespace-pre-wrap rounded-lg bg-optimal-field p-3 text-xs leading-relaxed text-optimal-field-text">
+              <pre className="whitespace-pre-wrap rounded-lg bg-white p-3 text-xs leading-relaxed text-slate-900">
                 {work.internal_notes}
               </pre>
             ) : (
-              <p className="text-sm text-optimal-muted">No internal notes for this work.</p>
+              <p className="text-sm text-slate-600">No internal notes for this work.</p>
             )}
           </div>
         </div>
@@ -483,26 +456,26 @@ export function CombinedNotesModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="combined-notes-title"
-        className="relative z-10 flex max-h-[90vh] w-full max-w-6xl flex-col rounded-lg border border-gray-200 bg-optimal-elevated shadow-xl"
+        className="relative z-10 flex max-h-[90vh] w-full max-w-6xl flex-col rounded-lg border border-slate-200 bg-white shadow-xl"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
-          <h2 id="combined-notes-title" className="text-lg font-semibold text-gray-900">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+          <h2 id="combined-notes-title" className="text-lg font-semibold text-slate-900">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-2 py-1 text-sm text-optimal-muted transition-colors hover:bg-gray-50 hover:text-gray-900"
+            className="rounded-lg px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
             aria-label="Close"
           >
             ✕
           </button>
         </div>
-        <pre className="mx-5 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg bg-optimal-field p-4 text-xs leading-relaxed text-optimal-field-text">
+        <pre className="mx-5 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg bg-white p-4 text-xs leading-relaxed text-slate-900">
           {notesText}
         </pre>
         {pdfError && <p className="px-5 text-sm text-red-600">{pdfError}</p>}
-        <div className="flex flex-wrap items-center gap-3 border-t border-gray-200 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 px-5 py-4">
           <EworksButton variant="secondary" onClick={() => void handleCopy()}>
             {copied ? "Copied!" : "Copy to clipboard"}
           </EworksButton>
@@ -543,9 +516,9 @@ export function WorkSelectionBar({
   calculating?: boolean;
 }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-6 py-4 backdrop-blur lg:px-8">
+    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur lg:px-8">
       <div className="flex w-full items-center gap-4">
-        <p className="text-sm font-medium text-gray-900">
+        <p className="text-sm font-medium text-slate-900">
           {selectedCount} work{selectedCount === 1 ? "" : "s"} selected
         </p>
         <div className="ml-auto flex items-center gap-3">
@@ -555,7 +528,7 @@ export function WorkSelectionBar({
           <button
             type="button"
             onClick={onClear}
-            className="px-3 py-2 text-sm text-optimal-muted underline-offset-2 hover:text-gray-900 hover:underline"
+            className="px-3 py-2 text-sm text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline"
           >
             Clear selection
           </button>
@@ -565,25 +538,106 @@ export function WorkSelectionBar({
   );
 }
 
+export function QuoteAdditionalChargesSection({ lines }: { lines: string[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="quote-additional-charges">
+      <EworksSectionTitle title="Additional Charges" />
+      <ul className="space-y-1 text-sm text-slate-900">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function workSubtotalFromQuote(quote: DashboardQuoteItem): number | null {
+  let total = 0;
+  let hasValue = false;
+  for (const work of quote.works) {
+    if (work.labour_subtotal != null || work.materials_subtotal != null) {
+      total += Number(work.labour_subtotal ?? 0) + Number(work.materials_subtotal ?? 0);
+      hasValue = true;
+    }
+  }
+  return hasValue ? total : null;
+}
+
+export function QuoteSummaryBreakdown({ quote }: { quote: DashboardQuoteItem }) {
+  const breakdown = quote.breakdown;
+  const worksSubtotal = breakdown?.works_subtotal ?? workSubtotalFromQuote(quote);
+  const additionalCharges = breakdown?.additional_charges ?? null;
+  const vatTotal = breakdown?.vat_total ?? null;
+  const finalTotal = breakdown?.final_total ?? quote.final_total ?? null;
+
+  if (worksSubtotal == null && finalTotal == null) {
+    return null;
+  }
+
+  return (
+    <div
+      className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4"
+      data-testid="quote-summary-breakdown"
+    >
+      <p className="text-sm font-semibold text-slate-900">Quote Summary</p>
+      <dl className="mt-3 space-y-2 text-sm">
+        {worksSubtotal != null ? (
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-slate-600">Works subtotal</dt>
+            <dd className="font-medium text-slate-900" data-testid="quote-summary-works-subtotal">
+              {money(worksSubtotal)}
+            </dd>
+          </div>
+        ) : null}
+        {additionalCharges != null ? (
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-slate-600">Additional charges</dt>
+            <dd className="font-medium text-slate-900" data-testid="quote-summary-additional-charges">
+              {money(additionalCharges)}
+            </dd>
+          </div>
+        ) : null}
+        {vatTotal != null ? (
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-slate-600">VAT</dt>
+            <dd className="font-medium text-slate-900" data-testid="quote-summary-vat">
+              {money(vatTotal)}
+            </dd>
+          </div>
+        ) : null}
+        {finalTotal != null ? (
+          <div className="flex items-center justify-between gap-4 border-t border-slate-200 pt-2">
+            <dt className="font-semibold text-slate-900">Final total</dt>
+            <dd className="text-base font-bold text-blue-700" data-testid="quote-summary-final-total">
+              {money(finalTotal)}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </div>
+  );
+}
+
 export function QuoteSummaryCard({ quote }: { quote: DashboardQuoteItem }) {
   return (
-    <article className="rounded-lg border border-gray-200 bg-optimal-elevated p-5 transition-colors hover:border-gray-300 hover:bg-gray-50 lg:p-6">
+    <article className="rounded-lg border border-slate-200 bg-white p-5 transition-colors hover:border-slate-300 hover:bg-slate-50 lg:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-slate-900">
             Quote {quote.quote_number} · Job {quote.job_number}
           </h2>
-          <p className="text-sm text-optimal-muted">
+          <p className="text-sm text-slate-600">
             {quote.client_name} · {quote.trade_name}
           </p>
-          <p className="text-xs text-optimal-muted">Submitted {formatSubmittedAt(quote.submitted_at)}</p>
-          <span className="mt-2 inline-block rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-optimal-muted">
+          <p className="text-xs text-slate-600">Submitted {formatSubmittedAt(quote.submitted_at)}</p>
+          <span className="mt-2 inline-block rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
             {quote.works.length} work{quote.works.length === 1 ? "" : "s"}
           </span>
         </div>
         <div className="text-right">
-          <p className="text-xs uppercase tracking-wide text-optimal-muted">Final total</p>
-          <p className="text-2xl font-bold text-optimal-orange">{money(quote.final_total)}</p>
+          <p className="text-xs uppercase tracking-wide text-slate-600">Final total</p>
+          <p className="text-2xl font-bold text-slate-900">{money(quote.final_total)}</p>
         </div>
       </div>
     </article>
@@ -598,9 +652,9 @@ export function QuotesTable({
   detailHref?: (sessionId: string) => string;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
+    <div className="overflow-x-auto rounded-lg border border-slate-200">
       <table className="min-w-full text-left text-sm">
-        <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-optimal-muted">
+        <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
           <tr>
             <th className="px-4 py-3 font-medium lg:px-5">Quote</th>
             <th className="px-4 py-3 font-medium lg:px-5">Job</th>
@@ -611,26 +665,26 @@ export function QuotesTable({
             <th className="px-4 py-3 text-right font-medium lg:px-5">Final total</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200">
+        <tbody className="divide-y divide-slate-200">
           {quotes.map((quote) => (
             <tr
               key={quote.session_id}
-              className="transition-colors hover:bg-gray-50"
+              className="transition-colors hover:bg-slate-50"
             >
               <td className="px-4 py-3 lg:px-5">
                 <Link
                   href={detailHref(quote.session_id)}
-                  className="font-semibold text-optimal-orange hover:underline"
+                  className="font-semibold text-blue-600 hover:text-blue-700 hover:underline"
                 >
                   {quote.quote_number}
                 </Link>
               </td>
-              <td className="px-4 py-3 text-gray-900 lg:px-5">{quote.job_number}</td>
-              <td className="px-4 py-3 text-gray-900 lg:px-5">{quote.client_name}</td>
-              <td className="px-4 py-3 text-optimal-muted lg:px-5">{quote.trade_name}</td>
-              <td className="px-4 py-3 text-optimal-muted lg:px-5">{formatSubmittedAt(quote.submitted_at)}</td>
-              <td className="px-4 py-3 text-optimal-muted lg:px-5">{quote.works.length}</td>
-              <td className="px-4 py-3 text-right font-semibold text-gray-900 lg:px-5">{money(quote.final_total)}</td>
+              <td className="px-4 py-3 text-slate-900 lg:px-5">{quote.job_number}</td>
+              <td className="px-4 py-3 text-slate-900 lg:px-5">{quote.client_name}</td>
+              <td className="px-4 py-3 text-slate-600 lg:px-5">{quote.trade_name}</td>
+              <td className="px-4 py-3 text-slate-600 lg:px-5">{formatSubmittedAt(quote.submitted_at)}</td>
+              <td className="px-4 py-3 text-slate-600 lg:px-5">{quote.works.length}</td>
+              <td className="px-4 py-3 text-right font-semibold text-slate-900 lg:px-5">{money(quote.final_total)}</td>
             </tr>
           ))}
         </tbody>

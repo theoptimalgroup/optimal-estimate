@@ -28,16 +28,150 @@ import {
 import type { UserRole } from "@/lib/auth/types";
 import {
   formatDate,
+  createUser,
   getUser,
   listUsers,
   roleLabel,
   updateUser,
   USER_ROLES,
   type ManagedUser,
+  type UserCreatePayload,
   type UserUpdatePayload,
 } from "@/lib/users";
 
 const PAGE_SIZE = 25;
+
+function UserCreatePanel({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (user: ManagedUser) => void;
+}) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<UserRole>("estimator");
+  const [isActive, setIsActive] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      setError("Name is required");
+      return;
+    }
+    if (!email.trim()) {
+      setError("Email is required");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const payload: UserCreatePayload = {
+      email: email.trim(),
+      name: name.trim(),
+      role,
+      is_active: isActive,
+    };
+    try {
+      const created = await createUser(payload);
+      onCreated(created);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create user");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="user-create-title"
+      data-testid="user-create-modal"
+    >
+      <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+          <div>
+            <h2 id="user-create-title" className="text-lg font-semibold text-slate-900">
+              Add User
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Pre-register a user for Azure sign-in. Email must match their Azure account.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="space-y-5 px-6 py-6">
+          {error ? <p className="text-sm text-rose-600" data-testid="user-create-error">{error}</p> : null}
+
+          <EworksLabel>
+            Name *
+            <EworksInput
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              data-testid="user-create-name-input"
+            />
+          </EworksLabel>
+
+          <EworksLabel>
+            Email *
+            <EworksInput
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              data-testid="user-create-email-input"
+            />
+          </EworksLabel>
+
+          <EworksLabel>
+            Role *
+            <select
+              value={role}
+              onChange={(event) => setRole(event.target.value as UserRole)}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              data-testid="user-create-role-select"
+            >
+              {USER_ROLES.map((option) => (
+                <option key={option} value={option}>
+                  {roleLabel(option)}
+                </option>
+              ))}
+            </select>
+          </EworksLabel>
+
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={(event) => setIsActive(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              data-testid="user-create-active-checkbox"
+            />
+            Active account
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-100 px-6 py-5">
+          <SecondaryButton onClick={onClose} disabled={saving}>
+            Cancel
+          </SecondaryButton>
+          <PrimaryButton onClick={() => void handleSave()} disabled={saving} data-testid="user-create-save">
+            {saving ? "Creating…" : "Create User"}
+          </PrimaryButton>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function UserEditPanel({
   user,
@@ -103,8 +237,8 @@ function UserEditPanel({
         </div>
 
         <div className="space-y-5 px-6 py-6">
-          <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Azure login is not enabled yet. These roles will be reused when Azure users are mapped later.
+          <p className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            Users sign in with Azure. Email must match their Azure account for role mapping.
           </p>
 
           {error ? <p className="text-sm text-rose-600">{error}</p> : null}
@@ -191,6 +325,8 @@ export default function AdminUsersPage() {
   const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
 
   const [selectedUser, setSelectedUser] = useState<ManagedUser | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
   const filters = useMemo(
@@ -250,17 +386,33 @@ export default function AdminUsersPage() {
     setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
   };
 
+  const handleCreated = (created: ManagedUser) => {
+    setSuccessMessage(`User ${created.email} created successfully.`);
+    void loadUsers();
+  };
+
   return (
     <div className="space-y-6" data-testid="admin-users-page">
       <PageHeader
         title="Users & Roles"
-        description="Manage internal user accounts and role assignments. Azure identity mapping will be added in a later phase."
+        description="Manage user accounts and role assignments for Azure sign-in mapping."
         actions={
-          <SecondaryButton onClick={() => void loadUsers()} disabled={loading}>
-            Refresh
-          </SecondaryButton>
+          <>
+            <PrimaryButton onClick={() => setCreateOpen(true)} data-testid="btn-add-user">
+              Add User
+            </PrimaryButton>
+            <SecondaryButton onClick={() => void loadUsers()} disabled={loading}>
+              Refresh
+            </SecondaryButton>
+          </>
         }
       />
+
+      {successMessage ? (
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" data-testid="user-create-success">
+          {successMessage}
+        </p>
+      ) : null}
 
       <FilterBar>
         <FilterField label="Search">
@@ -389,6 +541,16 @@ export default function AdminUsersPage() {
 
       {selectedUser ? (
         <UserEditPanel user={selectedUser} onClose={() => setSelectedUser(null)} onSaved={handleSaved} />
+      ) : null}
+
+      {createOpen ? (
+        <UserCreatePanel
+          onClose={() => setCreateOpen(false)}
+          onCreated={(user) => {
+            handleCreated(user);
+            setCreateOpen(false);
+          }}
+        />
       ) : null}
     </div>
   );

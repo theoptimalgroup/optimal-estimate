@@ -40,6 +40,7 @@ export default function EworksDashboardQuotePage({
       backHref="/eworks/dashboard"
       listHref="/eworks/dashboard"
       shell="dashboard"
+      showClientAcceptance
     />
   );
 }

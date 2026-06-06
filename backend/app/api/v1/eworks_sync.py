@@ -18,6 +18,7 @@ from app.core.exceptions import AppError, success_response
 from app.core.security import UserRole
 from app.db.session import DbSession
 from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksQuote, EworksSyncRun
+from app.models.product import Product
 from app.schemas.quote_assignment import AssignmentCreate, AssignmentRead
 from app.schemas.eworks_sync_api import (
     EworksActiveSyncRun,
@@ -299,6 +300,7 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
     quotes_count = db.query(EworksQuote).count()
     jobs_count = db.query(EworksJob).count()
     customers_count = db.query(EworksCustomer).count()
+    products_count = db.query(Product).count()
 
     last_q = (
         db.query(EworksQuote.synced_at)
@@ -315,6 +317,11 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
         .order_by(EworksCustomer.synced_at.desc())
         .first()
     )
+    last_p = (
+        db.query(Product.updated_at)
+        .order_by(Product.updated_at.desc())
+        .first()
+    )
     active = get_running_sync_run(db)
     background_config = build_background_sync_config()
     last_background = serialize_background_sync_run(get_last_background_sync_run(db))
@@ -324,9 +331,11 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
             quotes_count=quotes_count,
             jobs_count=jobs_count,
             customers_count=customers_count,
+            products_count=products_count,
             last_quotes_sync=str(last_q[0]) if last_q else None,
             last_jobs_sync=str(last_j[0]) if last_j else None,
             last_customers_sync=str(last_c[0]) if last_c else None,
+            last_products_sync=str(last_p[0]) if last_p else None,
             eworks_api_enabled=bool(cfg.eworks_api_enabled),
             active_sync=_serialize_active_run(active),
             background_sync=EworksBackgroundSyncConfigRead(**background_config),

@@ -16,8 +16,10 @@ import {
   LoadingState,
   PageHeader,
   PaginationBar,
+  PageTabs,
   SecondaryButton,
   StatusBadge,
+  TagBadges,
   filterInputClass,
 } from "@/components/ui";
 import { JobDetailModal, QuoteDetailModal } from "@/components/manager/sync-detail-modals";
@@ -51,31 +53,6 @@ function fmtDate(val: string | null | undefined): string {
 function fmtMoney(val: number | null | undefined): string {
   if (val === null || val === undefined) return "—";
   return `£${val.toFixed(2)}`;
-}
-
-function TagBadges({ tags }: { tags?: string[] }) {
-  if (!tags?.length) {
-    return <span className="text-slate-400">—</span>;
-  }
-
-  const maxVisible = 2;
-  const visible = tags.slice(0, maxVisible);
-  const hiddenCount = tags.length - visible.length;
-
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {visible.map((tag) => (
-        <StatusBadge key={tag} tone="info" className="max-w-[8rem] truncate" title={tag}>
-          {tag.length > 18 ? `${tag.slice(0, 18)}…` : tag}
-        </StatusBadge>
-      ))}
-      {hiddenCount > 0 ? (
-        <span className="text-xs text-slate-500" title={tags.slice(maxVisible).join(", ")}>
-          +{hiddenCount} more
-        </span>
-      ) : null}
-    </div>
-  );
 }
 
 function quoteListCustomer(q: EworksQuoteRecord): string {
@@ -355,32 +332,17 @@ export default function ManagerQuotesPage() {
     <div className="space-y-6" data-testid="manager-quotes-page">
       <PageHeader title="Quotes" />
 
-      <div className="flex gap-1 border-b border-slate-200">
-        {(
-          [
-            { id: "quotes" as const, label: "Quotes" },
-            { id: "jobs" as const, label: "Jobs" },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => {
-              setActiveTab(tab.id);
-              resetOffset();
-            }}
-            data-testid={`tab-${tab.id}`}
-            className={[
-              "px-4 py-2 text-sm font-medium transition-colors",
-              activeTab === tab.id
-                ? "border-b-2 border-blue-600 text-blue-600"
-                : "text-slate-500 hover:text-slate-700",
-            ].join(" ")}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <PageTabs
+        tabs={[
+          { id: "quotes" as const, label: "Quotes" },
+          { id: "jobs" as const, label: "Jobs" },
+        ]}
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          resetOffset();
+        }}
+      />
 
       <SharedFilters
         search={search}
@@ -424,14 +386,11 @@ export default function ManagerQuotesPage() {
         <LoadingState message={activeTab === "quotes" ? "Loading quotes…" : "Loading jobs…"} />
       ) : activeTab === "quotes" ? (
         quoteItems.length === 0 ? (
-          <EmptyState
-            title="No synced quotes found."
-            description="No synced quotes."
-          />
+          <EmptyState title="No synced quotes found." />
         ) : (
           <>
             <DataTable testId="quotes-table">
-              <DataTableHead>
+              <DataTableHead sticky>
                 <DataTableCell header>Quote Ref</DataTableCell>
                 <DataTableCell header>eWorks Quote ID</DataTableCell>
                 <DataTableCell header>Customer</DataTableCell>
@@ -462,18 +421,15 @@ export default function ManagerQuotesPage() {
                     <DataTableCell>
                       <TagBadges tags={quoteListTags(q)} />
                     </DataTableCell>
-                    <DataTableCell>{quoteListDate(q)}</DataTableCell>
-                    <DataTableCell align="right">{fmtMoney(quoteListTotal(q))}</DataTableCell>
-                    <DataTableCell>{fmtDate(q.synced_at)}</DataTableCell>
+                    <DataTableCell className="whitespace-nowrap">{quoteListDate(q)}</DataTableCell>
+                    <DataTableCell align="right" className="whitespace-nowrap tabular-nums">
+                      {fmtMoney(quoteListTotal(q))}
+                    </DataTableCell>
+                    <DataTableCell className="whitespace-nowrap text-slate-600">{fmtDate(q.synced_at)}</DataTableCell>
                     <DataTableCell>
-                      <button
-                        type="button"
-                        className="text-sm font-medium text-blue-600 hover:text-blue-800"
-                        onClick={() => void openQuoteDetail(q.id)}
-                        data-testid={`quote-view-${q.id}`}
-                      >
-                        View Details
-                      </button>
+                      <SecondaryButton size="sm" onClick={() => void openQuoteDetail(q.id)} data-testid={`quote-view-${q.id}`}>
+                        View
+                      </SecondaryButton>
                     </DataTableCell>
                   </DataTableRow>
                 ))}
@@ -488,10 +444,7 @@ export default function ManagerQuotesPage() {
           </>
         )
       ) : jobItems.length === 0 ? (
-        <EmptyState
-          title="No synced jobs found."
-          description="No synced quotes."
-        />
+        <EmptyState title="No synced jobs found." />
       ) : (
         <>
           <DataTable testId="jobs-table">
@@ -534,14 +487,9 @@ export default function ManagerQuotesPage() {
                   <DataTableCell align="right">{fmtMoney(j.total)}</DataTableCell>
                   <DataTableCell>{fmtDate(j.synced_at)}</DataTableCell>
                   <DataTableCell>
-                    <button
-                      type="button"
-                      className="text-sm font-medium text-blue-600 hover:text-blue-800"
-                      onClick={() => void openJobDetail(j.id)}
-                      data-testid={`job-view-${j.id}`}
-                    >
-                      View Details
-                    </button>
+                    <SecondaryButton size="sm" onClick={() => void openJobDetail(j.id)} data-testid={`job-view-${j.id}`}>
+                      View
+                    </SecondaryButton>
                   </DataTableCell>
                 </DataTableRow>
               ))}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { KeyboardEvent } from "react";
 
-import { DateText, StatusBadge } from "@/components/ui";
+import { DateText, TagBadges } from "@/components/ui";
 import type { ManagerDashboardQuoteRow } from "@/lib/manager-dashboard";
 
 type BucketAccent = "blue" | "amber" | "emerald";
@@ -31,28 +31,6 @@ function fmtMoney(val: number | null | undefined): string | null {
   return `£${val.toFixed(2)}`;
 }
 
-function CompactTagBadges({ tags }: { tags?: string[] }) {
-  if (!tags?.length) {
-    return null;
-  }
-
-  const visible = tags.slice(0, 2);
-  const extra = tags.length - visible.length;
-
-  return (
-    <div className="flex flex-wrap gap-1">
-      {visible.map((tag) => (
-        <StatusBadge key={tag} tone="info">
-          {tag}
-        </StatusBadge>
-      ))}
-      {extra > 0 ? (
-        <StatusBadge tone="neutral">+{extra}</StatusBadge>
-      ) : null}
-    </div>
-  );
-}
-
 function handleCardKeyDown(
   event: KeyboardEvent<HTMLDivElement>,
   onActivate: () => void,
@@ -78,7 +56,7 @@ export function DashboardQuoteCard({
       role="button"
       tabIndex={0}
       aria-label={`View details for quote ${quote.quote_ref ?? quote.id}`}
-      className="cursor-pointer rounded-lg border border-slate-200 bg-slate-50 p-4 transition hover:border-blue-300 hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+      className="cursor-pointer rounded-lg border border-slate-200 bg-white p-4 transition hover:border-blue-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
       data-testid={`dashboard-quote-card-${quote.id}`}
       onClick={activate}
       onKeyDown={(event) => handleCardKeyDown(event, activate)}
@@ -93,9 +71,11 @@ export function DashboardQuoteCard({
 
         <div className="flex flex-wrap items-center gap-2">
           {quote.status_name || quote.status ? (
-            <StatusBadge tone="neutral">{quote.status_name ?? quote.status}</StatusBadge>
+            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+              {quote.status_name ?? quote.status}
+            </span>
           ) : null}
-          <CompactTagBadges tags={quote.tags} />
+          <TagBadges tags={quote.tags} compact maxVisible={2} emptyLabel="" />
         </div>
 
         <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
@@ -120,8 +100,6 @@ export function DashboardQuoteCard({
             Synced <DateText value={quote.synced_at} includeTime />
           </p>
         ) : null}
-
-        <p className="text-sm font-medium text-blue-600">View Details</p>
       </div>
     </div>
   );
@@ -153,11 +131,11 @@ export function QuoteBucketColumn({
       className={`flex min-h-[18rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm border-t-4 ${styles.border}`}
       data-testid={testId}
     >
-      <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4">
-        <div className="min-w-0 space-y-2">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+        <div className="flex min-w-0 items-center gap-3">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <span
-            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${styles.badge}`}
+            className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tabular-nums ring-1 ring-inset ${styles.badge}`}
             data-testid={`${testId}-count`}
           >
             {count}
@@ -173,7 +151,7 @@ export function QuoteBucketColumn({
         </Link>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 p-4" data-testid={`${testId}-cards`}>
+      <div className="flex flex-1 flex-col gap-4 p-4" data-testid={`${testId}-cards`}>
         {quotes.length === 0 ? (
           <div
             className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600"

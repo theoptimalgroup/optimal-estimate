@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CombinedNotesModal,
   formatSubmittedAt,
   money,
   WorkSection,
   WorkSelectionBar,
+  QuoteAdditionalChargesSection,
+  QuoteSummaryBreakdown,
 } from "@/components/eworks-dashboard";
 import { ClientLinkPanel } from "@/components/dashboard/client-link-panel";
 import { QuoteAcceptancePanel } from "@/components/quote-acceptance-panel";
@@ -33,6 +35,7 @@ import {
 import type { DashboardClient } from "@/lib/dashboard-client";
 import type { DashboardQuoteItem, ReopenQuoteResponse } from "@/lib/dashboard";
 import { downloadSessionPdf } from "@/lib/eworks-session";
+import { defaultOpenWorkIndexes, formatQuoteSummaryTitle } from "@/lib/work-label";
 
 type QuoteReviewDetailProps = {
   sessionId: string;
@@ -42,6 +45,7 @@ type QuoteReviewDetailProps = {
   onUnlockSuccess?: (reopened: ReopenQuoteResponse, quote: DashboardQuoteItem) => void;
   shell?: "dashboard" | "embedded";
   enableClientLink?: boolean;
+  showClientAcceptance?: boolean;
 };
 
 export function QuoteReviewDetail({
@@ -52,6 +56,7 @@ export function QuoteReviewDetail({
   onUnlockSuccess,
   shell = "dashboard",
   enableClientLink = false,
+  showClientAcceptance = false,
 }: QuoteReviewDetailProps) {
   const router = useRouter();
   const [quote, setQuote] = useState<DashboardQuoteItem | null>(null);
@@ -72,6 +77,7 @@ export function QuoteReviewDetail({
   const [refilling, setRefilling] = useState(false);
   const [refillError, setRefillError] = useState<string | null>(null);
   const [unlockMessage, setUnlockMessage] = useState<string | null>(null);
+  const initializedOpenWorksSessionId = useRef<string | null>(null);
 
   const loadQuote = useCallback(async () => {
     setLoading(true);
@@ -97,6 +103,28 @@ export function QuoteReviewDetail({
   useEffect(() => {
     void loadQuote();
   }, [loadQuote]);
+
+  useEffect(() => {
+    if (!quote) {
+      initializedOpenWorksSessionId.current = null;
+      setOpenWorks(new Set());
+      return;
+    }
+    if (initializedOpenWorksSessionId.current === quote.session_id) {
+      return;
+    }
+    initializedOpenWorksSessionId.current = quote.session_id;
+    setOpenWorks(
+      new Set(
+        defaultOpenWorkIndexes(
+          quote.works.map((work) => ({
+            work_index: work.work_index,
+            scope: work.scope ?? work.details?.scope ?? null,
+          })),
+        ),
+      ),
+    );
+  }, [quote]);
 
   const handleCalculateNotes = async () => {
     if (!quote || selectedWorks.size === 0) return;
@@ -234,33 +262,46 @@ export function QuoteReviewDetail({
       <>
         <div className={cn("space-y-6", selectedWorks.size > 0 && "pb-20")}>
           {enableClientLink ? <ClientLinkPanel sessionId={quote.session_id} /> : null}
-          <QuoteAcceptancePanel
-            acceptance={normalizeQuoteAcceptance(quote.acceptance as Record<string, unknown> | undefined)}
-            showEworksSync={enableClientLink}
-            onRetryEworksSync={
-              enableClientLink
-                ? async () => {
-                    const sync = await retryEworksAcceptanceSync(quote.session_id);
-                    setQuote((current) =>
-                      current
-                        ? {
-                            ...current,
-                            acceptance: {
-                              ...(current.acceptance ?? { accepted: true, accepted_at: null, name: null }),
-                              eworks_sync: sync,
-                            },
-                          }
-                        : current,
-                    );
-                  }
-                : undefined
-            }
-          />
-          <SectionCard title={quote.trade_name} description={`Submitted ${formatSubmittedAt(quote.submitted_at)}`}>
+          {showClientAcceptance ? (
+            <QuoteAcceptancePanel
+              acceptance={normalizeQuoteAcceptance(quote.acceptance as Record<string, unknown> | undefined)}
+              showEworksSync={enableClientLink}
+              onRetryEworksSync={
+                enableClientLink
+                  ? async () => {
+                      const sync = await retryEworksAcceptanceSync(quote.session_id);
+                      setQuote((current) =>
+                        current
+                          ? {
+                              ...current,
+                              acceptance: {
+                                ...(current.acceptance ?? { accepted: true, accepted_at: null, name: null }),
+                                eworks_sync: sync,
+                              },
+                            }
+                          : current,
+                      );
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
+          <SectionCard
+            testId="quote-summary-card"
+            title={formatQuoteSummaryTitle()}
+            description={`Submitted ${formatSubmittedAt(quote.submitted_at)}`}
+          >
             <div className="flex flex-wrap items-end justify-between gap-4">
-              <p className="text-sm text-slate-600">
-                Job {quote.job_number} · {quote.client_name}
-              </p>
+              <div className="space-y-1">
+                <p className="text-sm text-slate-600">
+                  Job {quote.job_number} · {quote.client_name}
+                </p>
+                {quote.trade_name ? (
+                  <p className="text-sm text-slate-600" data-testid="quote-summary-trade">
+                    Trade: {quote.trade_name}
+                  </p>
+                ) : null}
+              </div>
               <div className="text-right">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Final total</p>
                 <p className="text-2xl font-bold text-blue-700">
@@ -270,11 +311,12 @@ export function QuoteReviewDetail({
             </div>
             {pdfError ? <p className="mt-3 text-sm text-rose-600">{pdfError}</p> : null}
             {refillError ? <p className="mt-3 text-sm text-rose-600">{refillError}</p> : null}
+            <QuoteSummaryBreakdown quote={quote} />
           </SectionCard>
 
           <div className="space-y-3">
             <EworksSectionTitle title="Works" />
-            <p className="text-sm text-optimal-muted">Select works to combine internal notes.</p>
+            <p className="text-sm text-optimal-muted">Select works for combined notes.</p>
             {notesError && <p className="text-sm text-red-600">{notesError}</p>}
             {quote.works.map((work) => (
               <WorkSection
@@ -289,6 +331,8 @@ export function QuoteReviewDetail({
               />
             ))}
           </div>
+
+          <QuoteAdditionalChargesSection lines={quote.additional_charges ?? []} />
 
           {quote.internal_notes ? (
             <SectionCard title="Internal notes (combined)">

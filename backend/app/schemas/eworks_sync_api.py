@@ -199,9 +199,11 @@ class EworksSyncStatusResponse(BaseModel):
     quotes_count: int
     jobs_count: int
     customers_count: int
+    products_count: int = 0
     last_quotes_sync: str | None
     last_jobs_sync: str | None
     last_customers_sync: str | None
+    last_products_sync: str | None = None
     eworks_api_enabled: bool
     active_sync: EworksActiveSyncRun | None = None
     background_sync: EworksBackgroundSyncConfigRead

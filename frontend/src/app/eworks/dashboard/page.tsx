@@ -100,8 +100,8 @@ function EworksDashboardContent() {
       }
     >
       {unlockedQuote && (
-        <div className="mb-4 rounded-lg border border-optimal-orange/40 bg-optimal-orange/10 p-4">
-          <p className="text-sm font-medium text-gray-900">Quote {unlockedQuote} is unlocked.</p>
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <p className="text-sm font-medium text-slate-900">Quote {unlockedQuote} is unlocked.</p>
           {unlockedSessionId && unlockedSessionToken ? (
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <Link
@@ -112,7 +112,7 @@ function EworksDashboardContent() {
               <button
                 type="button"
                 onClick={() => router.replace("/eworks/dashboard")}
-                className="text-sm text-optimal-muted underline-offset-2 hover:text-gray-900 hover:underline"
+                className="text-sm text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline"
               >
                 Dismiss
               </button>

@@ -9,6 +9,7 @@ from app.schemas.eworks_link import (
     Step2Snapshot,
     WorkBlockSnapshot,
     WorkBreakdownResult,
+    quote_additional_charge_lines,
 )
 from app.services.eworks_pdf_context_service import _supplier_display_title, build_eworks_estimate_pdf_context
 
@@ -155,6 +156,57 @@ def test_render_eworks_estimate_document_includes_form_sections():
     assert file_name.startswith("document_Q21863")
 
 
+def test_quote_additional_charge_lines_omits_ulez_and_waste():
+    step2 = Step2Snapshot(
+        congestion_required=True,
+        congestion_amount=Decimal("18"),
+        travel_charge=Decimal("10"),
+        other_charge=Decimal("5"),
+        other_charge_reason="Access fee",
+        ulez_required=True,
+        ulez_amount=Decimal("12.50"),
+        waste_disposal_required=True,
+        waste_disposal_amount=Decimal("45"),
+    )
+    lines = quote_additional_charge_lines(step2)
+    joined = " ".join(lines)
+    assert "Congestion: £18" in joined
+    assert "Travel: £10" in joined
+    assert "Other: £5" in joined
+    assert "ULEZ" not in joined
+    assert "Waste disposal" not in joined
+
+
+def test_pdf_charges_omits_ulez_and_waste():
+    step2 = Step2Snapshot(
+        ulez_required=True,
+        ulez_amount=Decimal("12.50"),
+        waste_disposal_required=True,
+        waste_disposal_amount=Decimal("45"),
+        congestion_required=True,
+        congestion_amount=Decimal("18"),
+    )
+    context = build_eworks_estimate_pdf_context(
+        step1=_step1(),
+        step2=step2,
+        breakdown=CalculationBreakdown(
+            labour=[],
+            materials=[],
+            charges=[],
+            subtotal=Decimal("100"),
+            vat_rate=Decimal("20"),
+            vat_total=Decimal("20"),
+            final_total=Decimal("120"),
+            formula_version="test",
+        ),
+        client_view={"calculation": {"subtotal": 100, "vat_rate": 20, "vat_total": 20, "final_total": 120}},
+    )
+    labels = [field["label"] for field in context["charges_fields"]]
+    assert "Congestion charge" in labels
+    assert "ULEZ charge" not in labels
+    assert "Waste disposal charge" not in labels
+
+
 def test_pdf_charges_fixed_parking_omits_hourly_fields():
     step2 = Step2Snapshot(
         parking_required=True,
@@ -217,16 +269,16 @@ def test_pdf_charges_hourly_parking_shows_rate_and_hours():
     assert "Parking fixed amount (£)" not in labels
 
 
-def test_pdf_work_parking_section_includes_vehicles_notes_and_maps():
+def test_pdf_quote_level_parking_in_charges_not_work_form():
     step2 = Step2Snapshot(
         works=[
             WorkBlockSnapshot(
-                scope="Work with parking",
+                scope="Work with legacy parking fields",
                 parking_required=True,
                 parking_type="fixed",
                 parking_fixed_amount=Decimal("50"),
                 parking_vehicles=2,
-                parking_notes="Bay 12 only; ring caretaker on arrival",
+                parking_notes="Legacy work note",
                 parking_latitude=Decimal("51.5074"),
                 parking_longitude=Decimal("-0.1278"),
             )
@@ -234,6 +286,10 @@ def test_pdf_work_parking_section_includes_vehicles_notes_and_maps():
         parking_required=True,
         parking_type="fixed",
         parking_fixed_amount=Decimal("100"),
+        parking_vehicles=2,
+        parking_latitude=Decimal("51.5074"),
+        parking_longitude=Decimal("-0.1278"),
+        parking_notes="Quote-level parking notes",
     )
     context = build_eworks_estimate_pdf_context(
         step1=_step1(),
@@ -251,13 +307,15 @@ def test_pdf_work_parking_section_includes_vehicles_notes_and_maps():
         client_view={"calculation": {"subtotal": 100, "vat_rate": 20, "vat_total": 20, "final_total": 120}},
     )
     parking = context["work_forms"][0]["parking"]
-    assert parking["required"] is True
-    labels = [field["label"] for field in parking["fields"]]
-    assert "Number of vehicles" in labels
-    assert parking["notes"] == "Bay 12 only; ring caretaker on arrival"
-    assert parking["maps_url"] == "https://www.google.com/maps?q=51.5074,-0.1278"
+    assert parking["required"] is False
     charge_labels = [field["label"] for field in context["charges_fields"]]
+    assert "Parking fixed amount (£)" in charge_labels
     assert "Number of vehicles" in charge_labels
+    assert "GPS snapshot" in charge_labels
+    parking_notes = next(field for field in context["charges_fields"] if field["label"] == "Parking notes")
+    assert parking_notes["value"] == "Quote-level parking notes"
+    gps = next(field for field in context["charges_fields"] if field["label"] == "GPS snapshot")
+    assert "51.5074" in gps["value"]
 
 
 def test_build_eworks_pdf_results_context():

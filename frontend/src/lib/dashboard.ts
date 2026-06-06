@@ -18,6 +18,13 @@ export type DashboardWorkItem = {
   details?: WorkBlockSnapshot | null;
 };
 
+export type DashboardQuoteSummaryBreakdown = {
+  works_subtotal: number | string;
+  additional_charges: number | string;
+  vat_total: number | string;
+  final_total: number | string;
+};
+
 export type DashboardQuoteItem = {
   session_id: string;
   session_token: string;
@@ -28,6 +35,8 @@ export type DashboardQuoteItem = {
   submitted_at: string;
   final_total?: number | string | null;
   internal_notes?: string | null;
+  additional_charges?: string[];
+  breakdown?: DashboardQuoteSummaryBreakdown | null;
   works: DashboardWorkItem[];
   acceptance?: QuoteAcceptanceStatus;
 };
@@ -71,6 +80,69 @@ export type DashboardQuoteGroupAssignmentItem = {
   has_submission: boolean;
 };
 
+export type DashboardQuoteGroupComparisonChargeLine = {
+  label: string;
+  amount: number | string;
+};
+
+export type DashboardQuoteGroupComparisonWorkBreakdown = {
+  product_name?: string | null;
+  product_code?: string | null;
+  scope_preview?: string | null;
+  labour_subtotal?: number | string | null;
+  materials_subtotal?: number | string | null;
+  work_subtotal?: number | string | null;
+};
+
+export type DashboardQuoteGroupComparisonSummary = {
+  final_total?: number | string | null;
+  works_subtotal?: number | string | null;
+  labour_subtotal?: number | string | null;
+  materials_subtotal?: number | string | null;
+  additional_charges_total?: number | string | null;
+  vat_total?: number | string | null;
+  vat_rate?: number | string | null;
+  scope_preview?: string | null;
+  product_preview?: string | null;
+  works?: DashboardQuoteGroupComparisonWorkBreakdown[];
+  additional_charges?: DashboardQuoteGroupComparisonChargeLine[];
+};
+
+export type DashboardQuoteJobAssignmentDecision = {
+  id: number;
+  selected_session_id: string;
+  assignee_name: string;
+  assignee_email?: string | null;
+  assignment_id?: number | null;
+  assigned_at: string;
+  assigned_by_name?: string | null;
+  assigned_by_email?: string | null;
+};
+
+export type DashboardQuoteGroupAssignmentSubmissionRow = {
+  assignment_id: number | null;
+  assignment_type: string;
+  assignee_kind: string;
+  assignee_name: string;
+  assignee_email?: string | null;
+  assignment_status: string;
+  assigned_at?: string | null;
+  started_at?: string | null;
+  submitted_at?: string | null;
+  linked_session_id?: string | null;
+  submitted_by_name?: string | null;
+  submitted_by_email?: string | null;
+  submitted_by_role?: string | null;
+  final_total?: number | string | null;
+  works_count?: number | null;
+  is_latest?: boolean;
+  can_view_details?: boolean;
+  can_reopen?: boolean;
+  can_assign_job?: boolean;
+  is_job_assigned?: boolean;
+  comparison_summary?: DashboardQuoteGroupComparisonSummary | null;
+};
+
 export type DashboardQuoteGroupAssignmentSummary = {
   total_assignments: number;
   estimator_assignments: number;
@@ -103,6 +175,8 @@ export type DashboardQuoteGroupDetailItem = DashboardQuoteGroupItem & {
   review_status?: "pending" | "in_progress" | "ready_for_review" | "accepted" | string;
   assignment_summary?: DashboardQuoteGroupAssignmentSummary;
   assignments?: DashboardQuoteGroupAssignmentItem[];
+  assignment_submissions?: DashboardQuoteGroupAssignmentSubmissionRow[];
+  job_assignment_decision?: DashboardQuoteJobAssignmentDecision | null;
   sessions: DashboardQuoteGroupSessionDetailItem[];
 };
 
@@ -112,6 +186,17 @@ export type DashboardQuoteGroupsResponse = {
 
 export type DashboardQuoteGroupDetailResponse = {
   group: DashboardQuoteGroupDetailItem;
+};
+
+export type AssignQuoteJobRequest = {
+  selected_session_id: string;
+  assignee_name: string;
+  assignee_email?: string | null;
+  assignment_id?: number | null;
+};
+
+export type AssignQuoteJobResponse = {
+  decision: DashboardQuoteJobAssignmentDecision;
 };
 
 export function buildQuoteGroupHref(group: Pick<DashboardQuoteGroupItem, "quote_ref" | "eworks_quote_id">): string {

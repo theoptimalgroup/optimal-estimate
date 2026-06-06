@@ -212,7 +212,7 @@ def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) ->
         "time_frame": _time_frame_display(block),
         "engineer": _engineer_summary(block),
         "labour": _labour_summary(block),
-        "parking": _work_parking_section(block),
+        "parking": {"required": False, "fields": [], "notes": None, "maps_url": None},
         "other_notes": _display(block.other_notes),
     }
 
@@ -224,9 +224,7 @@ def _charges_fields(step2: Step2Snapshot) -> list[dict[str, str]]:
     if step2.parking_required:
         parking_type = (step2.parking_type or "fixed").strip().lower()
         fields.append({"label": "Parking type", "value": _display(step2.parking_type or "fixed")})
-        works = step2.works or []
-        if len(works) == 1 and works[0].parking_required:
-            fields.append({"label": "Number of vehicles", "value": _display(max(1, works[0].parking_vehicles or 1))})
+        fields.append({"label": "Number of vehicles", "value": _display(max(1, step2.parking_vehicles or 1))})
         if parking_type == "hourly":
             fields.extend(
                 [
@@ -236,13 +234,17 @@ def _charges_fields(step2: Step2Snapshot) -> list[dict[str, str]]:
             )
         else:
             fields.append({"label": "Parking fixed amount (£)", "value": _money(step2.parking_fixed_amount)})
+        maps_url = _google_maps_url(step2.parking_latitude, step2.parking_longitude)
+        if maps_url:
+            fields.append({"label": "GPS snapshot", "value": maps_url})
     fields.extend(
         [
             {"label": "Congestion charge", "value": "Yes" if step2.congestion_required else "No"},
             {"label": "Congestion amount (£)", "value": _money(step2.congestion_amount)},
             {"label": "Travel charge (£)", "value": _money(step2.travel_charge)},
             {"label": "Other charge (£)", "value": _money(step2.other_charge)},
-            {"label": "Other charge reason", "value": _display(step2.other_charge_reason)},
+            {"label": "Other charge notes", "value": _display(step2.other_charge_reason)},
+            {"label": "Parking notes", "value": _display(step2.parking_notes)},
         ]
     )
     return fields

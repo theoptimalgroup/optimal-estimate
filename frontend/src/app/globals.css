@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  /* App shell / dashboard tokens */
+  /* App shell tokens (slate + blue) */
   --app-bg: #f8fafc;
   --app-card: #ffffff;
   --app-text: #0f172a;
@@ -11,17 +11,17 @@
   --app-border: #e2e8f0;
   --app-primary: #2563eb;
   --app-primary-hover: #1d4ed8;
-  --app-success: #059669;
-  --app-warning: #d97706;
-  --app-error: #dc2626;
+  --app-success: #047857;
+  --app-warning: #b45309;
+  --app-error: #b91c1c;
 
-  /* eWorks calculator branding (unchanged) */
+  /* eWorks / legacy tokens — aligned to the same palette */
   --optimal-bg: #f8fafc;
   --optimal-bg-elevated: #ffffff;
   --optimal-panel: #f1f5f9;
   --optimal-surface: #ffffff;
-  --optimal-orange: #f9a825;
-  --optimal-orange-dark: #e09400;
+  --optimal-orange: #2563eb;
+  --optimal-orange-dark: #1d4ed8;
   --optimal-field: #ffffff;
   --optimal-field-text: #0f172a;
   --optimal-muted: #64748b;

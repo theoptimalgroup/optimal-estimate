@@ -129,6 +129,84 @@ def test_admin_can_get_user_detail(mock_settings, users_client, db_session):
     assert "password_hash" not in data
 
 
+@patch("app.services.user_service.settings")
+@patch("app.auth.dependencies.settings")
+def test_admin_can_create_user(mock_auth_settings, mock_user_settings, users_client, db_session):
+    _patch_dev_user(mock_auth_settings, role="admin")
+    mock_user_settings.auth_provider = "azure"
+    session, *_ = db_session
+
+    response = users_client.post(
+        "/api/v1/users",
+        json={
+            "email": "new.user@optimal.example",
+            "name": "New User",
+            "role": "estimator",
+            "is_active": True,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["email"] == "new.user@optimal.example"
+    assert data["name"] == "New User"
+    assert data["role"] == "estimator"
+    assert data["is_active"] is True
+    assert data["auth_provider"] == "azure"
+    assert "password_hash" not in data
+    assert "password_hash" not in response.text
+
+    audit = session.query(AuditLog).filter(AuditLog.action == "user_created").one()
+    assert audit.entity_type == "user"
+    assert audit.new_value is not None
+    assert "password_hash" not in (audit.new_value or {})
+
+
+@patch("app.auth.dependencies.settings")
+def test_create_user_duplicate_email_blocked(mock_settings, users_client, db_session):
+    _patch_dev_user(mock_settings, role="admin")
+    _, admin, _, _ = db_session
+
+    response = users_client.post(
+        "/api/v1/users",
+        json={
+            "email": admin.email.upper(),
+            "name": "Duplicate User",
+            "role": "manager",
+        },
+    )
+    assert response.status_code == 400
+    assert "already exists" in response.json()["detail"].lower()
+
+
+@patch("app.auth.dependencies.settings")
+def test_create_user_invalid_role_returns_422(mock_settings, users_client):
+    _patch_dev_user(mock_settings, role="admin")
+    response = users_client.post(
+        "/api/v1/users",
+        json={
+            "email": "bad.role@optimal.example",
+            "name": "Bad Role User",
+            "role": "superadmin",
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("role", ["manager", "engineer"])
+@patch("app.auth.dependencies.settings")
+def test_non_admin_cannot_create_user(mock_settings, users_client, role):
+    _patch_dev_user(mock_settings, role=role)
+    response = users_client.post(
+        "/api/v1/users",
+        json={
+            "email": "blocked@optimal.example",
+            "name": "Blocked User",
+            "role": "client",
+        },
+    )
+    assert response.status_code == 403
+
+
 @patch("app.auth.dependencies.settings")
 def test_admin_can_update_role(mock_settings, users_client, db_session):
     _patch_dev_user(mock_settings, role="admin")
@@ -172,6 +250,16 @@ def test_non_admin_cannot_list_or_update_users(mock_settings, users_client, db_s
 
     list_response = users_client.get("/api/v1/users")
     assert list_response.status_code == 403
+
+    create_response = users_client.post(
+        "/api/v1/users",
+        json={
+            "email": "blocked@optimal.example",
+            "name": "Blocked User",
+            "role": "client",
+        },
+    )
+    assert create_response.status_code == 403
 
     update_response = users_client.patch(
         f"/api/v1/users/{manager.id}",

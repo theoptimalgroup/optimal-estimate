@@ -25,15 +25,79 @@ async function mockAuthMe(page: Page, role: MockUserRole) {
 
 const EWORKS_SYNC_API = process.env.PLAYWRIGHT_API_URL ?? "http://127.0.0.1:8000";
 
-const MOCK_RUN_ID = "aaaa-1111";
+const MOCK_PRODUCTS = [
+  {
+    id: 1,
+    eworks_item_id: 1403,
+    product_name: "Plant Room",
+    product_code: "PR-0011",
+    scope_of_work: "Inspect plant room equipment",
+    description: "Annual inspection",
+    category: "Plumber",
+    type: "Products",
+    is_active: true,
+    selling_price: "100.00",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-06-01T00:00:00Z",
+    eworks_created_on: null,
+    eworks_last_updated_on: null,
+  },
+];
+
+async function mockProductsApi(page: Page) {
+  await page.route("**/api/v1/products**", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: MOCK_PRODUCTS,
+        meta: { total: 1, page: 1, per_page: 50, last_page: 1 },
+      }),
+    });
+  });
+}
+
+async function mockProductSyncApi(page: Page) {
+  await page.route("**/api/v1/integrations/eworks/products/sync", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          message: "eWorks products synced successfully",
+          summary: {
+            fetched: 10,
+            created: 2,
+            updated: 7,
+            skipped: 1,
+            failed: 0,
+            errors: [],
+          },
+        },
+      }),
+    });
+  });
+}
 
 const MOCK_IDLE_STATUS = {
   quotes_count: 0,
   jobs_count: 0,
   customers_count: 0,
+  products_count: 0,
   last_quotes_sync: null,
   last_jobs_sync: null,
   last_customers_sync: null,
+  last_products_sync: null,
   eworks_api_enabled: true,
   active_sync: null,
   background_sync: {
@@ -52,6 +116,8 @@ const MOCK_IDLE_STATUS = {
   },
   last_background_sync: null,
 };
+
+const MOCK_RUN_ID = "aaaa-1111";
 
 const MOCK_RUN_RUNNING = {
   id: MOCK_RUN_ID,
@@ -258,6 +324,15 @@ async function expectJobsTabContent(page: Page) {
   await expect(table.or(empty)).toBeVisible({ timeout: 30000 });
 }
 
+async function expectProductsTabContent(page: Page) {
+  const panel = page.getByTestId("eworks-sync-tab-products-panel");
+  await expect(panel).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId("manage-products-scope-link")).toBeVisible();
+  const table = panel.getByTestId("eworks-sync-products-table");
+  const empty = panel.getByTestId("eworks-sync-empty-products");
+  await expect(table.or(empty)).toBeVisible({ timeout: 30000 });
+}
+
 async function expectRecentSyncRunsContent(page: Page) {
   const table = page.getByTestId("eworks-sync-runs-table");
   const empty = page.getByTestId("eworks-sync-empty-runs");
@@ -298,7 +373,9 @@ test.describe("Admin: /admin/eworks-sync", () => {
     await expectNumericCountCard(page.getByTestId("eworks-sync-card-customers-count"));
     await expectNumericCountCard(page.getByTestId("eworks-sync-card-quotes-count"));
     await expectNumericCountCard(page.getByTestId("eworks-sync-card-jobs-count"));
-    await expect(page.getByTestId("eworks-sync-card-last-status")).toBeVisible();
+    await expectNumericCountCard(page.getByTestId("eworks-sync-card-products-count"));
+    await expect(page.getByTestId("eworks-sync-card-last-jobs-sync")).toBeVisible();
+    await expect(page.getByTestId("eworks-sync-card-last-products-sync")).toBeVisible();
   });
 
   test("admin sees background sync configuration", async ({ page }) => {
@@ -317,10 +394,27 @@ test.describe("Admin: /admin/eworks-sync", () => {
 
   test("admin sees sync buttons", async ({ page }) => {
     await gotoEworksSyncPage(page);
-    await expect(page.getByTestId("btn-sync-all")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByTestId("btn-sync-quotes")).toBeVisible();
-    await expect(page.getByTestId("btn-sync-jobs")).toBeVisible();
-    await expect(page.getByTestId("btn-sync-customers")).toBeVisible();
+    await expect(page.getByTestId("sync-data-card")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Sync Data")).toBeVisible();
+    await expect(page.getByTestId("sync-action-buttons")).toBeVisible();
+    await expect(page.getByTestId("btn-sync-all")).toHaveText("Sync All");
+    await expect(page.getByTestId("btn-sync-customers")).toHaveText("Customers");
+    await expect(page.getByTestId("btn-sync-quotes")).toHaveText("Quotes");
+    await expect(page.getByTestId("btn-sync-jobs")).toHaveText("Jobs");
+    await expect(page.getByTestId("btn-sync-products")).toHaveText("Products");
+    await expect(page.getByTestId("sync-last-synced")).toContainText("Last synced:");
+    await expect(page.getByTestId("sync-last-synced")).toContainText("Customers:");
+    await expect(page.getByTestId("sync-last-synced")).toContainText("Products:");
+  });
+
+  test("admin can trigger product sync and sees summary", async ({ page }) => {
+    await mockIdleEworksSyncStatus(page);
+    await mockProductSyncApi(page);
+    await gotoEworksSyncPage(page);
+    await page.getByTestId("btn-sync-products").click();
+    await expect(page.getByTestId("product-sync-result")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("product-sync-summary")).toBeVisible();
+    await expect(page.getByText("Product sync completed")).toBeVisible();
   });
 
   test("admin can trigger Sync All and sees result summary", async ({ page }) => {
@@ -372,6 +466,21 @@ test.describe("Admin: /admin/eworks-sync", () => {
     await expectJobsTabContent(page);
   });
 
+  test("admin can view Products tab", async ({ page }) => {
+    await mockProductsApi(page);
+    await gotoEworksSyncPage(page);
+    await page.getByTestId("eworks-sync-tab-products").click();
+    await expectProductsTabContent(page);
+    await expect(page.getByText("Plant Room")).toBeVisible();
+  });
+
+  test("Products tab manage link goes to Products/Scope", async ({ page }) => {
+    await mockProductsApi(page);
+    await gotoEworksSyncPage(page);
+    await page.getByTestId("eworks-sync-tab-products").click();
+    await expect(page.getByTestId("manage-products-scope-link")).toHaveAttribute("href", "/admin/products");
+  });
+
   test("no API key or secret visible in DOM", async ({ page }) => {
     await gotoEworksSyncPage(page);
     await assertNoSecretsVisible(page);
@@ -399,4 +508,5 @@ test("admin sidebar shows eWorks Sync navigation item", async ({ page }) => {
   await mockAuthMe(page, "admin");
   await page.goto("/admin/dashboard");
   await expect(page.getByRole("link", { name: /eWorks Sync/i })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("link", { name: /Products\/Scope/i })).toHaveCount(0);
 });

@@ -47,6 +47,8 @@ const mockUsers = [
 ];
 
 async function mockUsersApi(page: Page) {
+  const users = [...mockUsers];
+
   await page.route("**/api/v1/users**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
@@ -57,16 +59,51 @@ async function mockUsersApi(page: Page) {
         contentType: "application/json",
         body: JSON.stringify({
           success: true,
-          data: mockUsers,
-          meta: { total: 2, limit: 25, offset: 0 },
+          data: users,
+          meta: { total: users.length, limit: 25, offset: 0 },
         }),
+      });
+      return;
+    }
+
+    if (method === "POST" && url.pathname.endsWith("/users")) {
+      const body = route.request().postDataJSON() as {
+        email?: string;
+        name?: string;
+        role?: string;
+        is_active?: boolean;
+      };
+      const email = String(body.email ?? "").toLowerCase();
+      if (users.some((item) => item.email.toLowerCase() === email)) {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "A user with this email already exists" }),
+        });
+        return;
+      }
+      const created = {
+        id: "33333333-3333-3333-3333-333333333333",
+        email,
+        name: String(body.name ?? ""),
+        role: body.role ?? "estimator",
+        is_active: body.is_active ?? true,
+        auth_provider: "azure",
+        created_at: "2024-06-03T00:00:00Z",
+        updated_at: "2024-06-03T00:00:00Z",
+      };
+      users.push(created);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: created }),
       });
       return;
     }
 
     if (method === "GET" && url.pathname.includes("/users/")) {
       const userId = url.pathname.split("/").pop();
-      const user = mockUsers.find((item) => item.id === userId) ?? mockUsers[0];
+      const user = users.find((item) => item.id === userId) ?? users[0];
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -78,7 +115,7 @@ async function mockUsersApi(page: Page) {
     if (method === "PATCH") {
       const userId = url.pathname.split("/").pop();
       const body = route.request().postDataJSON() as { role?: string; name?: string; is_active?: boolean };
-      const user = mockUsers.find((item) => item.id === userId) ?? mockUsers[0];
+      const user = users.find((item) => item.id === userId) ?? users[0];
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -133,5 +170,39 @@ test.describe("Admin users page", () => {
     await page.getByTestId("user-save").click();
     await expect(page.getByTestId("user-edit-modal")).not.toBeVisible();
     await expect(page.getByText("password_hash")).toHaveCount(0);
+  });
+
+  test("admin sees Add User button", async ({ page }) => {
+    await mockAuthMe(page, "admin");
+    await mockUsersApi(page);
+    await page.goto("/admin/users");
+    await expect(page.getByTestId("btn-add-user")).toBeVisible();
+  });
+
+  test("admin can create user with mocked API", async ({ page }) => {
+    await mockAuthMe(page, "admin");
+    await mockUsersApi(page);
+    await page.goto("/admin/users");
+    await page.getByTestId("btn-add-user").click();
+    await expect(page.getByTestId("user-create-modal")).toBeVisible();
+    await page.getByTestId("user-create-name-input").fill("Estimator User");
+    await page.getByTestId("user-create-email-input").fill("estimator@optimal.example");
+    await page.getByTestId("user-create-role-select").selectOption("estimator");
+    await page.getByTestId("user-create-save").click();
+    await expect(page.getByTestId("user-create-modal")).not.toBeVisible();
+    await expect(page.getByTestId("user-create-success")).toContainText("estimator@optimal.example");
+    await expect(page.getByText("Estimator User")).toBeVisible();
+    await expect(page.getByText("password_hash")).toHaveCount(0);
+  });
+
+  test("admin sees duplicate email error when creating user", async ({ page }) => {
+    await mockAuthMe(page, "admin");
+    await mockUsersApi(page);
+    await page.goto("/admin/users");
+    await page.getByTestId("btn-add-user").click();
+    await page.getByTestId("user-create-name-input").fill("Duplicate Admin");
+    await page.getByTestId("user-create-email-input").fill("admin@optimal.example");
+    await page.getByTestId("user-create-save").click();
+    await expect(page.getByTestId("user-create-error")).toContainText("already exists");
   });
 });

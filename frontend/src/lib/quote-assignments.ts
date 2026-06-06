@@ -139,7 +139,8 @@ export async function startAssignmentEstimate(
 export async function getPublicAssignment(token: string): Promise<PublicAssignment> {
   const resp = await apiFetch<PublicAssignment>(
     `/api/v1/quote-assignments/public/${token}`,
-    { token: null },
+    {},
+    null,
   );
   return resp.data;
 }
@@ -149,7 +150,8 @@ export async function startPublicAssignmentEstimate(
 ): Promise<AssignmentStartEstimateResult> {
   const resp = await apiFetch<AssignmentStartEstimateResult>(
     `/api/v1/quote-assignments/public/${token}/start-estimate`,
-    { method: "POST", token: null },
+    { method: "POST" },
+    null,
   );
   return resp.data;
 }
@@ -163,8 +165,8 @@ export async function submitPublicAssignment(
     {
       method: "POST",
       body: JSON.stringify({ notes: notes ?? null }),
-      token: null,
     },
+    null,
   );
   return resp.data;
 }

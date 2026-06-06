@@ -140,6 +140,8 @@ async function mockQuestionnaireSessionRoutes(
   sessionToken: string,
   quoteDescription = "",
   uiStep = 0,
+  step1Overrides: Record<string, unknown> = {},
+  onPatch?: (body: Record<string, unknown>) => void,
 ) {
   await page.route("**/api/v1/trades**", async (route) => {
     await route.fulfill({
@@ -154,6 +156,8 @@ async function mockQuestionnaireSessionRoutes(
   await page.route(`**/api/v1/calculation-session/${sessionId}**`, async (route) => {
     const method = route.request().method();
     if (method === "PATCH") {
+      const patchBody = route.request().postDataJSON() as Record<string, unknown>;
+      onPatch?.(patchBody);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -184,6 +188,7 @@ async function mockQuestionnaireSessionRoutes(
             congestion_required: false,
             congestion_amount: 0,
             travel: 0,
+            ...step1Overrides,
           },
           step2: null,
           resolved: {
@@ -203,12 +208,32 @@ async function mockQuestionnaireSessionRoutes(
 }
 
 async function expandWorkBlock(page: import("@playwright/test").Page, workIndex = 0) {
-  const collapseLabel = `Collapse work ${workIndex + 1}`;
-  const expandBtn = page.getByRole("button", { name: new RegExp(`^(Expand|Collapse) work ${workIndex + 1}$`) });
-  const isExpanded = await page.getByRole("button", { name: collapseLabel }).isVisible().catch(() => false);
-  if (!isExpanded) {
-    await expandBtn.click();
+  const toggle = page.getByTestId(`work-block-toggle-${workIndex}`);
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
   }
+}
+
+async function selectWorkTab(
+  page: import("@playwright/test").Page,
+  tab: "product" | "scope" | "materials" | "labour" | "charges",
+  workIndex = 0,
+) {
+  await page.getByTestId(`work-tab-${tab}-${workIndex}`).click();
+}
+
+async function openStep2MockSession(
+  page: import("@playwright/test").Page,
+  sessionId: string,
+  sessionToken: string,
+) {
+  await mockProductsApi(page);
+  await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, "", 1);
+  await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
+    waitUntil: "networkidle",
+    timeout: 60000,
+  });
+  await expect(page.getByText("Step 2 of 3: Estimating Questionnaire")).toBeVisible({ timeout: 15000 });
 }
 
 async function selectProduct(
@@ -216,8 +241,13 @@ async function selectProduct(
   productLabel: string,
   workIndex = 0,
 ) {
-  const comboboxes = page.getByRole("combobox", { name: "" });
-  const combobox = comboboxes.nth(workIndex);
+  await expandWorkBlock(page, workIndex);
+  const block = page.getByTestId(`work-block-${workIndex}`);
+  const changeProduct = block.getByTestId(`change-product-${workIndex}`);
+  if (await changeProduct.isVisible().catch(() => false)) {
+    await changeProduct.click();
+  }
+  const combobox = block.getByRole("combobox").first();
   await combobox.click();
   await combobox.fill(productLabel.split(" · ")[0]);
   await page.getByRole("option", { name: productLabel }).click();
@@ -242,17 +272,21 @@ async function fillWorkBlock(
   },
 ) {
   await expandWorkBlock(page, workIndex);
-  const block = page.locator("main");
   if (productLabel) {
     await selectProduct(page, productLabel, workIndex);
   }
-  await block.locator("textarea").nth(workIndex).fill(scope);
-  await block.getByLabel("Skill Required").nth(workIndex).selectOption(skill);
-  await block.locator('input[type="number"]').nth(workIndex * 4 + 1).fill(materialCost);
-  await block.getByRole("checkbox", { name: "Engineer needed" }).nth(workIndex).check();
-  await block.getByLabel("Number of engineers").nth(workIndex).fill("1");
-  await block.getByLabel("Hours or Days").nth(workIndex).selectOption("hours");
-  await block.getByLabel("Duration").nth(workIndex).fill(duration);
+  await selectWorkTab(page, "scope", workIndex);
+  await page.getByTestId(`work-scope-${workIndex}`).fill(scope);
+  await selectWorkTab(page, "labour", workIndex);
+  const block = page.getByTestId(`work-block-${workIndex}`);
+  await block.getByLabel("Skill Required").selectOption(skill);
+  await selectWorkTab(page, "materials", workIndex);
+  await block.getByPlaceholder("0.00").first().fill(materialCost);
+  await selectWorkTab(page, "labour", workIndex);
+  await block.getByRole("checkbox", { name: "Engineer needed" }).check();
+  await block.getByLabel("Number of engineers").fill("1");
+  await block.getByLabel("Hours or Days").selectOption("hours");
+  await block.getByLabel("Duration").fill(duration);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -277,8 +311,11 @@ test.describe("eWorks calculate link flow", () => {
     const url = `${FRONTEND}/eworks/calculate?payload=${encodeURIComponent(raw)}&sig=${encodeURIComponent(sig)}`;
     await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
     await expect(page.getByText("Step 1 of 3")).toBeVisible({ timeout: 20000 });
-    await expect(page.getByText("Engineer Name")).toBeVisible();
-    await expect(page.getByText("Description of what quoting for")).toBeVisible();
+    await expect(page.getByTestId("estimation-quote-summary")).toBeVisible();
+    await expect(page.getByTestId("estimation-job-information")).toBeVisible();
+    await expect(page.getByTestId("estimation-property-client")).toBeVisible();
+    await expect(page.getByTestId("estimation-quote-description")).toBeVisible();
+    await expect(page.getByTestId("estimation-findings-report")).toBeVisible();
     await expect(page.getByText("Lamberts Chartered Surveyors")).toBeVisible();
 
     await page.getByRole("button", { name: "Continue" }).click();
@@ -317,7 +354,7 @@ test.describe("eWorks calculate link flow", () => {
 
     await fillWorkBlock(page, { scope: "First work scope." });
 
-    await page.getByRole("button", { name: "Add more works" }).click();
+    await page.getByTestId("add-work-button").click();
     await expect(page.getByRole("combobox")).toHaveCount(2);
     await fillWorkBlock(page, { scope: "Second work scope.", materialCost: "100", duration: "2", workIndex: 1 });
 
@@ -350,16 +387,17 @@ test.describe("eWorks calculate link flow", () => {
 
     await expandWorkBlock(page, 0);
     await selectProduct(page, "Plant Room · PR-0011", 0);
-    const scopeTextarea = page.locator("textarea").first();
+    await selectWorkTab(page, "scope", 0);
+    const scopeTextarea = page.getByTestId("work-scope-0");
     await expect(scopeTextarea).toHaveValue("Inspect plant room equipment and report findings.");
 
     await scopeTextarea.fill("Custom manual scope for work one.");
     await expect(scopeTextarea).toHaveValue("Custom manual scope for work one.");
 
-    await page.getByRole("button", { name: "Add more works" }).click();
+    await page.getByTestId("add-work-button").click();
     await expandWorkBlock(page, 1);
     await selectProduct(page, "Window Repair · WR-001", 1);
-    await expect(page.locator("textarea").nth(1)).toHaveValue("");
+    await expect(page.getByTestId("work-scope-1")).toHaveValue("");
 
     await page.getByRole("button", { name: "Reword with AI" }).first().click();
     await expect(page.getByRole("button", { name: "Reword with AI" }).first()).toBeEnabled();
@@ -387,6 +425,7 @@ test.describe("eWorks calculate link flow", () => {
     });
     await page.getByRole("button", { name: "Continue" }).click();
     await expandWorkBlock(page, 0);
+    await selectWorkTab(page, "scope", 0);
 
     await page.getByTestId("work-scope-0").fill("Manual scope written by estimator.");
     await selectProduct(page, "Plant Room · PR-0011", 0);
@@ -427,13 +466,15 @@ test.describe("eWorks calculate link flow", () => {
     await page.getByRole("button", { name: "Continue" }).click();
 
     await expandWorkBlock(page, 0);
-    await selectProduct(page, "Plant Room · PR-0011", 0);
+    await selectWorkTab(page, "scope", 0);
     await expect(page.getByTestId("work-scope-0")).toHaveValue("Inspect plant room equipment and report findings.");
 
-    await page.getByRole("button", { name: "Add more works" }).click();
+    await page.getByTestId("add-work-button").click();
     await expandWorkBlock(page, 1);
     await selectProduct(page, "Window Repair · WR-001", 1);
+    await selectWorkTab(page, "scope", 1);
     await expect(page.getByTestId("work-scope-1")).toHaveValue("");
+    await selectWorkTab(page, "scope", 0);
     await expect(page.getByTestId("work-scope-0")).toHaveValue("Inspect plant room equipment and report findings.");
   });
 
@@ -460,7 +501,7 @@ test.describe("eWorks calculate link flow", () => {
     await expandWorkBlock(page, 0);
     await selectProduct(page, "Plant Room · PR-0011", 0);
     await expect(page.getByTestId("work-block-0")).toContainText("Plant Room · PR-0011");
-    await expect(page.getByTestId("work-block-0")).toContainText("Work 1");
+    await expect(page.getByTestId("work-block-0")).not.toContainText("Work 1");
   });
 
   test("from-link API accepts signed payload for Lambert Carpenter", async ({ request }) => {
@@ -485,16 +526,13 @@ test.describe("eWorks calculate link flow", () => {
   });
 
   test("supplier card shows supplier name field without duplicate header title", async ({ page }) => {
-    await mockProductsApi(page);
     const sessionId = "e2e-supplier-ui";
     const sessionToken = "e2e-supplier-token";
-    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, "", 1);
-    await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
-      waitUntil: "networkidle",
-      timeout: 60000,
-    });
-    await expect(page.getByText("Step 2 of 3: Estimating Questionnaire")).toBeVisible({ timeout: 15000 });
+    await openStep2MockSession(page, sessionId, sessionToken);
     await expandWorkBlock(page, 0);
+    await selectWorkTab(page, "materials", 0);
+    await page.getByTestId("supplier-materials-section-0-toggle").click();
+    await page.getByTestId("supplier-toggle-0").click();
 
     const card = page.getByTestId("supplier-card-0");
     const nameInput = card.getByTestId("supplier-name-0");
@@ -504,10 +542,268 @@ test.describe("eWorks calculate link flow", () => {
     await nameInput.fill("Travis Perkins");
     await expect(nameInput).toHaveValue("Travis Perkins");
 
-    await page.getByRole("button", { name: "+ Add supplier" }).click();
+    await page.getByTestId("supplier-materials-section-0").getByRole("button", { name: "+ Add supplier" }).click();
     await expect(page.getByTestId("supplier-card-1")).toBeVisible();
-    await page.getByTestId("supplier-card-1").getByRole("button", { name: "Remove Supplier 2" }).click();
+    await page.getByTestId("supplier-remove-1").click();
     await expect(page.getByTestId("supplier-card-1")).toHaveCount(0);
+  });
+
+  test("materials tab shows collapsible suppliers and subtotals", async ({ page }) => {
+    await openStep2MockSession(page, "e2e-materials-subtotals", "e2e-materials-subtotals-token");
+    await expandWorkBlock(page, 0);
+    await selectWorkTab(page, "materials", 0);
+
+    await expect(page.getByTestId("supplier-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("shelf-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("supplier-name-0")).toHaveCount(0);
+    await expect(page.getByTestId("supplier-materials-subtotal-0")).toContainText("£0.00");
+    await expect(page.getByTestId("shelf-materials-subtotal-0")).toContainText("£0.00");
+    await expect(page.getByTestId("grand-total-materials-0")).toContainText("£0.00");
+
+    await page.getByTestId("supplier-materials-section-0-toggle").click();
+    await expect(page.getByTestId("supplier-toggle-0")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("supplier-name-0")).toHaveCount(0);
+
+    await page.getByTestId("supplier-toggle-0").click();
+    await expect(page.getByTestId("supplier-toggle-0")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("supplier-name-0")).toBeVisible();
+
+    await page.getByTestId("supplier-toggle-0").click();
+    await expect(page.getByTestId("supplier-toggle-0")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("supplier-name-0")).toHaveCount(0);
+
+    await page.getByTestId("supplier-toggle-0").click();
+    const qtyInputs = page.getByTestId("supplier-card-0").locator('input[inputmode="decimal"]');
+    await qtyInputs.nth(0).fill("2");
+    await qtyInputs.nth(1).fill("60");
+    await qtyInputs.nth(2).fill("0");
+
+    await expect(page.getByTestId("supplier-subtotal-0")).toHaveText("£120.00");
+    await expect(page.getByTestId("supplier-total-0")).toHaveText("£120.00");
+    await expect(page.getByTestId("supplier-materials-subtotal-0")).toContainText("£120.00");
+    await expect(page.getByTestId("shelf-materials-subtotal-0")).toContainText("£0.00");
+    await expect(page.getByTestId("grand-total-materials-0")).toContainText("£120.00");
+
+    await page.getByTestId("supplier-materials-section-0").getByRole("button", { name: "+ Add supplier" }).click();
+    await expect(page.getByTestId("supplier-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("supplier-toggle-1")).toHaveAttribute("aria-expanded", "false");
+    await page.getByTestId("supplier-toggle-1").click();
+    await page.getByTestId("supplier-name-1").fill("Second Supplier");
+    await expect(page.getByTestId("supplier-card-1")).toContainText("Second Supplier");
+  });
+
+  test("materials section headers include add buttons that expand collapsed sections", async ({ page }) => {
+    await openStep2MockSession(page, "e2e-materials-header-actions", "e2e-materials-header-actions-token");
+    await expandWorkBlock(page, 0);
+    await selectWorkTab(page, "materials", 0);
+
+    await expect(page.getByTestId("materials-actions-0")).toHaveCount(0);
+
+    const supplierSection = page.getByTestId("supplier-materials-section-0");
+    const shelfSection = page.getByTestId("shelf-materials-section-0");
+
+    await expect(supplierSection.getByTestId("supplier-materials-add-0")).toBeVisible();
+    await expect(shelfSection.getByTestId("shelf-materials-add-0")).toBeVisible();
+
+    await expect(page.getByTestId("supplier-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("shelf-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+
+    await supplierSection.getByRole("button", { name: "+ Add supplier" }).click();
+    await expect(page.getByTestId("supplier-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("shelf-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("supplier-card-1")).toBeVisible();
+
+    await page.getByTestId("supplier-materials-section-0-toggle").click();
+    await expect(page.getByTestId("supplier-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+
+    await shelfSection.getByRole("button", { name: "+ Add material" }).click();
+    await expect(page.getByTestId("shelf-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "true");
+    await expect(
+      shelfSection.locator('input[name*="shelf_materials_rows"][name*=".link"]'),
+    ).toHaveCount(2);
+
+    await page.getByTestId("shelf-materials-section-0-toggle").click();
+    await expect(page.getByTestId("shelf-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+    await page.getByTestId("shelf-materials-section-0-toggle").click();
+    await expect(page.getByTestId("shelf-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("materials tab is collapsed by default and scope is default when product selected", async ({ page }) => {
+    await openStep2MockSession(page, "e2e-materials-defaults", "e2e-materials-defaults-token");
+    await expandWorkBlock(page, 0);
+
+    await expect(page.getByTestId("work-tab-product-0")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("work-tab-materials-0")).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByTestId("work-panel-product-0")).toBeVisible();
+    await expect(page.getByTestId("supplier-name-0")).toHaveCount(0);
+
+    await selectProduct(page, "Plant Room · PR-0011", 0);
+    await expect(page.getByTestId("work-tab-scope-0")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("work-tab-materials-0")).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByTestId("work-scope-0")).toBeVisible();
+    await expect(page.getByTestId("supplier-name-0")).toHaveCount(0);
+
+    await selectWorkTab(page, "materials", 0);
+    await expect(page.getByTestId("work-panel-materials-0")).toBeVisible();
+    await expect(page.getByTestId("materials-summary-0")).toBeVisible();
+    await expect(page.getByTestId("supplier-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("shelf-materials-section-0-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("supplier-name-0")).toHaveCount(0);
+    await expect(page.getByTestId("materials-actions-0")).toHaveCount(0);
+    await expect(page.getByTestId("supplier-materials-section-0").getByTestId("supplier-materials-add-0")).toBeVisible();
+    await expect(page.getByTestId("shelf-materials-section-0").getByTestId("shelf-materials-add-0")).toBeVisible();
+  });
+
+  test("materials edits autosave when supplier section is collapsed", async ({ page }) => {
+    const sessionId = "e2e-materials-autosave";
+    const sessionToken = "e2e-materials-autosave-token";
+    const patchBodies: Record<string, unknown>[] = [];
+    await mockProductsApi(page);
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, "", 1, {}, (body) => patchBodies.push(body));
+    await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+
+    await expandWorkBlock(page, 0);
+    await selectWorkTab(page, "materials", 0);
+    await page.getByTestId("supplier-materials-section-0-toggle").click();
+    await page.getByTestId("supplier-toggle-0").click();
+    const card = page.getByTestId("supplier-card-0");
+    await card.locator('input[name*="links.0.link"]').fill("Cable");
+    const qtyInputs = card.locator('input[inputmode="decimal"]');
+    await qtyInputs.nth(0).fill("2");
+    await qtyInputs.nth(1).fill("60");
+    await page.getByTestId("supplier-materials-section-0-toggle").click();
+    await expect(page.getByTestId("supplier-name-0")).toHaveCount(0);
+
+    await expect
+      .poll(
+        () =>
+          patchBodies.some((body) => {
+            const step2 = body.step2 as
+              | {
+                  works?: Array<{ materials_to_order?: Array<{ links?: Array<{ quantity?: number; cost?: number }> }> }>;
+                  materials_to_order?: Array<{ links?: Array<{ quantity?: number; cost?: number }> }>;
+                }
+              | undefined;
+            const link =
+              step2?.works?.[0]?.materials_to_order?.[0]?.links?.[0] ??
+              step2?.materials_to_order?.[0]?.links?.[0];
+            return Number(link?.quantity) === 2 && Number(link?.cost) === 60;
+          }),
+        { timeout: 15000 },
+      )
+      .toBeTruthy();
+  });
+
+  test("step 1 layout shows quote summary, job information, and property cards", async ({ page }) => {
+    const sessionId = "e2e-step1-layout";
+    const sessionToken = "e2e-step1-token";
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, "Plain quote description", 0, {
+      engineer_name: "Alex Engineer",
+      property_manager_name: "Kira Mcintyre",
+      contact: "Alex - 07960696064",
+    });
+    await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+
+    await expect(page.getByTestId("estimation-quote-summary")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("estimation-job-information")).toBeVisible();
+    await expect(page.getByTestId("estimation-property-client")).toBeVisible();
+    await expect(page.getByTestId("estimation-quote-description")).toBeVisible();
+    await expect(page.getByTestId("estimation-findings-report")).toBeVisible();
+    await expect(page.getByTestId("findings-report-input")).toBeEditable();
+    await expect(page.getByTestId("additional-charges-section")).toBeVisible();
+    await expect(page.getByTestId("quote-travel-charge")).toBeVisible();
+    await expect(page.getByText("Applied once to the whole quote, not per work item.")).toHaveCount(0);
+    await expect(page.getByText("Rate rule")).toHaveCount(0);
+    await expect(page.getByText(/COMMISSION/i)).toHaveCount(0);
+  });
+
+  test("shows customer not matched badge for unknown customer", async ({ page }) => {
+    const sessionId = "e2e-unknown-customer";
+    const sessionToken = "e2e-unknown-customer-token";
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, "", 0, {
+      client_name: "Unknown Customer",
+    });
+    await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+
+    await expect(page.getByTestId("customer-not-matched-badge")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("customer-not-matched-badge")).toHaveText("Customer not matched");
+  });
+
+  test("findings report autosaves after edit", async ({ page }) => {
+    const sessionId = "e2e-findings-autosave";
+    const sessionToken = "e2e-findings-autosave-token";
+    const patchBodies: Record<string, unknown>[] = [];
+    await mockQuestionnaireSessionRoutes(
+      page,
+      sessionId,
+      sessionToken,
+      "",
+      0,
+      {},
+      (body) => patchBodies.push(body),
+    );
+    await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+
+    const findingsInput = page.getByTestId("findings-report-input");
+    await expect(findingsInput).toBeVisible({ timeout: 15000 });
+    await findingsInput.fill("Updated findings from e2e");
+
+    await expect
+      .poll(() => patchBodies.some((body) => body.findings_report === "Updated findings from e2e"))
+      .toBeTruthy();
+  });
+
+  test("step 2 work block shows tabs and product-based header", async ({ page }) => {
+    await openStep2MockSession(page, "e2e-step2-layout", "e2e-step2-layout-token");
+
+    const workBlock = page.getByTestId("work-block-0");
+    await expect(workBlock).toContainText("Select product");
+    await expect(workBlock).not.toContainText("Work 1");
+    await expect(workBlock).not.toContainText("Work 2");
+    await expect(workBlock).not.toContainText("Missing scope");
+    await expect(page.getByText("No default scope configured")).toHaveCount(0);
+    await expect(page.getByTestId("work-summary-nav")).toHaveCount(0);
+    await expect(page.getByTestId("work-block-toggle-0")).toHaveAttribute("aria-expanded", "false");
+
+    await expandWorkBlock(page, 0);
+    await expect(page.getByTestId("work-tabs-0")).toBeVisible();
+    await expect(page.getByTestId("work-tab-product-0")).toBeVisible();
+    await expect(page.getByTestId("work-tab-scope-0")).toBeVisible();
+    await expect(page.getByTestId("work-tab-materials-0")).toBeVisible();
+    await expect(page.getByTestId("work-tab-labour-0")).toBeVisible();
+    await expect(page.getByTestId("work-tab-charges-0")).toHaveCount(0);
+    await expect(page.getByTestId("additional-charges-section")).toHaveCount(0);
+    await expect(page.getByTestId("work-tab-product-0")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("work-tab-materials-0")).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByRole("combobox").first()).toBeVisible();
+
+    await selectWorkTab(page, "scope", 0);
+    await expect(page.getByTestId("work-scope-0")).toBeVisible();
+
+    await selectWorkTab(page, "materials", 0);
+    await expect(page.getByTestId("materials-summary-0")).toBeVisible();
+    await expect(page.getByTestId("supplier-name-0")).toHaveCount(0);
+    await page.getByTestId("supplier-materials-section-0-toggle").click();
+    await page.getByTestId("supplier-toggle-0").click();
+    await expect(page.getByTestId("supplier-name-0")).toBeVisible();
+    await expect(page.getByTestId("supplier-name-0")).toBeEditable();
+  });
+
+  test("step 2 sticky footer shows add work and save status", async ({ page }) => {
+    await openStep2MockSession(page, "e2e-step2-footer", "e2e-step2-footer-token");
+    await expect(page.getByTestId("add-work-button")).toBeVisible();
   });
 
   test("renders malformed quote description when resuming session", async ({ page }) => {
@@ -591,6 +887,7 @@ test.describe("eWorks calculate link flow", () => {
     });
     await page.getByRole("button", { name: "Continue" }).click();
     await expandWorkBlock(page, 0);
+    await selectWorkTab(page, "scope", 0);
 
     const scopeTextarea = page.getByTestId("work-scope-0");
     const scopeValue = await scopeTextarea.inputValue();
@@ -605,6 +902,61 @@ test.describe("eWorks calculate link flow", () => {
     expect(productScopeValue).not.toMatch(/<span|<br|&nbsp;|<ol/i);
     await expect(page.getByTestId("work-block-0")).toContainText("HTML Product · HTML-001");
     await expect(page.getByTestId("work-block-0")).not.toContainText("<strong>");
+  });
+
+  test("shows additional charges on step 1 estimation form", async ({ page }) => {
+    const sessionId = "e2e-charges-step1";
+    const sessionToken = "e2e-charges-step1-token";
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, "", 0);
+    await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+
+    await expect(page.getByTestId("additional-charges-section")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("quote-travel-charge")).toBeVisible();
+    await expect(page.getByText("Parking charge")).toBeVisible();
+    await expect(page.getByText("Congestion charge")).toBeVisible();
+    await expect(page.getByText("ULEZ charge")).toHaveCount(0);
+    await expect(page.getByText("Waste disposal charge")).toHaveCount(0);
+    await expect(page.getByText("Applied once to the whole quote, not per work item.")).toHaveCount(0);
+  });
+
+  test("persists travel and other charges after step 2 navigation", async ({ page }) => {
+    await mockProductsApi(page);
+    const sessionId = "e2e-charges-persist";
+    const sessionToken = "e2e-charges-persist-token";
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, "", 0);
+    await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+
+    await expect(page.getByTestId("quote-travel-charge")).toBeVisible({ timeout: 15000 });
+    await page.getByTestId("quote-travel-charge").fill("42.50");
+    await page.getByLabel("Other charge (£)").fill("15");
+    await page.getByLabel("Other charge notes").fill("Site access fee");
+
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByText("Step 2 of 3: Estimating Questionnaire")).toBeVisible();
+    await expect(page.getByTestId("additional-charges-section")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Previous" }).click();
+    await expect(page.getByTestId("additional-charges-section")).toBeVisible();
+    await expect(page.getByTestId("quote-travel-charge")).toHaveValue("42.5");
+    await expect(page.getByLabel("Other charge (£)")).toHaveValue("15");
+    await expect(page.getByLabel("Other charge notes")).toHaveValue("Site access fee");
+  });
+
+  test("does not duplicate additional charges with multiple work blocks", async ({ page }) => {
+    await openStep2MockSession(page, "e2e-charges-single", "e2e-charges-single-token");
+
+    await page.getByTestId("add-work-button").click();
+    await expect(page.getByTestId("work-block-1")).toBeVisible();
+    await expect(page.getByTestId("additional-charges-section")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Previous" }).click();
+    await expect(page.getByTestId("additional-charges-section")).toHaveCount(1);
   });
 });
 

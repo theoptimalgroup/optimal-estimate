@@ -33,6 +33,13 @@ export type UserUpdatePayload = {
   is_active?: boolean;
 };
 
+export type UserCreatePayload = {
+  email: string;
+  name: string;
+  role: UserRole;
+  is_active?: boolean;
+};
+
 function normalizeUser(raw: Record<string, unknown>): ManagedUser {
   return {
     id: String(raw.id ?? ""),
@@ -77,6 +84,19 @@ export async function updateUser(userId: string, payload: UserUpdatePayload): Pr
   const response = await apiFetch<ManagedUser>(`/api/v1/users/${userId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+  return normalizeUser(response.data as unknown as Record<string, unknown>);
+}
+
+export async function createUser(payload: UserCreatePayload): Promise<ManagedUser> {
+  const response = await apiFetch<ManagedUser>("/api/v1/users", {
+    method: "POST",
+    body: JSON.stringify({
+      email: payload.email.trim(),
+      name: payload.name.trim(),
+      role: payload.role,
+      is_active: payload.is_active ?? true,
+    }),
   });
   return normalizeUser(response.data as unknown as Record<string, unknown>);
 }

@@ -129,11 +129,19 @@ export type Step2Snapshot = {
   parking_rate_per_hour?: number | string | null;
   parking_hours?: number | string | null;
   parking_fixed_amount?: number | string | null;
+  parking_vehicles?: number | null;
+  parking_latitude?: number | string | null;
+  parking_longitude?: number | string | null;
   congestion_required?: boolean;
   congestion_amount?: number | string;
   travel_charge?: number | string;
   other_charge?: number | string;
   other_charge_reason?: string | null;
+  ulez_required?: boolean;
+  ulez_amount?: number | string;
+  waste_disposal_required?: boolean;
+  waste_disposal_amount?: number | string;
+  parking_notes?: string | null;
 };
 
 export type ResolvedRuleInfo = {

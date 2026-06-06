@@ -7,6 +7,7 @@ import { useState, type ReactNode } from "react";
 
 import { AzureSignOutButton } from "@/components/auth/azure-sign-out-button";
 import { DevAuthStatus } from "@/components/auth/dev-auth-status";
+import { CompanyLogo } from "@/components/ui/company-logo";
 import { RoleBadge } from "@/components/ui/role-badge";
 import { useCurrentUser } from "@/lib/auth/auth-context";
 import { isAzureAuth } from "@/lib/auth/auth-config";
@@ -48,10 +49,10 @@ export function AppShell({ children }: AppShellProps) {
               mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
             )}
           >
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-5">
-              <div>
-                <p className="text-sm font-semibold text-slate-900">Optimal Estimate</p>
-                <p className="text-xs text-slate-500">Operations</p>
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-5">
+              <div className="min-w-0 space-y-2">
+                <CompanyLogo className="h-8" priority />
+                <p className="text-xs font-medium text-slate-500">Optimal Estimate</p>
               </div>
               <button
                 type="button"
@@ -95,8 +96,8 @@ export function AppShell({ children }: AppShellProps) {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
-          <div className="flex h-14 items-center justify-between gap-4 px-6">
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white shadow-sm">
+          <div className="flex min-h-16 items-center justify-between gap-4 px-6 py-3 lg:px-8">
             <div className="flex min-w-0 items-center gap-3">
               {showSidebar ? (
                 <button
@@ -108,8 +109,13 @@ export function AppShell({ children }: AppShellProps) {
                   <Menu className="size-5" />
                 </button>
               ) : null}
+              {showSidebar ? (
+                <CompanyLogo className="h-7 shrink-0 lg:hidden" />
+              ) : (
+                <CompanyLogo className="h-8 shrink-0" />
+              )}
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-slate-900">{pageTitle}</p>
+                <p className="truncate text-base font-semibold text-slate-900">{pageTitle}</p>
                 {user ? (
                   <p className="truncate text-xs text-slate-500">{user.email}</p>
                 ) : (
@@ -118,12 +124,12 @@ export function AppShell({ children }: AppShellProps) {
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-3">
+            <div className="flex shrink-0 items-center gap-2.5 sm:gap-3">
               {user ? (
-                <div className="hidden items-center gap-2.5 sm:flex">
-                  <span className="max-w-[140px] truncate text-sm text-slate-900">{user.name}</span>
+                <>
+                  <span className="hidden max-w-[140px] truncate text-sm text-slate-700 sm:inline">{user.name}</span>
                   <RoleBadge role={user.role} />
-                </div>
+                </>
               ) : null}
               {azureMode ? <AzureSignOutButton /> : null}
               <DevAuthStatus />
@@ -132,7 +138,7 @@ export function AppShell({ children }: AppShellProps) {
         </header>
 
         <main className="flex-1 overflow-auto bg-slate-50">
-          <div className="mx-auto w-full max-w-content space-y-6 px-6 py-6">{children}</div>
+          <div className="mx-auto w-full max-w-content space-y-6 px-6 py-6 lg:px-8">{children}</div>
         </main>
       </div>
     </div>

@@ -133,6 +133,29 @@ def test_parking_fixed():
     assert result.parking_total == Decimal("20.00")
 
 
+def test_parking_fixed_multiple_vehicles():
+    charges = ChargeInput(
+        parking_required=True,
+        parking_type="fixed",
+        parking_fixed_amount=Decimal("20"),
+        parking_vehicles=2,
+    )
+    result = calculate_charges(charges)
+    assert result.parking_total == Decimal("40.00")
+
+
+def test_parking_hourly_multiple_vehicles():
+    charges = ChargeInput(
+        parking_required=True,
+        parking_type="hourly",
+        parking_rate_per_hour=Decimal("6.50"),
+        parking_hours=Decimal("2"),
+        parking_vehicles=2,
+    )
+    result = calculate_charges(charges)
+    assert result.parking_total == Decimal("26.00")
+
+
 def test_parking_included():
     charges = ChargeInput(parking_required=True, parking_type="included")
     result = calculate_charges(charges)
