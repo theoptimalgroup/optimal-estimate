@@ -13,6 +13,12 @@ export type EngineerAssignedJob = {
   job_date: string | null;
   description: string | null;
   total: string | null;
+  appointment_user_name?: string | null;
+  appointment_user_email?: string | null;
+  appointment_type?: string | null;
+  appointment_status?: string | null;
+  appointment_start_at?: string | null;
+  appointment_end_at?: string | null;
 };
 
 export async function listEngineerAssignedJobs(): Promise<EngineerAssignedJob[]> {

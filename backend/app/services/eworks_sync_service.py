@@ -607,6 +607,10 @@ def _extract_job_fields(raw: dict[str, Any]) -> dict[str, Any]:
                 address_parts.append(str(v).strip())
     address_str = ", ".join(address_parts) if address_parts else _safe_str(raw.get("address"))
 
+    from app.services.eworks_job_detail_sync_service import extract_job_appointment_summary_fields
+
+    summary_fields = extract_job_appointment_summary_fields(raw)
+
     return {
         "eworks_job_id": _safe_int(raw.get("id")),
         "job_ref": _safe_str(raw.get("job_ref"), 100),
@@ -628,6 +632,7 @@ def _extract_job_fields(raw: dict[str, Any]) -> dict[str, Any]:
         "total": _safe_float(raw.get("total")),
         "tags": _extract_tags_from_raw(raw),
         "raw_payload": raw,
+        **summary_fields,
     }
 
 
@@ -719,6 +724,13 @@ def _upsert_jobs(
     summary = EworksSyncBucketSummary(fetched=len(records))
     now = datetime.now(timezone.utc)
 
+    from app.core.config import settings as cfg
+    from app.services.eworks_job_detail_sync_service import JobDetailFetchStats, maybe_fetch_job_detail_after_list_upsert
+
+    detail_stats = JobDetailFetchStats()
+    detail_limit = cfg.eworks_sync_job_details_limit_per_run
+    detail_remaining = detail_limit
+
     if run is not None:
         update_sync_run_progress(
             db,
@@ -765,6 +777,29 @@ def _upsert_jobs(
                 parent_local_id=row.id,
                 raw_payload=raw,
             )
+
+            try:
+                from app.services.eworks_job_appointment_service import sync_job_appointments
+
+                sync_job_appointments(db, row, raw_payload=raw, synced_at=now)
+            except Exception:
+                logger.exception(
+                    "Failed to sync appointments for eWorks Job id=%s; continuing job upsert",
+                    eworks_id,
+                )
+
+            maybe_fetch_job_detail_after_list_upsert(
+                db,
+                row,
+                raw,
+                synced_at=now,
+                stats=detail_stats,
+                limit_remaining=detail_remaining,
+            )
+            if detail_limit is not None and detail_stats.attempted >= detail_limit:
+                detail_remaining = 0
+            elif detail_limit is not None:
+                detail_remaining = max(detail_limit - detail_stats.attempted, 0)
 
         except Exception as exc:
             logger.exception("Failed to upsert eWorks Job id=%s: %s", raw.get("id"), exc)

@@ -19,21 +19,22 @@ from app.models.calculation_session import CalculationSession
 from app.models.calculation_session_version import CalculationSessionVersion
 from app.models.client import Client
 from app.models.client_alias import ClientAlias
-from app.models.eworks_sync import EworksJob, EworksQuote
+from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote
 from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.quote_job_assignment import QuoteJobAssignment
 from app.models.selected_estimate_decision import SelectedEstimateDecision
 from app.models.support import AuditLog
 from app.models.trade import Trade
 from app.models.user import User
+from app.services.eworks_job_appointment_service import sync_job_appointments
 
 
-def _patch_dev_user(mock_settings, *, role: str, email: str | None = None):
+def _patch_dev_user(mock_settings, *, role: str, email: str | None = None, name: str | None = None):
     mock_settings.auth_provider = "dev"
     mock_settings.dev_auth_enabled = True
     mock_settings.dev_user_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     mock_settings.dev_user_email = email or "staff@optimal.example"
-    mock_settings.dev_user_name = "Staff User"
+    mock_settings.dev_user_name = name or "Staff User"
     mock_settings.dev_user_role = role
     mock_settings.dev_user_is_active = True
     mock_settings.dev_auth_auto_create_user = False
@@ -101,6 +102,7 @@ def assign_db_session():
         AuditLog,
         EworksQuote,
         EworksJob,
+        EworksJobAppointment,
         EworksQuoteAssignment,
         QuoteJobAssignment,
         SelectedEstimateDecision,
@@ -448,26 +450,41 @@ def test_select_estimate_does_not_create_engineer_assigned_job(mock_settings, as
 @patch("app.auth.dependencies.settings")
 def test_engineer_lists_eworks_assigned_jobs(mock_settings, assign_api_client, assign_db_session):
     db_session, _, _, _ = assign_db_session
-    db_session.add(
-        EworksJob(
-            eworks_job_id=29226,
-            job_ref="29226",
-            eworks_quote_id=29204,
-            customer_name="Douglas & Gordon",
-            address="1 High Street",
-            status_name="Assigned",
-            raw_payload={"engineer": "rohit@example.com"},
-        )
+    job = EworksJob(
+        eworks_job_id=29226,
+        job_ref="29226",
+        eworks_quote_id=29204,
+        customer_name="Douglas & Gordon",
+        address="1 High Street",
+        status_name="Assigned",
+        raw_payload={
+            "appointments": [
+                {
+                    "id": 7001,
+                    "user": {"name": "Rohit", "email": "rohit@example.com"},
+                    "appointment_type": "1 Hour Job",
+                    "status": "Scheduled",
+                    "start_date": "2026-06-10",
+                    "start_time": "11:00",
+                    "end_date": "2026-06-10",
+                    "end_time": "12:00",
+                }
+            ]
+        },
     )
+    db_session.add(job)
+    db_session.flush()
+    sync_job_appointments(db_session, job)
     db_session.commit()
 
-    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com")
+    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com", name="Rohit")
     response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
     assert response.status_code == 200
     items = response.json()["data"]
     assert len(items) == 1
     assert items[0]["eworks_job_id"] == 29226
     assert items[0]["customer_name"] == "Douglas & Gordon"
+    assert items[0]["appointment_user_name"] == "Rohit"
     assert "selected_session_id" not in items[0]
     assert "selected_estimate_total" not in items[0]
 
@@ -475,17 +492,31 @@ def test_engineer_lists_eworks_assigned_jobs(mock_settings, assign_api_client, a
 @patch("app.auth.dependencies.settings")
 def test_engineer_does_not_see_other_engineers_eworks_jobs(mock_settings, assign_api_client, assign_db_session):
     db_session, _, _, _ = assign_db_session
-    db_session.add(
-        EworksJob(
-            eworks_job_id=29227,
-            job_ref="29227",
-            customer_name="Other Client",
-            raw_payload={"engineer": "other@example.com"},
-        )
+    job = EworksJob(
+        eworks_job_id=29227,
+        job_ref="29227",
+        customer_name="Other Client",
+        raw_payload={
+            "appointments": [
+                {
+                    "id": 7002,
+                    "user": {"name": "Other", "email": "other@example.com"},
+                    "appointment_type": "1 Hour Job",
+                    "status": "Scheduled",
+                    "start_date": "2026-06-10",
+                    "start_time": "11:00",
+                    "end_date": "2026-06-10",
+                    "end_time": "12:00",
+                }
+            ]
+        },
     )
+    db_session.add(job)
+    db_session.flush()
+    sync_job_appointments(db_session, job)
     db_session.commit()
 
-    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com")
+    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com", name="Rohit")
     response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
     assert response.status_code == 200
     assert response.json()["data"] == []

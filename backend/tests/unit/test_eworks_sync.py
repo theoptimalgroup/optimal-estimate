@@ -16,7 +16,7 @@ from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
-from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksQuote, EworksSyncRun
+from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksJobAppointment, EworksQuote, EworksSyncRun
 from app.models.product import Product
 from app.models.support import AuditLog
 from app.models.user import User
@@ -39,6 +39,7 @@ def db_session():
         AuditLog.__table__,
         EworksQuote.__table__,
         EworksJob.__table__,
+        EworksJobAppointment.__table__,
         EworksCustomer.__table__,
         EworksAttachment.__table__,
         EworksSyncRun.__table__,
@@ -253,6 +254,43 @@ def test_upsert_jobs_creates_new_record(db_session):
     row = db_session.query(EworksJob).filter(EworksJob.eworks_job_id == 55).one()
     assert row.job_ref == "J-55"
     assert row.eworks_quote_id == 100
+
+
+def test_upsert_jobs_syncs_appointments_from_raw_payload(db_session):
+    from app.models.eworks_sync import EworksJobAppointment
+    from app.services.eworks_sync_service import _upsert_jobs
+
+    raw = [
+        {
+            "id": 56,
+            "job_ref": "J-56",
+            "appointments": [
+                {
+                    "id": 8801,
+                    "user": {"name": "Alex Alves", "email": "alex@example.com"},
+                    "appointment_type": "1 Hour Job",
+                    "status": "Scheduled",
+                    "start_date": "2026-06-10",
+                    "start_time": "11:00",
+                    "end_date": "2026-06-10",
+                    "end_time": "12:00",
+                }
+            ],
+        }
+    ]
+    summary = _upsert_jobs(db_session, raw)
+    assert summary.created == 1
+    db_session.commit()
+    row = db_session.query(EworksJob).filter(EworksJob.eworks_job_id == 56).one()
+    assert row.assigned_user_name == "Alex Alves"
+    assert row.assigned_user_email == "alex@example.com"
+    appointments = (
+        db_session.query(EworksJobAppointment)
+        .filter(EworksJobAppointment.eworks_job_id == 56)
+        .all()
+    )
+    assert len(appointments) == 1
+    assert appointments[0].status == "Scheduled"
 
 
 def test_upsert_skips_record_missing_id(db_session):

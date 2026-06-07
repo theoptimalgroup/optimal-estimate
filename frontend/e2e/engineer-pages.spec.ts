@@ -89,6 +89,19 @@ const MOCK_ASSIGNED_JOB = {
   job_date: "2026-06-01",
   description: "Kitchen refit",
   total: "100.00",
+  appointment_user_name: "Dev engineer",
+  appointment_type: "1 Hour Job",
+  appointment_status: "Scheduled",
+  appointment_start_at: "2026-06-10 11:00",
+  appointment_end_at: "2026-06-10 12:00",
+};
+
+const MOCK_CANCELLED_ASSIGNED_JOB = {
+  ...MOCK_ASSIGNED_JOB,
+  id: 2,
+  eworks_job_id: 5002,
+  job_ref: "JOB-CANCELLED",
+  appointment_status: "Cancelled",
 };
 
 async function mockMyAssignments(page: Page, items: unknown[]) {
@@ -201,9 +214,18 @@ test.describe("engineer job pages", () => {
     await page.goto("/engineer/assigned-jobs");
 
     await expect(page.getByTestId("engineer-assigned-job-1")).toBeVisible();
-    await expect(page.getByText("Q22100")).toBeVisible();
-    await expect(page.getByText("Job JOB-001")).toBeVisible();
-    await expect(page.getByTestId("engineer-assigned-job-open-1")).toHaveCount(0);
+    await expect(page.getByText("JOB-001")).toBeVisible();
+    await expect(page.getByText("Quote Q22100")).toBeVisible();
+    await expect(page.getByTestId("engineer-assigned-job-appointment-1")).toContainText("2026-06-10 11:00");
+    await expect(page.getByTestId("engineer-assigned-job-assignee-1")).toContainText("Dev engineer");
+    await expect(page.getByTestId("engineer-assigned-job-status-1")).toHaveText("Scheduled");
+  });
+
+  test("cancelled appointment job does not appear as active assigned job", async ({ page }) => {
+    await mockAuthMe(page, "engineer");
+    await mockAssignedJobs(page, [MOCK_ASSIGNED_JOB]);
+    await page.goto("/engineer/assigned-jobs");
+    await expect(page.getByTestId("engineer-assigned-job-2")).toHaveCount(0);
   });
 
   test("assigned jobs empty state", async ({ page }) => {

@@ -47,3 +47,9 @@ class EngineerAssignedJobRead(BaseModel):
     job_date: str | None = None
     description: str | None = None
     total: str | None = None
+    appointment_user_name: str | None = None
+    appointment_user_email: str | None = None
+    appointment_type: str | None = None
+    appointment_status: str | None = None
+    appointment_start_at: str | None = None
+    appointment_end_at: str | None = None

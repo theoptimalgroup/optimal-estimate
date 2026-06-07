@@ -148,7 +148,20 @@ export type EworksJobRecord = {
   vat: number | null;
   total: number | null;
   tags?: string[];
+  total_appointments?: number | null;
+  completed_appointments?: number | null;
+  detail_synced_at?: string | null;
   synced_at: string | null;
+};
+
+export type JobAppointmentBackfillSummary = {
+  jobs_scanned: number;
+  jobs_with_total_appointments: number;
+  detail_fetches_attempted: number;
+  detail_fetches_success: number;
+  detail_fetches_failed: number;
+  appointments_created: number;
+  appointments_updated: number;
 };
 
 export type EworksCustomerRecord = {
@@ -236,6 +249,17 @@ export async function triggerJobsSync(req: EworksSyncRequest = {}): Promise<Ewor
   const resp = await apiFetch<EworksSyncStartResponse>(
     "/api/v1/eworks-sync/jobs",
     { method: "POST", body: JSON.stringify(req) }
+  );
+  return resp.data;
+}
+
+export async function backfillJobAppointments(limit?: number): Promise<JobAppointmentBackfillSummary> {
+  const params = new URLSearchParams();
+  if (limit != null) params.set("limit", String(limit));
+  const qs = params.toString();
+  const resp = await apiFetch<JobAppointmentBackfillSummary>(
+    `/api/v1/eworks-sync/jobs/backfill-appointments${qs ? `?${qs}` : ""}`,
+    { method: "POST" },
   );
   return resp.data;
 }
@@ -429,6 +453,18 @@ export type EworksQuoteSafeDetail = {
   linked_estimate: EworksLinkedEstimate;
 };
 
+export type EworksJobAppointmentSafe = {
+  appointment_id?: number | null;
+  user_name?: string | null;
+  user_email?: string | null;
+  user_id?: number | null;
+  appointment_type?: string | null;
+  status?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  is_active_assignment?: boolean;
+};
+
 export type EworksJobSafeDetail = {
   identity: {
     id: number;
@@ -466,6 +502,7 @@ export type EworksJobSafeDetail = {
     completed_date?: string | null;
   };
   linked_estimate: EworksLinkedEstimate;
+  appointments?: EworksJobAppointmentSafe[];
 };
 
 export async function getSafeQuoteDetail(id: number): Promise<EworksQuoteSafeDetail> {

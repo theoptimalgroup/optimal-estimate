@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, type ReactNode } from "react";
 
 import { LoadingState } from "@/components/ui/states";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
-import type { ReactNode } from "react";
 
 import { useCurrentUser } from "@/lib/auth/auth-context";
 import { isAzureAuthRequested } from "@/lib/auth/auth-config";
@@ -30,7 +31,17 @@ function AccessCard({ children, testId }: { children: ReactNode; testId: string 
 }
 
 export function RequireRole({ allowedRoles, children }: RequireRoleProps) {
+  const router = useRouter();
   const { isLoading, isAuthenticated, hasRole, error } = useCurrentUser();
+
+  useEffect(() => {
+    if (isLoading || isAuthenticated || error) {
+      return;
+    }
+    if (isAzureAuthRequested()) {
+      router.replace("/login");
+    }
+  }, [isLoading, isAuthenticated, error, router]);
 
   if (isLoading) {
     return (

@@ -177,6 +177,24 @@ def test_azure_inactive_user_returns_403(mock_validate, mock_settings, auth_db_c
 
 
 @patch("app.auth.dependencies.settings")
+def test_azure_provider_never_uses_dev_auth_fallback(mock_settings, auth_db_client):
+    """Production security: AUTH_PROVIDER=azure with DEV_AUTH_ENABLED=false must not auto-login."""
+    _patch_azure_settings(mock_settings, dev_auth_enabled=False)
+    client, session = auth_db_client
+    _seed_user(
+        session,
+        email="admin@optimal.example",
+        full_name="Admin User",
+        role=UserRole.ADMIN,
+    )
+
+    response = client.get("/api/v1/auth/me")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
+
+
+@patch("app.auth.dependencies.settings")
 def test_azure_missing_bearer_returns_401(mock_settings, auth_db_client):
     _patch_azure_settings(mock_settings)
     client, _ = auth_db_client

@@ -418,6 +418,7 @@ test.describe("Admin: /admin/eworks-sync", () => {
   });
 
   test("admin can trigger Sync All and sees result summary", async ({ page }) => {
+    await mockIdleEworksSyncStatus(page);
     await mockSyncTriggerApis(page);
     await gotoEworksSyncPage(page);
     await page.getByTestId("btn-sync-all").click();

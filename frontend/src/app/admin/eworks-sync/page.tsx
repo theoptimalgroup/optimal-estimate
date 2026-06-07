@@ -32,6 +32,7 @@ import {
 import {
   EWORKS_ACTIVE_SYNC_RUN_KEY,
   buildDefaultSyncRequest,
+  backfillJobAppointments,
   cancelSyncRun,
   getEworksSyncStatus,
   getSyncRun,
@@ -822,6 +823,9 @@ function JobsTab({ refreshKey }: { refreshKey: number }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillSummary, setBackfillSummary] = useState<string | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -847,8 +851,47 @@ function JobsTab({ refreshKey }: { refreshKey: number }) {
     void load();
   }, [load, refreshKey]);
 
+  const handleBackfillAppointments = async () => {
+    setBackfilling(true);
+    setBackfillError(null);
+    setBackfillSummary(null);
+    try {
+      const summary = await backfillJobAppointments();
+      setBackfillSummary(
+        `Scanned ${summary.jobs_scanned} jobs · fetched ${summary.detail_fetches_success}/${summary.detail_fetches_attempted} details · appointments +${summary.appointments_created} / ~${summary.appointments_updated} updated`,
+      );
+      await load();
+    } catch (e: unknown) {
+      setBackfillError(e instanceof Error ? e.message : "Failed to backfill appointments");
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void handleBackfillAppointments()}
+          disabled={backfilling}
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          data-testid="btn-backfill-job-appointments"
+        >
+          {backfilling ? "Backfilling appointments…" : "Backfill Appointments"}
+        </button>
+        {backfillSummary ? (
+          <p className="text-sm text-slate-600" data-testid="job-appointments-backfill-summary">
+            {backfillSummary}
+          </p>
+        ) : null}
+        {backfillError ? (
+          <p className="text-sm text-red-600" data-testid="job-appointments-backfill-error">
+            {backfillError}
+          </p>
+        ) : null}
+      </div>
+
       <FilterBar>
         <FilterField label="Search">
           <input

@@ -1,4 +1,4 @@
-"""Engineer assigned jobs sourced from eWorks job sync (read-only)."""
+"""Engineer assigned jobs sourced from synced eWorks job appointments (read-only)."""
 
 from __future__ import annotations
 
@@ -7,27 +7,16 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.auth.types import AuthenticatedUser
-from app.models.eworks_sync import EworksJob, EworksQuote
+from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote
+from app.services.eworks_job_appointment_service import is_cancelled_appointment_status
 from app.services.quote_assignment_service import _as_uuid
 
-# TODO: Expand payload field mapping once eWorks job assignee schema is confirmed.
-_PAYLOAD_ASSIGNEE_FIELDS = (
-    "engineer",
-    "assigned_to",
-    "staff",
-    "operative",
-    "user",
-    "engineer_id",
-    "assigned_user",
-)
-
-_DICT_EMAIL_KEYS = ("email", "user_email", "assigned_user_email")
-_DICT_NAME_KEYS = ("name", "full_name", "user_name", "assigned_user_name")
-_DICT_ID_KEYS = ("id", "user_id", "assigned_user_id", "engineer_id", "staff_id")
+_DICT_EMAIL_KEYS = ("email", "user_email")
+_DICT_NAME_KEYS = ("name", "full_name", "user_name")
 
 
 def _normalize_text(value: str | None) -> str:
-    return (value or "").strip().lower()
+    return (value or "").strip().casefold()
 
 
 def _uuid_matches(value: object, user_id: UUID) -> bool:
@@ -37,55 +26,23 @@ def _uuid_matches(value: object, user_id: UUID) -> bool:
         return str(value).strip().lower() == str(user_id).lower()
 
 
-def _value_matches_user(value: object, *, user: AuthenticatedUser, user_id: UUID) -> bool:
-    if value is None:
-        return False
-
-    if isinstance(value, dict):
-        for key in _DICT_EMAIL_KEYS:
-            if key in value and value[key]:
-                if _normalize_text(str(value[key])) == _normalize_text(user.email):
-                    return True
-        for key in _DICT_NAME_KEYS:
-            if key in value and value[key]:
-                if _normalize_text(str(value[key])) == _normalize_text(user.name):
-                    return True
-        for key in _DICT_ID_KEYS:
-            if key in value and value[key] is not None and _uuid_matches(value[key], user_id):
+def _appointment_user_matches(
+    appointment: EworksJobAppointment,
+    *,
+    user: AuthenticatedUser,
+    user_id: UUID,
+) -> bool:
+    if appointment.user_email and _normalize_text(appointment.user_email) == _normalize_text(user.email):
+        return True
+    if appointment.user_name and _normalize_text(appointment.user_name) == _normalize_text(user.name):
+        return True
+    if appointment.user_id is not None:
+        try:
+            if UUID(int=appointment.user_id) == user_id:
                 return True
-        return False
-
-    if isinstance(value, (int, float)):
-        return _uuid_matches(value, user_id)
-
-    if isinstance(value, str):
-        normalized = value.strip()
-        if not normalized:
-            return False
-        if "@" in normalized:
-            return _normalize_text(normalized) == _normalize_text(user.email)
-        if _uuid_matches(normalized, user_id):
-            return True
-        return _normalize_text(normalized) == _normalize_text(user.name)
-
-    return False
-
-
-def _payload_has_assignee_mapping(raw_payload: dict | None) -> bool:
-    if not isinstance(raw_payload, dict):
-        return False
-    return any(field in raw_payload and raw_payload[field] is not None for field in _PAYLOAD_ASSIGNEE_FIELDS)
-
-
-def _engineer_owns_eworks_job(job: EworksJob, *, user: AuthenticatedUser, user_id: UUID) -> bool:
-    raw_payload = job.raw_payload if isinstance(job.raw_payload, dict) else None
-    if not _payload_has_assignee_mapping(raw_payload):
-        return False
-    for field in _PAYLOAD_ASSIGNEE_FIELDS:
-        if raw_payload is None or field not in raw_payload:
-            continue
-        if _value_matches_user(raw_payload[field], user=user, user_id=user_id):
-            return True
+        except (TypeError, ValueError):
+            if _uuid_matches(appointment.user_id, user_id):
+                return True
     return False
 
 
@@ -103,7 +60,11 @@ def _quote_ref_for_job(db: Session, job: EworksJob) -> str | None:
     return (quote.quote_ref or "").strip() or None
 
 
-def build_engineer_assigned_job_read(db: Session, job: EworksJob) -> dict:
+def build_engineer_assigned_job_read(
+    db: Session,
+    job: EworksJob,
+    appointment: EworksJobAppointment,
+) -> dict:
     total = None
     if job.total is not None:
         total = str(job.total)
@@ -120,6 +81,12 @@ def build_engineer_assigned_job_read(db: Session, job: EworksJob) -> dict:
         "job_date": job.job_date,
         "description": job.description,
         "total": total,
+        "appointment_user_name": appointment.user_name,
+        "appointment_user_email": appointment.user_email,
+        "appointment_type": appointment.appointment_type,
+        "appointment_status": appointment.status,
+        "appointment_start_at": appointment.start_at,
+        "appointment_end_at": appointment.end_at,
     }
 
 
@@ -128,10 +95,18 @@ def list_assigned_jobs_for_engineer(db: Session, user: AuthenticatedUser) -> lis
     if user_id is None:
         return []
 
-    rows = db.query(EworksJob).order_by(EworksJob.synced_at.desc()).all()
+    rows = (
+        db.query(EworksJob, EworksJobAppointment)
+        .join(EworksJobAppointment, EworksJob.active_appointment_id == EworksJobAppointment.id)
+        .order_by(EworksJobAppointment.start_at.desc(), EworksJob.synced_at.desc())
+        .all()
+    )
+
     results: list[dict] = []
-    for row in rows:
-        if not _engineer_owns_eworks_job(row, user=user, user_id=user_id):
+    for job, appointment in rows:
+        if is_cancelled_appointment_status(appointment.status):
             continue
-        results.append(build_engineer_assigned_job_read(db, row))
+        if not _appointment_user_matches(appointment, user=user, user_id=user_id):
+            continue
+        results.append(build_engineer_assigned_job_read(db, job, appointment))
     return results

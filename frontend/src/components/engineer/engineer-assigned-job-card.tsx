@@ -7,9 +7,17 @@ type EngineerAssignedJobCardProps = {
   job: EngineerAssignedJob;
 };
 
+function formatAppointmentWindow(job: EngineerAssignedJob): string | null {
+  if (job.appointment_start_at && job.appointment_end_at) {
+    return `${job.appointment_start_at} – ${job.appointment_end_at}`;
+  }
+  return job.appointment_start_at ?? job.appointment_end_at ?? null;
+}
+
 export function EngineerAssignedJobCard({ job }: EngineerAssignedJobCardProps) {
-  const quoteLabel = job.quote_ref ?? (job.eworks_quote_id != null ? String(job.eworks_quote_id) : "Quote");
-  const statusLabel = job.status_name ?? job.status ?? "Assigned";
+  const jobLabel = job.job_ref ?? `Job ${job.eworks_job_id}`;
+  const appointmentWindow = formatAppointmentWindow(job);
+  const statusLabel = job.appointment_status ?? job.status_name ?? job.status ?? "Assigned";
 
   return (
     <div
@@ -18,13 +26,18 @@ export function EngineerAssignedJobCard({ job }: EngineerAssignedJobCardProps) {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="font-semibold text-slate-900">{quoteLabel}</p>
-          {job.job_ref ? <p className="text-sm text-slate-600">Job {job.job_ref}</p> : null}
+          <p className="font-semibold text-slate-900">{jobLabel}</p>
+          {job.quote_ref ? <p className="text-sm text-slate-600">Quote {job.quote_ref}</p> : null}
           <p className="text-sm text-slate-600">{job.customer_name ?? "Customer not available"}</p>
           <p className="text-sm text-slate-600">{job.address ?? "Address not available"}</p>
-          {job.job_date ? (
-            <p className="text-xs text-slate-500" data-testid={`engineer-assigned-job-date-${job.id}`}>
-              Job date {job.job_date}
+          {appointmentWindow ? (
+            <p className="text-sm text-slate-600" data-testid={`engineer-assigned-job-appointment-${job.id}`}>
+              Appointment: {appointmentWindow}
+            </p>
+          ) : null}
+          {job.appointment_user_name ? (
+            <p className="text-sm text-slate-600" data-testid={`engineer-assigned-job-assignee-${job.id}`}>
+              Assigned to: {job.appointment_user_name}
             </p>
           ) : null}
           {job.total != null ? (
@@ -38,7 +51,6 @@ export function EngineerAssignedJobCard({ job }: EngineerAssignedJobCardProps) {
           {statusLabel}
         </StatusBadge>
       </div>
-      {/* TODO: Open Job deep-link once eWorks job navigation is integrated. */}
     </div>
   );
 }

@@ -222,3 +222,65 @@ def fetch_job_attachments(
     with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
         result = _fetch_page(client, url=url, api_key=api_key, page=1, per_page=100)
     return result.records
+
+
+def _unwrap_single_record(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise AppError("EWORKS_API_UNAVAILABLE", "eWorks Job detail response has unexpected structure", 502)
+
+    collection = payload.get("collection")
+    if isinstance(collection, dict):
+        data = collection.get("data")
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+        if isinstance(data, dict):
+            return data
+
+    data = payload.get("data")
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        return data[0]
+    if isinstance(data, dict):
+        return data
+
+    if payload.get("id") is not None or payload.get("job_ref") is not None:
+        return payload
+
+    raise AppError("EWORKS_API_UNAVAILABLE", "eWorks Job detail response has unexpected structure", 502)
+
+
+def fetch_job_detail(eworks_job_id: int) -> dict[str, Any]:
+    """Fetch a single Job detail record from eWorks (read-only)."""
+    if not settings.eworks_api_enabled:
+        raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
+
+    base_url, api_key = _require_eworks_credentials()
+    url = f"{base_url}/Job/{eworks_job_id}"
+    headers = {"api_key": api_key, "Accept": "application/json"}
+
+    try:
+        with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
+            response = client.get(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise AppError("EWORKS_API_UNAVAILABLE", f"eWorks Job detail API timed out: {url}", 502) from exc
+    except httpx.HTTPError as exc:
+        raise AppError("EWORKS_API_UNAVAILABLE", f"Cannot reach eWorks Job detail API: {url}", 502) from exc
+
+    if response.status_code >= 500:
+        raise AppError(
+            "EWORKS_API_UNAVAILABLE",
+            f"eWorks Job detail API returned {response.status_code} from {url}",
+            502,
+        )
+    if response.status_code >= 400:
+        raise AppError(
+            "EWORKS_API_ERROR",
+            f"eWorks Job detail API returned {response.status_code} from {url}",
+            502,
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise AppError("EWORKS_API_UNAVAILABLE", "eWorks Job detail API returned invalid JSON", 502) from exc
+
+    return _unwrap_single_record(payload)

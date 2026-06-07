@@ -99,6 +99,49 @@ class EworksJob(Base):
     total: Mapped[float | None] = mapped_column(Numeric(14, 2))
     tags: Mapped[list | None] = mapped_column(_json_col())
     raw_payload: Mapped[dict | None] = mapped_column(_json_col())
+    total_appointments: Mapped[int | None] = mapped_column(Integer)
+    completed_appointments: Mapped[int | None] = mapped_column(Integer)
+    total_appointment_time: Mapped[str | None] = mapped_column(String(100))
+    total_appointment_cost: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    raw_detail_payload: Mapped[dict | None] = mapped_column(_json_col())
+    detail_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    assigned_user_name: Mapped[str | None] = mapped_column(String(500))
+    assigned_user_email: Mapped[str | None] = mapped_column(String(320))
+    assigned_user_id: Mapped[int | None] = mapped_column(Integer)
+    next_appointment_at: Mapped[str | None] = mapped_column(String(50))
+    active_appointment_id: Mapped[int | None] = mapped_column(Integer)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EworksJobAppointment(Base):
+    """Normalized eWorks job appointment rows extracted from synced job payloads."""
+
+    __tablename__ = "eworks_job_appointments"
+    __table_args__ = (
+        Index("ix_eworks_job_appointments_eworks_job_id", "eworks_job_id"),
+        Index("ix_eworks_job_appointments_user_email", "user_email"),
+        Index("ix_eworks_job_appointments_user_name", "user_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    eworks_job_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("eworks_jobs.eworks_job_id", ondelete="CASCADE"), nullable=False
+    )
+    appointment_id: Mapped[int | None] = mapped_column(Integer)
+    job_ref: Mapped[str | None] = mapped_column(String(100))
+    user_id: Mapped[int | None] = mapped_column(Integer)
+    user_name: Mapped[str | None] = mapped_column(String(500))
+    user_email: Mapped[str | None] = mapped_column(String(320))
+    appointment_type: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str | None] = mapped_column(String(200))
+    start_at: Mapped[str | None] = mapped_column(String(50))
+    end_at: Mapped[str | None] = mapped_column(String(50))
+    raw_safe_snapshot: Mapped[dict | None] = mapped_column(_json_col())
+    dedupe_key: Mapped[str] = mapped_column(String(300), nullable=False)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

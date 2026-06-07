@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     eworks_sync_attachment_files_enabled: bool = False
     eworks_sync_running_timeout_minutes: int = 30
     eworks_sync_lookback_days: int = 7
+    eworks_sync_job_details_enabled: bool = False
+    eworks_sync_job_details_only_with_appointments: bool = True
+    eworks_sync_job_details_limit_per_run: int | None = None
 
     # Background eWorks sync scheduler (disabled by default; enable on one worker only)
     eworks_background_sync_enabled: bool = False

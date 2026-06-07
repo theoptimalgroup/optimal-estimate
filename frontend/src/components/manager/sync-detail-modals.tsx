@@ -481,6 +481,34 @@ export function JobDetailModal({
                 </dl>
               </SectionCard>
 
+              {detail.appointments?.length ? (
+                <SectionCard title="Appointments" testId="job-appointments-section">
+                  <div className="space-y-4">
+                    {detail.appointments.map((appointment, index) => (
+                      <div
+                        key={`${appointment.appointment_id ?? appointment.user_name ?? "appointment"}-${index}`}
+                        className="rounded-lg border border-slate-200 p-4"
+                        data-testid={`job-appointment-row-${index}`}
+                      >
+                        <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                          <DetailField label="User" value={displayValue(appointment.user_name)} />
+                          <DetailField label="Type" value={displayValue(appointment.appointment_type)} />
+                          <DetailField
+                            label="Date / Time"
+                            value={displayValue(
+                              appointment.start_at && appointment.end_at
+                                ? `${appointment.start_at} to ${appointment.end_at}`
+                                : appointment.start_at ?? appointment.end_at,
+                            )}
+                          />
+                          <DetailField label="Status" value={displayValue(appointment.status)} />
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+              ) : null}
+
               <SectionCard title="Description & Notes" testId="job-description-notes-section">
                 <div className="space-y-4">
                   <RichTextBlock

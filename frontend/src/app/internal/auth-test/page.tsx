@@ -44,9 +44,9 @@ export default function AuthTestPage() {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-900">Configuration</h2>
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
           <dt className="text-amber-800">frontend provider</dt>
-          <dd>{getAuthProvider()}</dd>
+          <dd data-testid="auth-test-frontend-provider">{getAuthProvider()}</dd>
           <dt className="text-amber-800">azure configured</dt>
-          <dd>{String(isAzureConfigured())}</dd>
+          <dd data-testid="auth-test-azure-configured">{String(isAzureConfigured())}</dd>
           <dt className="text-amber-800">msal hasAccount</dt>
           <dd>{msal ? String(msal.hasAccount) : "—"}</dd>
           <dt className="text-amber-800">msal hasAccessToken</dt>
@@ -66,7 +66,7 @@ export default function AuthTestPage() {
           <dt className="text-gray-500">isLoading</dt>
           <dd>{String(isLoading)}</dd>
           <dt className="text-gray-500">isAuthenticated</dt>
-          <dd>{String(isAuthenticated)}</dd>
+          <dd data-testid="auth-test-is-authenticated">{String(isAuthenticated)}</dd>
           <dt className="text-gray-500">role</dt>
           <dd>{role ?? "—"}</dd>
           <dt className="text-gray-500">hasRole(&quot;admin&quot;)</dt>

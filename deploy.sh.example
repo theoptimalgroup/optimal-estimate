@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+# Manual deployment script — build images and update Azure Container Apps.
+#
+# Defaults address common deploy pitfalls:
+#   - Unique image tags (Container Apps ignore :latest if the tag string is unchanged)
+#   - Backend build --no-cache (avoids stale COPY layers shipping old code)
+#   - az containerapp update --no-wait (avoids local CLI polling / connection reset)
+#   - Production frontend built with Azure MSAL auth (from .env.production)
+#   - Backend auth env synced to Azure AD on deploy (override with --skip-auth-env)
+#
+# Prerequisites:
+#   cp .env.production.example .env.production
+#   Fill AZURE_TENANT_ID, AZURE_API_CLIENT_ID, NEXT_PUBLIC_AZURE_CLIENT_ID
+#
+# Usage:
+#   ./deploy.sh                         # deploy both with tag deploy-YYYYMMDD-HHMMSS
+#   ./deploy.sh my-tag                  # deploy both with a custom tag
+#   ./deploy.sh --frontend-only         # frontend only, auto tag
+#   ./deploy.sh --backend-only my-tag   # backend only, custom tag
+#   ./deploy.sh --skip-build my-tag     # point apps at an existing ACR tag
+#   ./deploy.sh --skip-auth-env         # do not update backend auth env vars in Azure
+#   ./deploy.sh --dev-frontend          # build frontend with dev auth (local testing only)
+#   ./deploy.sh --cache-backend         # allow Docker layer cache on backend build
+#   ./deploy.sh --wait                  # block until az update finishes (may flake locally)
+#   ./deploy.sh --help
+#
+# DB migrations run on backend container start via startup.sh (alembic upgrade head).
+# See docs/AZURE_DEPLOYMENT.md for Microsoft login setup and post-deploy validation.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+ACR="acroptimalestimate"
+RESOURCE_GROUP="rg-optimal-estimate"
+API_APP="optimal-estimate-api"
+WEB_APP="optimal-estimate-web"
+API_URL="https://optimal-estimate-api.wonderfulpebble-655f8f4d.northeurope.azurecontainerapps.io"
+WEB_URL="https://optimal-estimate-web.wonderfulpebble-655f8f4d.northeurope.azurecontainerapps.io"
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-.env.production}"
+
+DEPLOY_BACKEND=true
+DEPLOY_FRONTEND=true
+BACKEND_NO_CACHE=true
+AZ_NO_WAIT=true
+SKIP_BUILD=false
+SKIP_AUTH_ENV=false
+DEV_FRONTEND_BUILD=false
+TAG=""
+
+usage() {
+  sed -n '3,28p' "$0" | sed 's/^# \?//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --backend-only)
+      DEPLOY_FRONTEND=false
+      shift
+      ;;
+    --frontend-only)
+      DEPLOY_BACKEND=false
+      shift
+      ;;
+    --cache-backend)
+      BACKEND_NO_CACHE=false
+      shift
+      ;;
+    --no-cache)
+      BACKEND_NO_CACHE=true
+      shift
+      ;;
+    --wait)
+      AZ_NO_WAIT=false
+      shift
+      ;;
+    --skip-build)
+      SKIP_BUILD=true
+      shift
+      ;;
+    --skip-auth-env)
+      SKIP_AUTH_ENV=true
+      shift
+      ;;
+    --dev-frontend)
+      DEV_FRONTEND_BUILD=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --*)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      if [[ -n "$TAG" ]]; then
+        echo "Unexpected extra argument: $1" >&2
+        exit 1
+      fi
+      TAG="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ "$SKIP_BUILD" == true && -z "$TAG" ]]; then
+  echo "With --skip-build, pass an explicit tag that already exists in ACR." >&2
+  exit 1
+fi
+
+load_production_env() {
+  if [[ ! -f "$DEPLOY_ENV_FILE" ]]; then
+    echo "Missing $DEPLOY_ENV_FILE — copy .env.production.example and fill Azure auth values." >&2
+    exit 1
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  source "$DEPLOY_ENV_FILE"
+  set +a
+}
+
+require_production_auth_vars() {
+  local missing=()
+  [[ -n "${AZURE_TENANT_ID:-}" ]] || missing+=("AZURE_TENANT_ID")
+  [[ -n "${AZURE_API_CLIENT_ID:-}" ]] || missing+=("AZURE_API_CLIENT_ID")
+
+  if [[ "$DEV_FRONTEND_BUILD" == false ]]; then
+    [[ -n "${NEXT_PUBLIC_AZURE_CLIENT_ID:-}" ]] || missing+=("NEXT_PUBLIC_AZURE_CLIENT_ID")
+  fi
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Missing required values in $DEPLOY_ENV_FILE: ${missing[*]}" >&2
+    exit 1
+  fi
+}
+
+resolve_frontend_build_args() {
+  if [[ "$DEV_FRONTEND_BUILD" == true ]]; then
+    FRONTEND_AUTH_PROVIDER="dev"
+    FRONTEND_AZURE_TENANT_ID=""
+    FRONTEND_AZURE_CLIENT_ID=""
+    FRONTEND_AZURE_API_SCOPE=""
+    FRONTEND_API_URL="${NEXT_PUBLIC_API_URL:-$API_URL}"
+    return
+  fi
+
+  FRONTEND_AUTH_PROVIDER="azure"
+  FRONTEND_AZURE_TENANT_ID="${NEXT_PUBLIC_AZURE_TENANT_ID:-$AZURE_TENANT_ID}"
+  FRONTEND_AZURE_CLIENT_ID="${NEXT_PUBLIC_AZURE_CLIENT_ID}"
+  FRONTEND_AZURE_API_SCOPE="${NEXT_PUBLIC_AZURE_API_SCOPE:-api://${AZURE_API_CLIENT_ID}/access_as_user}"
+  FRONTEND_API_URL="${NEXT_PUBLIC_API_URL:-$API_URL}"
+}
+
+update_backend_auth_env() {
+  echo "==> Updating backend auth env on $API_APP..."
+  az containerapp update \
+    --name "$API_APP" \
+    --resource-group "$RESOURCE_GROUP" \
+    --set-env-vars \
+      "AUTH_PROVIDER=azure" \
+      "DEV_AUTH_ENABLED=false" \
+      "AZURE_TENANT_ID=$AZURE_TENANT_ID" \
+      "AZURE_API_CLIENT_ID=$AZURE_API_CLIENT_ID" \
+    >/dev/null
+  echo "    AUTH_PROVIDER=azure DEV_AUTH_ENABLED=false (tenant + API client set)"
+}
+
+print_validation_steps() {
+  echo ""
+  echo "Post-deploy auth validation:"
+  echo "  1. Open $WEB_URL/internal/auth-test"
+  echo "     Expected before login: frontend provider=azure, azure configured=true, isAuthenticated=false"
+  echo "  2. Open $WEB_URL/login — Microsoft sign-in should appear"
+  echo "  3. Sign in with a Microsoft account that exists in the users table (matching email, correct role)"
+  echo "  4. Revisit /internal/auth-test — isAuthenticated=true, role from DB"
+  echo "  5. Open $WEB_URL/admin/dashboard — should load after login (redirects to /login when signed out)"
+  echo ""
+  echo "Users table: each staff Microsoft account email must exist with role admin|manager|estimator|engineer."
+  echo "Security: DEV_AUTH_ENABLED=false on API — dev auto-login is disabled in production."
+}
+
+TAG="${TAG:-deploy-$(date +%Y%m%d-%H%M%S)}"
+BACKEND_IMAGE="$ACR.azurecr.io/backend:$TAG"
+FRONTEND_IMAGE="$ACR.azurecr.io/frontend:$TAG"
+
+if [[ "$DEPLOY_BACKEND" == false && "$DEPLOY_FRONTEND" == false ]]; then
+  echo "Nothing to deploy (use --backend-only and/or --frontend-only)." >&2
+  exit 1
+fi
+
+if [[ "$SKIP_BUILD" == false && "$DEPLOY_FRONTEND" == true && "$DEV_FRONTEND_BUILD" == false ]]; then
+  load_production_env
+  require_production_auth_vars
+  resolve_frontend_build_args
+elif [[ "$SKIP_AUTH_ENV" == false && "$DEPLOY_BACKEND" == true ]]; then
+  load_production_env
+  require_production_auth_vars
+elif [[ "$DEV_FRONTEND_BUILD" == true ]]; then
+  FRONTEND_AUTH_PROVIDER="dev"
+  FRONTEND_AZURE_TENANT_ID=""
+  FRONTEND_AZURE_CLIENT_ID=""
+  FRONTEND_AZURE_API_SCOPE=""
+  FRONTEND_API_URL="$API_URL"
+fi
+
+update_container_app() {
+  local app_name=$1
+  local image=$2
+  local -a args=(
+    containerapp update
+    --name "$app_name"
+    --resource-group "$RESOURCE_GROUP"
+    --image "$image"
+  )
+  if [[ "$AZ_NO_WAIT" == true ]]; then
+    args+=(--no-wait)
+  fi
+  echo "==> Updating $app_name -> $image"
+  az "${args[@]}" >/dev/null
+}
+
+wait_for_revision() {
+  local app_name=$1
+  local expected_image=$2
+  local attempts=${3:-24}
+  local delay=${4:-5}
+
+  echo "==> Waiting for $app_name revision ($expected_image)..."
+  for ((i = 1; i <= attempts; i++)); do
+    local running_image
+    running_image=$(
+      az containerapp revision list \
+        --name "$app_name" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query "[?properties.trafficWeight==\`100\`].properties.template.containers[0].image | [0]" \
+        -o tsv 2>/dev/null || true
+    )
+    local running_state
+    running_state=$(
+      az containerapp revision list \
+        --name "$app_name" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query "[?properties.trafficWeight==\`100\`].properties.runningState | [0]" \
+        -o tsv 2>/dev/null || true
+    )
+    if [[ "$running_image" == "$expected_image" && "$running_state" == "Running" ]]; then
+      echo "    $app_name is Running on $expected_image"
+      return 0
+    fi
+    if [[ "$i" -lt "$attempts" ]]; then
+      sleep "$delay"
+    fi
+  done
+  echo "    Warning: $app_name did not reach Running on $expected_image within $((attempts * delay))s." >&2
+  az containerapp revision list \
+    --name "$app_name" \
+    --resource-group "$RESOURCE_GROUP" \
+    --query "[].{name:name,traffic:properties.trafficWeight,state:properties.runningState,image:properties.template.containers[0].image}" \
+    -o table >&2 || true
+  return 1
+}
+
+echo "==> Deploy tag: $TAG"
+echo "    Backend:  $([[ "$DEPLOY_BACKEND" == true ]] && echo yes || echo skip)"
+echo "    Frontend: $([[ "$DEPLOY_FRONTEND" == true ]] && echo yes || echo skip)"
+echo "    Build:    $([[ "$SKIP_BUILD" == true ]] && echo skip || echo yes)"
+echo "    Frontend auth: $([[ "$DEV_FRONTEND_BUILD" == true ]] && echo dev || echo azure)"
+echo "    Sync auth env: $([[ "$SKIP_AUTH_ENV" == true ]] && echo skip || echo yes)"
+echo "    Backend no-cache: $([[ "$BACKEND_NO_CACHE" == true ]] && echo yes || echo no)"
+echo "    az --no-wait:     $([[ "$AZ_NO_WAIT" == true ]] && echo yes || echo no)"
+
+if [[ "$SKIP_BUILD" == false ]]; then
+  echo "==> Logging in to ACR..."
+  az acr login --name "$ACR"
+
+  if [[ "$DEPLOY_BACKEND" == true ]]; then
+    echo "==> Building and pushing backend ($TAG)..."
+    backend_build_args=(buildx build --platform linux/amd64 -t "$BACKEND_IMAGE" --push)
+    if [[ "$BACKEND_NO_CACHE" == true ]]; then
+      backend_build_args+=(--no-cache)
+    fi
+    docker "${backend_build_args[@]}" ./backend
+  fi
+
+  if [[ "$DEPLOY_FRONTEND" == true ]]; then
+    echo "==> Building and pushing frontend ($TAG) with NEXT_PUBLIC_AUTH_PROVIDER=$FRONTEND_AUTH_PROVIDER..."
+    docker buildx build \
+      --platform linux/amd64 \
+      --build-arg "NEXT_PUBLIC_API_URL=$FRONTEND_API_URL" \
+      --build-arg "NEXT_PUBLIC_AUTH_PROVIDER=$FRONTEND_AUTH_PROVIDER" \
+      --build-arg "NEXT_PUBLIC_AZURE_TENANT_ID=$FRONTEND_AZURE_TENANT_ID" \
+      --build-arg "NEXT_PUBLIC_AZURE_CLIENT_ID=$FRONTEND_AZURE_CLIENT_ID" \
+      --build-arg "NEXT_PUBLIC_AZURE_API_SCOPE=$FRONTEND_AZURE_API_SCOPE" \
+      -t "$FRONTEND_IMAGE" \
+      --push \
+      ./frontend
+  fi
+fi
+
+if [[ "$SKIP_AUTH_ENV" == false && "$DEPLOY_BACKEND" == true ]]; then
+  update_backend_auth_env
+fi
+
+if [[ "$DEPLOY_BACKEND" == true ]]; then
+  update_container_app "$API_APP" "$BACKEND_IMAGE"
+fi
+
+if [[ "$DEPLOY_FRONTEND" == true ]]; then
+  update_container_app "$WEB_APP" "$FRONTEND_IMAGE"
+fi
+
+if [[ "$AZ_NO_WAIT" == true ]]; then
+  if [[ "$DEPLOY_BACKEND" == true ]]; then
+    wait_for_revision "$API_APP" "$BACKEND_IMAGE" || true
+  fi
+  if [[ "$DEPLOY_FRONTEND" == true ]]; then
+    wait_for_revision "$WEB_APP" "$FRONTEND_IMAGE" || true
+  fi
+fi
+
+echo ""
+echo "Done."
+echo "  Tag:       $TAG"
+echo "  Web:       $WEB_URL"
+echo "  Login:     $WEB_URL/login"
+echo "  Auth test: $WEB_URL/internal/auth-test"
+echo "  API:       $API_URL"
+if [[ "$DEPLOY_BACKEND" == true ]]; then
+  echo ""
+  echo "Verify backend revision:"
+  echo "  az containerapp revision list -n $API_APP -g $RESOURCE_GROUP -o table"
+fi
+if [[ "$DEV_FRONTEND_BUILD" == false ]]; then
+  print_validation_steps
+fi

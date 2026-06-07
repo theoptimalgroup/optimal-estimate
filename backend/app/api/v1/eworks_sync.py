@@ -28,6 +28,7 @@ from app.schemas.eworks_sync_api import (
     EworksBackgroundSyncLastRunRead,
     EworksCustomerRead,
     EworksJobRead,
+    EworksJobAppointmentBackfillRead,
     EworksJobSafeDetailRead,
     EworksQuoteDetailRead,
     EworksQuoteRead,
@@ -265,6 +266,27 @@ def trigger_jobs_sync(
 ):
     """Start background sync of eWorks Jobs into local DB (admin only, read-only from eWorks)."""
     return _start_background_sync(db, actor, "jobs", req)
+
+
+@router.post("/jobs/backfill-appointments")
+def backfill_job_appointments(
+    db: DbSession,
+    actor: AdminOnly,
+    limit: int | None = Query(default=None, ge=1, le=5000),
+):
+    """Fetch eWorks Job detail for synced jobs and backfill appointment rows (admin only)."""
+    from app.core.config import settings as cfg
+    from app.services.eworks_job_detail_sync_service import backfill_job_appointments_from_details
+
+    if not cfg.eworks_api_enabled:
+        raise HTTPException(status_code=503, detail="eWorks API is disabled")
+
+    effective_limit = limit
+    if effective_limit is None and cfg.eworks_sync_job_details_limit_per_run is not None:
+        effective_limit = cfg.eworks_sync_job_details_limit_per_run
+
+    summary = backfill_job_appointments_from_details(db, limit=effective_limit)
+    return success_response(EworksJobAppointmentBackfillRead.model_validate(summary.__dict__).model_dump())
 
 
 @router.post("/customers")
@@ -601,6 +623,9 @@ def list_jobs(
                 vat=float(r.vat) if r.vat is not None else None,
                 total=float(r.total) if r.total is not None else None,
                 tags=_serialize_tags(r.tags),
+                total_appointments=r.total_appointments,
+                completed_appointments=r.completed_appointments,
+                detail_synced_at=str(r.detail_synced_at) if r.detail_synced_at else None,
                 synced_at=str(r.synced_at) if r.synced_at else None,
             ).model_dump()
             for r in rows

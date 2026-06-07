@@ -112,6 +112,9 @@ class EworksJobRead(BaseModel):
     vat: float | None
     total: float | None
     tags: list[str] = Field(default_factory=list)
+    total_appointments: int | None = None
+    completed_appointments: int | None = None
+    detail_synced_at: str | None = None
     synced_at: str | None
 
     model_config = {"from_attributes": True}
@@ -339,6 +342,18 @@ class EworksJobSafeDates(BaseModel):
     completed_date: str | None = None
 
 
+class EworksJobAppointmentSafeRead(BaseModel):
+    appointment_id: int | None = None
+    user_name: str | None = None
+    user_email: str | None = None
+    user_id: int | None = None
+    appointment_type: str | None = None
+    status: str | None = None
+    start_at: str | None = None
+    end_at: str | None = None
+    is_active_assignment: bool = False
+
+
 class EworksJobSafeDetailRead(BaseModel):
     identity: EworksJobSafeIdentity
     customer: EworksJobSafeCustomer
@@ -350,6 +365,7 @@ class EworksJobSafeDetailRead(BaseModel):
     custom_fields: list[EworksSafeCustomField] = Field(default_factory=list)
     dates: EworksJobSafeDates
     linked_estimate: EworksLinkedEstimate
+    appointments: list[EworksJobAppointmentSafeRead] = Field(default_factory=list)
 
 
 class EworksAttachmentSafeRead(BaseModel):
@@ -372,3 +388,13 @@ class EworksAttachmentDetailRead(EworksAttachmentSafeRead):
     local_storage_path: str | None = None
     downloaded_at: str | None = None
     raw_payload: dict | None = None
+
+
+class EworksJobAppointmentBackfillRead(BaseModel):
+    jobs_scanned: int
+    jobs_with_total_appointments: int
+    detail_fetches_attempted: int
+    detail_fetches_success: int
+    detail_fetches_failed: int
+    appointments_created: int
+    appointments_updated: int
