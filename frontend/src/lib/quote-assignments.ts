@@ -55,6 +55,7 @@ export type QuoteAssignment = {
   active_revision_reason?: string | null;
   can_revise?: boolean;
   can_continue_revision?: boolean;
+  can_view_submission?: boolean;
 };
 
 export type AssignmentStartEstimateResult = {

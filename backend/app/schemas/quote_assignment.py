@@ -78,6 +78,7 @@ class AssignmentRead(BaseModel):
     active_revision_reason: str | None = None
     can_revise: bool = False
     can_continue_revision: bool = False
+    can_view_submission: bool = False
 
 
 class AssignmentStartEstimateRead(BaseModel):

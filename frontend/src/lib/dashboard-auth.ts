@@ -8,6 +8,7 @@ import {
   type CombineWorkNotesResponse,
   type DashboardQuoteGroupDetailResponse,
   type DashboardQuoteGroupsResponse,
+  type DashboardQuoteItem,
   type DashboardQuotesResponse,
   type ManagerQuotePdfView,
   type ReopenQuoteResponse,
@@ -15,6 +16,12 @@ import {
 
 export async function fetchSubmittedQuotes() {
   const response = await apiFetch<DashboardQuotesResponse>("/api/v1/dashboard/quotes");
+  return response.data;
+}
+
+export async function fetchSubmittedQuoteDetail(sessionId: string, versionNumber?: number) {
+  const search = versionNumber != null ? `?version=${versionNumber}` : "";
+  const response = await apiFetch<DashboardQuoteItem>(`/api/v1/dashboard/quotes/${sessionId}${search}`);
   return response.data;
 }
 

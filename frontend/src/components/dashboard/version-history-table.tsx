@@ -1,6 +1,7 @@
 "use client";
 
 import { formatSubmittedAt, money } from "@/components/dashboard/quote-groups-table";
+import { StatusBadge } from "@/components/ui";
 import type { DashboardQuoteGroupVersionItem } from "@/lib/dashboard";
 
 type VersionHistoryTableProps = {
@@ -10,6 +11,11 @@ type VersionHistoryTableProps = {
   onDownload?: (versionNumber: number) => void;
 };
 
+function revisionReasonLabel(reason: string | null | undefined): string {
+  const text = (reason ?? "").trim();
+  return text || "Initial submission";
+}
+
 export function VersionHistoryTable({ sessionId, versions, onView, onDownload }: VersionHistoryTableProps) {
   return (
     <div className="overflow-x-auto" data-testid={`version-history-table-${sessionId}`}>
@@ -17,11 +23,11 @@ export function VersionHistoryTable({ sessionId, versions, onView, onDownload }:
         <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
           <tr>
             <th className="px-3 py-2">Version</th>
-            <th className="px-3 py-2">Submitted By</th>
             <th className="px-3 py-2">Submitted At</th>
-            <th className="px-3 py-2">Reason</th>
+            <th className="px-3 py-2">Submitted By</th>
+            <th className="px-3 py-2">Revision Reason</th>
             <th className="px-3 py-2 text-right">Final Total</th>
-            <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2">Current</th>
             <th className="px-3 py-2">Actions</th>
           </tr>
         </thead>
@@ -29,13 +35,23 @@ export function VersionHistoryTable({ sessionId, versions, onView, onDownload }:
           {versions.map((version) => (
             <tr key={version.version_number} data-testid={`version-row-${sessionId}-${version.version_number}`}>
               <td className="px-3 py-2 font-medium text-slate-900">v{version.version_number}</td>
-              <td className="px-3 py-2 text-slate-900">{version.submitted_by_name ?? "—"}</td>
               <td className="px-3 py-2 text-slate-600">
                 {version.submitted_at ? formatSubmittedAt(version.submitted_at) : "—"}
               </td>
-              <td className="px-3 py-2 text-slate-600">{version.revision_reason ?? "Initial submission"}</td>
+              <td className="px-3 py-2 text-slate-900">{version.submitted_by_name ?? "—"}</td>
+              <td className="px-3 py-2 text-slate-600" data-testid={`version-reason-${sessionId}-${version.version_number}`}>
+                {revisionReasonLabel(version.revision_reason)}
+              </td>
               <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-900">{money(version.final_total)}</td>
-              <td className="px-3 py-2 text-slate-600">{version.is_current ? "Current" : version.status}</td>
+              <td className="px-3 py-2">
+                {version.is_current ? (
+                  <StatusBadge tone="success" data-testid={`version-current-${sessionId}-${version.version_number}`}>
+                    Current
+                  </StatusBadge>
+                ) : (
+                  <span className="text-slate-400">—</span>
+                )}
+              </td>
               <td className="px-3 py-2">
                 <div className="flex flex-wrap gap-2">
                   {onView ? (
@@ -55,7 +71,7 @@ export function VersionHistoryTable({ sessionId, versions, onView, onDownload }:
                       onClick={() => onDownload(version.version_number)}
                       data-testid={`version-download-${sessionId}-${version.version_number}`}
                     >
-                      Download
+                      PDF
                     </button>
                   ) : null}
                 </div>

@@ -56,6 +56,7 @@ const MOCK_ACTIVE_ASSIGNMENT = {
   has_calculation_session: true,
   calculation_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
   can_start_estimate: true,
+  can_view_submission: false,
 };
 
 const MOCK_SUBMITTED_ASSIGNMENT = {
@@ -68,6 +69,7 @@ const MOCK_SUBMITTED_ASSIGNMENT = {
   final_total: "1234.56",
   calculation_session_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
   can_start_estimate: true,
+  can_view_submission: true,
   quote_summary: {
     ...MOCK_ACTIVE_ASSIGNMENT.quote_summary,
     quote_ref: "Q-102",

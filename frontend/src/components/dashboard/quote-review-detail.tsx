@@ -65,6 +65,7 @@ function defaultBackLabel(backHref: string): string {
 
 type QuoteReviewDetailProps = {
   sessionId: string;
+  versionNumber?: number;
   client: DashboardClient;
   backHref: string;
   listHref: string;
@@ -77,6 +78,7 @@ type QuoteReviewDetailProps = {
 
 export function QuoteReviewDetail({
   sessionId,
+  versionNumber,
   client,
   backHref,
   listHref,
@@ -115,6 +117,11 @@ export function QuoteReviewDetail({
     setError(null);
     setNotFound(false);
     try {
+      if (versionNumber != null) {
+        const detail = await client.fetchSubmittedQuoteDetail(sessionId, versionNumber);
+        setQuote(detail);
+        return;
+      }
       const response = await client.fetchSubmittedQuotes();
       const match = response.quotes.find((item) => item.session_id === sessionId);
       if (!match) {
@@ -129,7 +136,7 @@ export function QuoteReviewDetail({
     } finally {
       setLoading(false);
     }
-  }, [client, sessionId]);
+  }, [client, sessionId, versionNumber]);
 
   useEffect(() => {
     void loadQuote();

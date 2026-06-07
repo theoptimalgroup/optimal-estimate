@@ -207,6 +207,57 @@ def test_manager_can_view_version_history_without_tokens(revision_api_client):
             assert version["revision_reason"] == "Updated materials"
 
 
+def test_manager_endpoint_returns_version_history(revision_api_client):
+    session_id, token, _ = _create_submitted_session(revision_api_client)
+    test_client, _ = revision_api_client
+    test_client.post(
+        f"/api/v1/calculation-session/{session_id}/revise",
+        headers={"X-Session-Token": token},
+        json={"reason": "Updated materials"},
+    )
+    test_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={
+            "step2": {
+                "works": [_alex_work_block(scope="Revised scope")],
+                "congestion_required": True,
+                "congestion_amount": 18,
+            }
+        },
+    )
+
+    with mock_patch("app.auth.dependencies.settings") as mock_settings:
+        _patch_dev_user(mock_settings)
+        response = test_client.get(f"/api/v1/manager/quotes/sessions/{session_id}/versions")
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["current_version_number"] == 2
+    assert {item["version_number"] for item in payload["versions"]} == {1, 2}
+    assert "session_token" not in payload
+
+
+def _patch_dev_user(mock_settings, *, role: str = "manager"):
+    mock_settings.auth_provider = "dev"
+    mock_settings.dev_auth_enabled = True
+    mock_settings.dev_user_id = "dev-user-1"
+    mock_settings.dev_user_email = "staff@optimal.example"
+    mock_settings.dev_user_name = "Staff User"
+    mock_settings.dev_user_role = role
+    mock_settings.dev_user_is_active = True
+    mock_settings.dev_auth_auto_create_user = False
+
+
+@pytest.mark.parametrize("role", ["engineer", "client"])
+@mock_patch("app.auth.dependencies.settings")
+def test_engineer_and_client_blocked_from_manager_versions_endpoint(mock_settings, revision_api_client, role):
+    _patch_dev_user(mock_settings, role=role)
+    session_id, _, _ = _create_submitted_session(revision_api_client)
+    test_client, _ = revision_api_client
+    response = test_client.get(f"/api/v1/manager/quotes/sessions/{session_id}/versions")
+    assert response.status_code == 403
+
+
 def test_manager_pdf_service_applies_version_snapshot(revision_api_client):
     from unittest.mock import patch as mock_patch
 

@@ -804,6 +804,19 @@ const MOCK_GROUP_DETAIL = {
       linked_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
       submitted_by_name: "Unknown submitter",
       final_total: "174.24",
+      current_version_number: 1,
+      version_count: 1,
+      versions: [
+        {
+          version_number: 1,
+          submitted_at: "2026-06-05T16:04:00Z",
+          submitted_by_name: "Unknown submitter",
+          revision_reason: null,
+          final_total: "174.24",
+          status: "submitted",
+          is_current: true,
+        },
+      ],
       is_latest: true,
       can_view_details: true,
       can_reopen: true,
@@ -813,11 +826,34 @@ const MOCK_GROUP_DETAIL = {
       assignment_type: "engineer",
       assignee_kind: "registered",
       assignee_name: "Engineer User",
+      assignee_email: "engineer@optimal.example",
       assignment_status: "submitted",
       submitted_at: "2026-06-05T15:48:00Z",
       linked_session_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
       submitted_by_name: "Engineer User",
       final_total: "0",
+      current_version_number: 2,
+      version_count: 2,
+      versions: [
+        {
+          version_number: 2,
+          submitted_at: "2026-06-05T15:48:00Z",
+          submitted_by_name: "Engineer User",
+          revision_reason: "Client requested scope change",
+          final_total: "0",
+          status: "submitted",
+          is_current: true,
+        },
+        {
+          version_number: 1,
+          submitted_at: "2026-06-05T14:00:00Z",
+          submitted_by_name: "Engineer User",
+          revision_reason: null,
+          final_total: "0",
+          status: "submitted",
+          is_current: false,
+        },
+      ],
       is_latest: false,
       can_view_details: true,
       can_reopen: true,
@@ -827,6 +863,7 @@ const MOCK_GROUP_DETAIL = {
       assignment_type: "estimator",
       assignee_kind: "registered",
       assignee_name: "Estimator User",
+      assignee_email: "estimator@optimal.example",
       assignment_status: "assigned",
       assigned_at: "2026-06-05T10:00:00Z",
       final_total: null,
@@ -877,7 +914,7 @@ test.describe("Manager quote group review", () => {
     await expect(page).toHaveURL(/\/manager\/review$/);
   });
 
-  test("assignment submissions section visible without separate cards", async ({ page }) => {
+  test("assignment submissions section shows submission cards", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await mockQuoteGroupDetailApi(page);
     await page.goto("/manager/review/group?quote_ref=Q22100");
@@ -885,24 +922,67 @@ test.describe("Manager quote group review", () => {
     await expect(page.getByTestId("quote-group-assignment-submissions-table")).toBeVisible();
     await expect(page.getByTestId("quote-group-assignments")).toHaveCount(0);
     await expect(page.getByTestId("quote-group-submissions")).toHaveCount(0);
+    await expect(page.locator('[data-testid^="assignment-submission-row-"]')).toHaveCount(3);
   });
 
-  test("submitted row shows assignee submitted at and final total", async ({ page }) => {
+  test("submitted card shows compact assignee, amount, badges, and actions", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await mockQuoteGroupDetailApi(page);
     await page.goto("/manager/review/group?quote_ref=Q22100");
     const engineerRow = page.getByTestId("assignment-submission-row-2");
     await expect(engineerRow).toContainText("Engineer User");
+    await expect(engineerRow).toContainText("Engineer · Registered");
+    await expect(engineerRow).toContainText("Submitted");
     await expect(engineerRow).toContainText("2026");
-    await expect(engineerRow).toContainText("£0.00");
+    await expect(engineerRow.getByTestId("submission-total-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveText("£0.00");
+    await expect(engineerRow.getByTestId("submission-version-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveText("v2");
+    await expect(engineerRow.getByTestId("view-session-detail-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveText("View");
+    await expect(engineerRow.getByTestId("version-history-open-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveText(
+      "History",
+    );
+    await expect(engineerRow.getByTestId("reopen-session-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveText("Reopen");
+    await expect(engineerRow).not.toContainText("engineer@optimal.example");
+    await expect(engineerRow).not.toContainText("Submitted by");
+    await expect(engineerRow).not.toContainText("Final total");
+    await expect(engineerRow.locator("text=in_progress")).toHaveCount(0);
   });
 
-  test("latest badge on latest submission and pending row has no final total", async ({ page }) => {
+  test("latest badge on latest submission and pending card shows no submission yet", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await mockQuoteGroupDetailApi(page);
     await page.goto("/manager/review/group?quote_ref=Q22100");
     await expect(page.getByTestId("submission-latest-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
-    await expect(page.getByTestId("assignment-submission-row-1")).toContainText("—");
+    const pendingRow = page.getByTestId("assignment-submission-row-1");
+    await expect(pendingRow).toContainText("No submission yet");
+    await expect(pendingRow).toContainText("Assigned");
+    await expect(pendingRow.getByTestId("compare-select-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveCount(0);
+    await expect(pendingRow.locator("text=—")).toHaveCount(0);
+  });
+
+  test("submitted row actions appear horizontally and pending row shows revoke", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    const submittedRow = page.getByTestId("assignment-submission-row-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    await expect(submittedRow.getByTestId("view-session-detail-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(submittedRow.getByTestId("version-history-open-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(submittedRow.getByTestId("reopen-session-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+
+    const pendingRow = page.getByTestId("assignment-submission-row-1");
+    await expect(pendingRow.getByTestId("revoke-assignment-1")).toBeVisible();
+    await expect(pendingRow.locator('input[type="checkbox"]')).toHaveCount(0);
+  });
+
+  test("selected submitted card highlights with blue background", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    const row = page.getByTestId("assignment-submission-row-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    await page.getByTestId("compare-select-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").check();
+    await expect(row).toHaveClass(/bg-blue-50/);
+    await expect(row).toHaveClass(/border-blue-200/);
   });
 
   test("view details and reopen actions available without tokens", async ({ page }) => {
@@ -930,6 +1010,88 @@ test.describe("Manager quote group review", () => {
     await expect(page).toHaveURL(/\/eworks\/calculate\?session_id=dddddddd-dddd-dddd-dddd-dddddddddddd/);
     await expect(page.getByText("secret-reopen-token")).toHaveCount(0);
     await expect(page.getByText("session_token")).toHaveCount(0);
+  });
+});
+
+test.describe("Manager assignment version history", () => {
+  test("single-version submission opens modal with v1 and Initial submission", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    await page.getByTestId("version-history-open-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").click();
+    await expect(page.getByTestId("version-history-modal-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(page.getByTestId("version-row-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb-1")).toBeVisible();
+    await expect(page.getByTestId("version-reason-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb-1")).toHaveText(
+      "Initial submission",
+    );
+    await expect(page.getByTestId("version-current-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb-1")).toBeVisible();
+  });
+
+  test("multi-version submission shows v1 and v2 with revision reason", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    await page.getByTestId("version-history-open-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").click();
+    await expect(page.getByTestId("version-history-modal-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toBeVisible();
+    await expect(page.getByTestId("version-row-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-1")).toBeVisible();
+    await expect(page.getByTestId("version-row-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-2")).toBeVisible();
+    await expect(page.getByTestId("version-reason-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-1")).toHaveText(
+      "Initial submission",
+    );
+    await expect(page.getByTestId("version-reason-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-2")).toHaveText(
+      "Client requested scope change",
+    );
+    await expect(page.getByTestId("version-current-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-2")).toBeVisible();
+  });
+
+  test("version view navigates to session detail with version query", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    await page.getByTestId("version-history-open-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").click();
+    await page.getByTestId("version-view-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-1").click();
+    await expect(page).toHaveURL(/\/manager\/review\/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\?version=1/);
+  });
+
+  test("version PDF download calls manager endpoint with version param", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    const downloadedUrls: string[] = [];
+
+    await page.route("**/api/v1/manager/quotes/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/pdf/*", async (route) => {
+      downloadedUrls.push(route.request().url());
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'attachment; filename="Q22100_Client_view.pdf"',
+        },
+        body: Buffer.from("%PDF-1.4 version pdf"),
+      });
+    });
+
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+    await page.getByTestId("version-history-open-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").click();
+    await page.getByTestId("version-download-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-2").click();
+
+    await expect.poll(() => downloadedUrls.length).toBe(1);
+    expect(downloadedUrls[0]).toContain("version=2");
+    await expect(page.getByText("session_token")).toHaveCount(0);
+  });
+
+  test("modal closes without exposing tokens", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    await page.getByTestId("version-history-open-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").click();
+    await page.getByTestId("version-history-close-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").click();
+    await expect(page.getByTestId("version-history-modal-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveCount(0);
+    await expect(page.getByText("session_token")).toHaveCount(0);
+    await expect(page.getByText("raw_payload")).toHaveCount(0);
   });
 });
 

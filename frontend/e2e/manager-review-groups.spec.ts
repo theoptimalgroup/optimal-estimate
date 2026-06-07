@@ -235,7 +235,7 @@ test.describe("Manager grouped quote review", () => {
     await expect(page.getByTestId("quote-group-assignments")).toHaveCount(0);
     await expect(page.getByTestId("quote-group-submissions")).toHaveCount(0);
     await expect(page.getByTestId("assignment-submission-row-1")).toBeVisible();
-    await expect(page.getByTestId("assignment-submission-status-1")).toContainText("Pending");
+    await expect(page.getByTestId("assignment-submission-status-1")).toContainText("Assigned");
     await expect(page.getByTestId("assignment-submission-row-2")).toBeVisible();
     await expect(
       page.getByTestId("assignment-submission-row-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
@@ -243,20 +243,18 @@ test.describe("Manager grouped quote review", () => {
     await expect(page.getByTestId("quote-group-submissions-notice")).toContainText("2 submissions received");
   });
 
-  test("group detail shows submitter column and latest badge", async ({ page }) => {
+  test("group detail shows latest badge without submitter line in card", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await mockQuoteGroupsApi(page);
     await page.goto("/manager/review/group?quote_ref=Q22100");
-    await expect(page.getByTestId("submission-submitter-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toContainText(
-      "Engineer User",
-    );
-    await expect(page.getByTestId("submission-submitter-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toContainText(
-      "Unknown submitter",
-    );
     await expect(page.getByTestId("submission-latest-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(page.getByTestId("assignment-submission-row-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).not.toContainText(
+      "Submitted by",
+    );
+    await expect(page.getByTestId("assignment-submission-row-2")).not.toContainText("engineer@example.com");
     await expect(page.getByTestId("quote-group-review-status")).toContainText("Ready for Review");
     await expect(page.getByText("assignment_token")).toHaveCount(0);
-    await expect(page.getByTestId("assignment-submission-row-1")).toContainText("—");
+    await expect(page.getByTestId("assignment-submission-row-1")).toContainText("No submission yet");
   });
 
   test("assignment submissions section precedes compare section in DOM order", async ({ page }) => {

@@ -14,6 +14,8 @@ from app.services.audit_helpers import record_audit
 from app.services.manager_dashboard_service import get_manager_dashboard
 from app.services.manager_quote_pdf_service import render_manager_quote_pdf
 from app.services.quote_job_assignment_service import assign_quote_job
+from app.schemas.calculation_session_revision import SessionVersionHistoryResponse
+from app.services.calculation_session_revision_service import list_session_version_history
 
 router = APIRouter(prefix="/manager", tags=["manager"])
 
@@ -42,6 +44,20 @@ def assign_quote_job_endpoint(
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return success_response(AssignQuoteJobResponse(decision=decision).model_dump(mode="json"))
+
+
+@router.get("/quotes/sessions/{session_id}/versions")
+def get_manager_session_version_history(
+    session_id: UUID,
+    db: DbSession,
+    _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER)),
+):
+    """Return sanitized version history for a submitted estimate session."""
+    try:
+        result = list_session_version_history(db, session_id)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return success_response(SessionVersionHistoryResponse.model_validate(result).model_dump(mode="json"))
 
 
 @router.get("/quotes/{session_id}/pdf/{view}")

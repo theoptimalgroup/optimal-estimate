@@ -102,10 +102,14 @@ export function EngineerAssignmentCard({
             )}
           </div>
           <StatusBadge
-            tone={assignmentStatusTone(assignment.status)}
+            tone={assignmentStatusTone(
+              assignment.revision_in_progress ? "in_progress" : assignment.status,
+            )}
             data-testid={`${testIdPrefix}-status-${assignment.id}`}
           >
-            {formatAssignmentStatusLabel(assignment.status)}
+            {assignment.revision_in_progress
+              ? "Revision in Progress"
+              : formatAssignmentStatusLabel(assignment.status)}
           </StatusBadge>
         </div>
         {variant === "active" ? (
@@ -116,13 +120,21 @@ export function EngineerAssignmentCard({
             onClick={() => void openEstimate("view")}
             data-testid={`${testIdPrefix}-action-${assignment.id}`}
           >
-            {loadingAction ? "Opening…" : assignment.has_calculation_session ? "Continue Estimate" : "Start Estimate"}
+            {loadingAction
+              ? "Opening…"
+              : assignment.status === "assigned"
+                ? "Start Estimate"
+                : "Continue Estimate"}
           </PrimaryButton>
         ) : (
           <div className="mt-4 flex flex-wrap gap-2">
             <PrimaryButton
               type="button"
-              disabled={loadingAction !== null || !assignment.calculation_session_id}
+              disabled={
+                loadingAction !== null
+                || !assignment.calculation_session_id
+                || assignment.can_view_submission === false
+              }
               onClick={() => void openEstimate("view")}
               data-testid={`${testIdPrefix}-view-${assignment.id}`}
             >

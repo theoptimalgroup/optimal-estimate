@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
+import { VersionHistoryModal } from "@/components/dashboard/version-history-modal";
 import { StatusBadge } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import {
   buildQuoteGroupHref,
   type DashboardQuoteGroupAssignmentItem,
@@ -59,7 +62,7 @@ function assignmentStatusTone(status: string): "warning" | "info" | "success" | 
 function assignmentStatusLabel(status: string): string {
   switch (status) {
     case "assigned":
-      return "Pending";
+      return "Assigned";
     case "in_progress":
       return "In Progress";
     case "submitted":
@@ -69,6 +72,18 @@ function assignmentStatusLabel(status: string): string {
     default:
       return status;
   }
+}
+
+function formatAssigneeKindLine(row: DashboardQuoteGroupAssignmentSubmissionRow): string {
+  const kind =
+    row.assignee_kind === "unknown"
+      ? "Unknown"
+      : row.assignee_kind.charAt(0).toUpperCase() + row.assignee_kind.slice(1);
+  return `${formatAssignmentType(row.assignment_type)} · ${kind}`;
+}
+
+function isSubmittedAssignmentRow(row: DashboardQuoteGroupAssignmentSubmissionRow): boolean {
+  return row.assignment_status === "submitted" && row.linked_session_id != null;
 }
 
 function groupReviewStatusTone(
@@ -201,6 +216,7 @@ export function QuoteGroupsTable({
 export function QuoteGroupAssignmentSubmissionsTable({
   rows,
   sessionDetailHref = (sessionId) => `/manager/review/${sessionId}`,
+  quoteRef,
   onReopen,
   reopeningSessionId,
   onRevoke,
@@ -208,9 +224,11 @@ export function QuoteGroupAssignmentSubmissionsTable({
   selectedSessionIds,
   onToggleSelect,
   selectionLimitMessage,
+  onDownloadVersionPdf,
 }: {
   rows: DashboardQuoteGroupAssignmentSubmissionRow[];
   sessionDetailHref?: (sessionId: string) => string;
+  quoteRef?: string | null;
   onReopen?: (sessionId: string) => Promise<void>;
   reopeningSessionId?: string | null;
   onRevoke?: (assignmentId: number) => Promise<void>;
@@ -218,166 +236,200 @@ export function QuoteGroupAssignmentSubmissionsTable({
   selectedSessionIds?: Set<string>;
   onToggleSelect?: (sessionId: string) => void;
   selectionLimitMessage?: string | null;
+  onDownloadVersionPdf?: (sessionId: string, versionNumber: number) => void | Promise<void>;
 }) {
+  const [versionHistoryRow, setVersionHistoryRow] = useState<DashboardQuoteGroupAssignmentSubmissionRow | null>(
+    null,
+  );
+
   if (rows.length === 0) {
     return <p className="text-sm text-slate-600">No assignments or submissions yet.</p>;
   }
 
   return (
-    <div className="space-y-3">
-      {selectionLimitMessage ? (
-        <p className="text-sm text-amber-800" data-testid="submission-selection-limit-message" role="status">
-          {selectionLimitMessage}
-        </p>
-      ) : null}
-      <div
-        className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm"
-        data-testid="quote-group-assignment-submissions-table"
-      >
-        <table className="min-w-full text-left text-sm">
-          <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-600">
-            <tr>
-              {onToggleSelect ? <th className="px-4 py-3 lg:px-5">Compare</th> : null}
-              <th className="px-4 py-3 lg:px-5">Type</th>
-            <th className="px-4 py-3 lg:px-5">Assignee</th>
-            <th className="px-4 py-3 lg:px-5">Kind</th>
-            <th className="px-4 py-3 lg:px-5">Status</th>
-            <th className="px-4 py-3 lg:px-5">Submitted At</th>
-            <th className="px-4 py-3 lg:px-5">Submitted By</th>
-            <th className="px-4 py-3 text-right lg:px-5">Final Total</th>
-            <th className="px-4 py-3 lg:px-5">Latest</th>
-            <th className="px-4 py-3 lg:px-5">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-200 bg-white">
+    <>
+      <div className="space-y-3">
+        {selectionLimitMessage ? (
+          <p className="text-sm text-amber-800" data-testid="submission-selection-limit-message" role="status">
+            {selectionLimitMessage}
+          </p>
+        ) : null}
+        <div className="space-y-2" data-testid="quote-group-assignment-submissions-table">
           {rows.map((row) => {
             const rowKey = assignmentSubmissionRowKey(row);
             const statusId = row.assignment_id ?? row.linked_session_id ?? rowKey;
             const isPendingOrInProgress =
               row.assignment_status === "assigned" || row.assignment_status === "in_progress";
             const sessionId = row.linked_session_id ?? null;
+            const isSubmitted = isSubmittedAssignmentRow(row);
             const isSelectable =
               row.assignment_status === "submitted" && sessionId != null && row.assignment_status !== "cancelled";
             const isSelected = sessionId != null && (selectedSessionIds?.has(sessionId) ?? false);
 
             return (
-              <tr
+              <article
                 key={rowKey}
-                className={
+                className={cn(
+                  "rounded-xl border px-3 py-2.5 transition-colors sm:px-4 sm:py-3",
                   row.is_job_assigned
-                    ? "border-l-4 border-emerald-500 bg-emerald-50/70 transition-colors hover:bg-emerald-50"
-                    : "transition-colors hover:bg-slate-50"
-                }
+                    ? "border-l-4 border-emerald-500 bg-emerald-50/70"
+                    : isSelected
+                      ? "border-blue-200 bg-blue-50"
+                      : "border-slate-200 bg-white hover:bg-slate-50/80",
+                )}
                 data-testid={`assignment-submission-row-${statusId}`}
               >
-                {onToggleSelect ? (
-                  <td className="px-4 py-3 lg:px-5">
-                    {isSelectable ? (
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => onToggleSelect(sessionId!)}
-                        aria-label={`Compare submission from ${row.assignee_name}`}
-                        data-testid={`compare-select-${sessionId}`}
-                      />
-                    ) : (
-                      <span className="text-sm text-slate-300">—</span>
-                    )}
-                  </td>
-                ) : null}
-                <td className="px-4 py-3 text-slate-900 lg:px-5">{formatAssignmentType(row.assignment_type)}</td>
-                <td className="px-4 py-3 text-slate-900 lg:px-5">
-                  <div>{row.assignee_name}</div>
-                  {row.assignee_email ? <div className="text-xs text-slate-500">{row.assignee_email}</div> : null}
-                </td>
-                <td className="px-4 py-3 capitalize text-slate-600 lg:px-5">{row.assignee_kind}</td>
-                <td className="px-4 py-3 lg:px-5">
-                  <StatusBadge
-                    tone={assignmentStatusTone(row.assignment_status)}
-                    data-testid={`assignment-submission-status-${statusId}`}
-                  >
-                    {assignmentStatusLabel(row.assignment_status)}
-                  </StatusBadge>
-                </td>
-                <td className="px-4 py-3 text-slate-600 lg:px-5">
-                  {row.submitted_at ? formatSubmittedAt(row.submitted_at) : "—"}
-                </td>
-                <td
-                  className="px-4 py-3 text-slate-900 lg:px-5"
-                  data-testid={sessionId ? `submission-submitter-${sessionId}` : undefined}
-                >
-                  {row.submitted_by_name ?? "—"}
-                </td>
-                <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900 lg:px-5">
-                  {money(row.final_total)}
-                </td>
-                <td className="px-4 py-3 lg:px-5">
-                  {row.is_latest && sessionId ? (
-                    <StatusBadge tone={latestBadgeTone()} data-testid={`submission-latest-${sessionId}`}>
-                      Latest
-                    </StatusBadge>
-                  ) : (
-                    <span className="text-sm text-slate-400">—</span>
-                  )}
-                  {row.is_job_assigned ? (
-                    <div className="mt-1">
-                      <StatusBadge tone="success" data-testid={`submission-assigned-job-${sessionId}`}>
-                        Selected Estimate
-                      </StatusBadge>
-                    </div>
+                <div className={cn("flex gap-3", isSelectable ? "items-center" : "items-start")}>
+                  {onToggleSelect && isSelectable ? (
+                    <input
+                      type="checkbox"
+                      className="shrink-0"
+                      checked={isSelected}
+                      onChange={() => onToggleSelect(sessionId!)}
+                      aria-label={`Compare submission from ${row.assignee_name}`}
+                      data-testid={`compare-select-${sessionId}`}
+                    />
                   ) : null}
-                </td>
-                <td className="px-4 py-3 lg:px-5">
-                  <div className="flex flex-wrap gap-3">
-                    {row.can_view_details && sessionId ? (
-                      <Link
-                        href={sessionDetailHref(sessionId)}
-                        className="text-sm font-medium text-blue-600 hover:text-blue-700"
-                        data-testid={`view-session-detail-${sessionId}`}
+
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <h3
+                        className="text-sm font-semibold text-slate-900 sm:text-base"
+                        title={row.assignee_email ?? undefined}
                       >
-                        View Details
-                      </Link>
-                    ) : null}
-                    {row.can_reopen && sessionId && onReopen ? (
-                      <button
-                        type="button"
-                        className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-50"
-                        disabled={reopeningSessionId === sessionId}
-                        onClick={() => void onReopen(sessionId)}
-                        data-testid={`reopen-session-${sessionId}`}
+                        {row.assignee_name}
+                      </h3>
+                      {isSubmitted ? (
+                        <span
+                          className="shrink-0 text-sm font-semibold tabular-nums text-slate-900"
+                          data-testid={sessionId ? `submission-total-${sessionId}` : undefined}
+                        >
+                          {money(row.final_total)}
+                        </span>
+                      ) : (
+                        <StatusBadge
+                          tone={assignmentStatusTone(row.assignment_status)}
+                          data-testid={`assignment-submission-status-${statusId}`}
+                        >
+                          {assignmentStatusLabel(row.assignment_status)}
+                        </StatusBadge>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <p className="text-xs text-slate-600 sm:text-sm">{formatAssigneeKindLine(row)}</p>
+                      {isSubmitted ? (
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          <StatusBadge
+                            tone={assignmentStatusTone(row.assignment_status)}
+                            data-testid={`assignment-submission-status-${statusId}`}
+                          >
+                            {assignmentStatusLabel(row.assignment_status)}
+                          </StatusBadge>
+                          {row.current_version_number && sessionId ? (
+                            <StatusBadge tone="info" data-testid={`submission-version-${sessionId}`}>
+                              v{row.current_version_number}
+                            </StatusBadge>
+                          ) : null}
+                          {row.is_latest && sessionId ? (
+                            <StatusBadge tone={latestBadgeTone()} data-testid={`submission-latest-${sessionId}`}>
+                              Latest
+                            </StatusBadge>
+                          ) : null}
+                          {row.is_job_assigned && sessionId ? (
+                            <StatusBadge tone="success" data-testid={`submission-assigned-job-${sessionId}`}>
+                              Selected Estimate
+                            </StatusBadge>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500 sm:text-sm">No submission yet</p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      {isSubmitted && row.submitted_at ? (
+                        <p className="text-xs text-slate-500 sm:text-sm">{formatSubmittedAt(row.submitted_at)}</p>
+                      ) : (
+                        <span className="flex-1" />
+                      )}
+                      <div
+                        className="flex flex-wrap items-center gap-3 text-sm"
+                        data-testid={sessionId ? `submission-actions-${sessionId}` : undefined}
                       >
-                        {reopeningSessionId === sessionId ? "Reopening…" : "Reopen"}
-                      </button>
-                    ) : null}
-                    {isPendingOrInProgress && row.assignment_id != null && sessionId ? (
-                      <Link
-                        href={sessionDetailHref(sessionId)}
-                        className="text-sm font-medium text-blue-600 hover:text-blue-700"
-                        data-testid={`open-assignment-${row.assignment_id}`}
-                      >
-                        Open Assignment
-                      </Link>
-                    ) : null}
-                    {isPendingOrInProgress && row.assignment_id != null && onRevoke ? (
-                      <button
-                        type="button"
-                        className="text-sm font-medium text-red-600 hover:text-red-700 hover:underline disabled:opacity-50"
-                        disabled={revokingAssignmentId === row.assignment_id}
-                        onClick={() => void onRevoke(row.assignment_id!)}
-                        data-testid={`revoke-assignment-${row.assignment_id}`}
-                      >
-                        {revokingAssignmentId === row.assignment_id ? "Revoking…" : "Revoke"}
-                      </button>
-                    ) : null}
+                        {row.can_view_details && sessionId ? (
+                          <Link
+                            href={sessionDetailHref(sessionId)}
+                            className="font-medium text-blue-600 hover:text-blue-700"
+                            data-testid={`view-session-detail-${sessionId}`}
+                          >
+                            View
+                          </Link>
+                        ) : null}
+                        {row.can_view_details && sessionId ? (
+                          <button
+                            type="button"
+                            className="font-medium text-blue-600 hover:text-blue-700"
+                            onClick={() => setVersionHistoryRow(row)}
+                            aria-label="Version History"
+                            data-testid={`version-history-open-${sessionId}`}
+                          >
+                            History
+                          </button>
+                        ) : null}
+                        {row.can_reopen && sessionId && onReopen ? (
+                          <button
+                            type="button"
+                            className="font-medium text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-50"
+                            disabled={reopeningSessionId === sessionId}
+                            onClick={() => void onReopen(sessionId)}
+                            data-testid={`reopen-session-${sessionId}`}
+                          >
+                            {reopeningSessionId === sessionId ? "Reopening…" : "Reopen"}
+                          </button>
+                        ) : null}
+                        {isPendingOrInProgress && row.assignment_id != null && sessionId ? (
+                          <Link
+                            href={sessionDetailHref(sessionId)}
+                            className="font-medium text-blue-600 hover:text-blue-700"
+                            data-testid={`open-assignment-${row.assignment_id}`}
+                          >
+                            Open Assignment
+                          </Link>
+                        ) : null}
+                        {isPendingOrInProgress && row.assignment_id != null && onRevoke ? (
+                          <button
+                            type="button"
+                            className="font-medium text-red-600 hover:text-red-700 hover:underline disabled:opacity-50"
+                            disabled={revokingAssignmentId === row.assignment_id}
+                            onClick={() => void onRevoke(row.assignment_id!)}
+                            data-testid={`revoke-assignment-${row.assignment_id}`}
+                          >
+                            {revokingAssignmentId === row.assignment_id ? "Revoking…" : "Revoke"}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
-                </td>
-              </tr>
+                </div>
+              </article>
             );
           })}
-        </tbody>
-      </table>
+        </div>
       </div>
-    </div>
+      {versionHistoryRow?.linked_session_id ? (
+        <VersionHistoryModal
+          open
+          assigneeName={versionHistoryRow.assignee_name}
+          sessionId={versionHistoryRow.linked_session_id}
+          quoteRef={quoteRef}
+          versions={versionHistoryRow.versions ?? []}
+          sessionDetailHref={sessionDetailHref}
+          onClose={() => setVersionHistoryRow(null)}
+          onDownloadPdf={onDownloadVersionPdf}
+        />
+      ) : null}
+    </>
   );
 }
 

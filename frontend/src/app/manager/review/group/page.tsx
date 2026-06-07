@@ -3,7 +3,6 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
-import { SessionVersionHistoryPanel } from "@/components/dashboard/session-version-history-panel";
 import { MAX_COMPARE, SubmissionComparePanel } from "@/components/dashboard/submission-compare-panel";
 import {
   QuoteGroupAssignmentSubmissionsTable,
@@ -329,6 +328,7 @@ function QuoteGroupReviewContent() {
           <SectionCard title="Assignment Submissions" testId="quote-group-assignment-submissions">
             <QuoteGroupAssignmentSubmissionsTable
               rows={assignmentSubmissions}
+              quoteRef={group.quote_ref}
               onReopen={handleReopen}
               reopeningSessionId={reopeningSessionId}
               onRevoke={handleRevoke}
@@ -336,6 +336,9 @@ function QuoteGroupReviewContent() {
               selectedSessionIds={selectedSessionIds}
               onToggleSelect={handleToggleSelect}
               selectionLimitMessage={selectionLimitMessage}
+              onDownloadVersionPdf={(sessionId, versionNumber) =>
+                void downloadManagerQuotePdf(sessionId, "client", group.quote_ref ?? undefined, versionNumber)
+              }
             />
           </SectionCard>
 
@@ -348,25 +351,6 @@ function QuoteGroupReviewContent() {
                 selectedEstimateDecision={selectedEstimateDecision}
                 quoteRef={group.quote_ref}
               />
-            </SectionCard>
-          ) : null}
-
-          {group.sessions.some((session) => (session.version_history?.length ?? 0) > 1) ? (
-            <SectionCard title="Version History" testId="quote-group-version-history">
-              <div className="space-y-4">
-                {group.sessions
-                  .filter((session) => (session.version_history?.length ?? 0) > 1)
-                  .map((session) => (
-                    <SessionVersionHistoryPanel
-                      key={session.session_id}
-                      sessionId={session.session_id}
-                      versions={session.version_history ?? []}
-                      onDownloadPdf={(sessionId, versionNumber) =>
-                        void downloadManagerQuotePdf(sessionId, "client", group.quote_ref ?? undefined, versionNumber)
-                      }
-                    />
-                  ))}
-              </div>
             </SectionCard>
           ) : null}
         </>

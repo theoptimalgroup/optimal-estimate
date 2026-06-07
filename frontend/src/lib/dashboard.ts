@@ -53,9 +53,12 @@ export type DashboardQuotesResponse = {
 };
 
 export type DashboardQuoteGroupVersionItem = {
+  version_id?: string | null;
   version_number: number;
   submitted_at?: string | null;
   submitted_by_name?: string | null;
+  submitted_by_email?: string | null;
+  submitted_by_role?: string | null;
   revision_reason?: string | null;
   final_total?: number | string | null;
   status: string;
@@ -161,6 +164,9 @@ export type DashboardQuoteGroupAssignmentSubmissionRow = {
   can_assign_job?: boolean;
   is_job_assigned?: boolean;
   comparison_summary?: DashboardQuoteGroupComparisonSummary | null;
+  current_version_number?: number | null;
+  version_count?: number;
+  versions?: DashboardQuoteGroupVersionItem[];
 };
 
 export type DashboardQuoteGroupAssignmentSummary = {
@@ -292,6 +298,23 @@ export async function fetchSubmittedQuotes(password: string) {
     throw new Error(typeof message === "string" ? message : JSON.stringify(message));
   }
   return payload.data as DashboardQuotesResponse;
+}
+
+export async function fetchSubmittedQuoteDetail(
+  password: string,
+  sessionId: string,
+  versionNumber?: number,
+) {
+  const search = versionNumber != null ? `?version=${versionNumber}` : "";
+  const response = await fetch(`${getApiUrl()}/api/v1/dashboard/quotes/${sessionId}${search}`, {
+    headers: { "X-Dashboard-Password": password },
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const message = payload?.detail?.error?.message || payload?.detail || "Failed to load quote";
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+  return payload.data as DashboardQuoteItem;
 }
 
 export async function reopenQuoteForRefill(password: string, sessionId: string) {

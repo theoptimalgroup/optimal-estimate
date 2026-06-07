@@ -10,6 +10,7 @@ from app.schemas.eworks_link import (
     CombinedPdfRequest,
     CombineWorkNotesRequest,
     CombineWorkNotesResponse,
+    DashboardQuoteItem,
     DashboardQuotesResponse,
     ReopenQuoteResponse,
 )
@@ -18,6 +19,7 @@ from app.schemas.calculation_session_revision import SessionVersionHistoryRespon
 from app.services.calculation_session_revision_service import list_session_version_history
 from app.services.calculation_session_service import (
     combine_selected_work_internal_notes,
+    get_submitted_quote_detail,
     get_submitted_quote_group_detail,
     list_submitted_quote_groups,
     list_submitted_quotes,
@@ -36,6 +38,20 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 def get_submitted_quotes(db: DbSession, _auth=Depends(require_dashboard_access)):
     result = list_submitted_quotes(db)
     return success_response(DashboardQuotesResponse.model_validate(result))
+
+
+@router.get("/quotes/{session_id}")
+def get_submitted_quote(
+    session_id: UUID,
+    db: DbSession,
+    _auth=Depends(require_dashboard_access),
+    version: int | None = Query(default=None, ge=1),
+):
+    try:
+        result = get_submitted_quote_detail(db, session_id, version_number=version)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return success_response(DashboardQuoteItem.model_validate(result).model_dump(mode="json"))
 
 
 @router.get("/quote-groups")

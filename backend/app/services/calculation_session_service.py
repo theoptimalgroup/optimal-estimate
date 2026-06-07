@@ -625,6 +625,9 @@ def submit_session(
     session.status = "submitted"
     session.submitted_at = datetime.now(timezone.utc)
     complete_revision_submit(db, session)
+    from app.services.quote_assignment_service import mark_linked_assignment_submitted
+
+    mark_linked_assignment_submitted(db, session_id)
     db.flush()
 
 
@@ -671,9 +674,101 @@ def _build_dashboard_work_item(
     )
 
 
-def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
+def _build_dashboard_quote_item_from_session(db: Session, session: CalculationSession) -> DashboardQuoteItem:
     from decimal import Decimal
 
+    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+    step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else Step2Snapshot()
+    last_result = _dashboard_last_result(db, session)
+    work_breakdowns = last_result.get("work_breakdowns", []) if last_result else []
+    breakdown_map = {item["work_index"]: item for item in work_breakdowns}
+
+    final_total = None
+    internal_notes = None
+    summary_breakdown = None
+    if last_result:
+        breakdown = last_result.get("breakdown") or {}
+        if breakdown.get("final_total") is not None:
+            final_total = Decimal(str(breakdown["final_total"]))
+        internal_notes = last_result.get("internal_notes")
+        summary_breakdown = _dashboard_quote_summary_breakdown(breakdown)
+
+    works: list[DashboardWorkItem] = []
+    for index, block in enumerate(step2.works):
+        work_result = breakdown_map.get(index, {})
+        breakdown = work_result.get("breakdown") or {}
+        labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(breakdown)
+        work_internal_notes = work_result.get("internal_notes")
+        if not work_internal_notes and len(step2.works) == 1:
+            work_internal_notes = internal_notes
+        works.append(
+            _build_dashboard_work_item(
+                db,
+                index=index,
+                block=block,
+                labour_subtotal=labour_subtotal,
+                materials_subtotal=materials_subtotal,
+                work_internal_notes=work_internal_notes,
+            )
+        )
+
+    return DashboardQuoteItem(
+        session_id=session.id,
+        session_token=session.session_token,
+        quote_number=step1.quote_number,
+        job_number=step1.job_number,
+        client_name=step1.client_name,
+        trade_name=step1.trade_name,
+        submitted_at=session.submitted_at,
+        final_total=final_total,
+        internal_notes=internal_notes,
+        additional_charges=quote_additional_charge_lines(step2),
+        breakdown=summary_breakdown,
+        works=works,
+        acceptance=staff_acceptance_from_session(session),
+        status=session.status,
+        locked=session.locked,
+        current_version_number=max(session.current_version_number, 1),
+        revision_in_progress=session.revision_in_progress,
+        active_revision_reason=session.active_revision_reason,
+        can_revise=session.status == "submitted" and session.locked and not session.revision_in_progress,
+        can_continue_revision=session.revision_in_progress and not session.locked,
+    )
+
+
+def get_submitted_quote_detail(
+    db: Session,
+    session_id: UUID,
+    *,
+    version_number: int | None = None,
+) -> DashboardQuoteItem:
+    from app.models.calculation_session import CalculationSession
+    from app.services.calculation_session_revision_service import (
+        apply_version_snapshot_to_session,
+        get_session_version,
+    )
+
+    session = db.get(CalculationSession, session_id)
+    if session is None:
+        raise AppError("SESSION_NOT_FOUND", "Quote session not found", 404)
+    if session.status not in {"submitted", "revision_in_progress"} or session.submitted_at is None:
+        raise AppError("SESSION_NOT_SUBMITTED", "Quote is not submitted", 404)
+
+    original_step1 = dict(session.step1_snapshot or {})
+    original_step2 = dict(session.step2_snapshot) if session.step2_snapshot else None
+    original_ui_state = dict(session.ui_state) if isinstance(session.ui_state, dict) else session.ui_state
+    try:
+        if version_number is not None:
+            version = get_session_version(db, session_id=session_id, version_number=version_number)
+            apply_version_snapshot_to_session(db, version)
+        return _build_dashboard_quote_item_from_session(db, session)
+    finally:
+        session.step1_snapshot = original_step1
+        session.step2_snapshot = original_step2
+        session.ui_state = original_ui_state
+
+
+def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
     from sqlalchemy import select
 
     from app.models.calculation_session import CalculationSession
@@ -691,65 +786,7 @@ def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
     for session in sessions:
         if not session.submitted_at:
             continue
-        step1 = Step1Snapshot.model_validate(session.step1_snapshot)
-        step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else Step2Snapshot()
-        last_result = _dashboard_last_result(db, session)
-        work_breakdowns = last_result.get("work_breakdowns", []) if last_result else []
-        breakdown_map = {item["work_index"]: item for item in work_breakdowns}
-
-        final_total = None
-        internal_notes = None
-        summary_breakdown = None
-        if last_result:
-            breakdown = last_result.get("breakdown") or {}
-            if breakdown.get("final_total") is not None:
-                final_total = Decimal(str(breakdown["final_total"]))
-            internal_notes = last_result.get("internal_notes")
-            summary_breakdown = _dashboard_quote_summary_breakdown(breakdown)
-
-        works: list[DashboardWorkItem] = []
-        for index, block in enumerate(step2.works):
-            work_result = breakdown_map.get(index, {})
-            breakdown = work_result.get("breakdown") or {}
-            labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(breakdown)
-            work_internal_notes = work_result.get("internal_notes")
-            if not work_internal_notes and len(step2.works) == 1:
-                work_internal_notes = internal_notes
-            works.append(
-                _build_dashboard_work_item(
-                    db,
-                    index=index,
-                    block=block,
-                    labour_subtotal=labour_subtotal,
-                    materials_subtotal=materials_subtotal,
-                    work_internal_notes=work_internal_notes,
-                )
-            )
-
-        quotes.append(
-            DashboardQuoteItem(
-                session_id=session.id,
-                session_token=session.session_token,
-                quote_number=step1.quote_number,
-                job_number=step1.job_number,
-                client_name=step1.client_name,
-                trade_name=step1.trade_name,
-                submitted_at=session.submitted_at,
-                final_total=final_total,
-                internal_notes=internal_notes,
-                additional_charges=quote_additional_charge_lines(step2),
-                breakdown=summary_breakdown,
-                works=works,
-                acceptance=staff_acceptance_from_session(session),
-                status=session.status,
-                locked=session.locked,
-                current_version_number=max(session.current_version_number, 1),
-                revision_in_progress=session.revision_in_progress,
-                active_revision_reason=session.active_revision_reason,
-                can_revise=session.status == "submitted" and session.locked and not session.revision_in_progress,
-                can_continue_revision=session.revision_in_progress and not session.locked,
-            )
-        )
+        quotes.append(_build_dashboard_quote_item_from_session(db, session))
 
     return DashboardQuotesResponse(quotes=quotes)
 
@@ -1085,6 +1122,29 @@ def _can_assign_job_row(
     return normalized_name not in {"", "unknown", "unassigned"}
 
 
+def _dashboard_version_items(
+    db: Session,
+    session_id: UUID,
+    *,
+    submitted_by_role: str | None = None,
+) -> list[DashboardQuoteGroupVersionItem]:
+    history = list_session_version_history(db, session_id)
+    return [
+        DashboardQuoteGroupVersionItem(
+            version_number=version.version_number,
+            submitted_at=version.submitted_at,
+            submitted_by_name=version.submitted_by_name,
+            submitted_by_email=version.submitted_by_email,
+            submitted_by_role=submitted_by_role,
+            revision_reason=version.revision_reason,
+            final_total=version.final_total,
+            status=version.status,
+            is_current=version.is_current,
+        )
+        for version in sorted(history.versions, key=lambda item: item.version_number, reverse=True)
+    ]
+
+
 def _enrich_assignment_submission_row(
     db: Session,
     row: DashboardQuoteGroupAssignmentSubmissionRow,
@@ -1106,6 +1166,17 @@ def _enrich_assignment_submission_row(
             from app.services.quote_job_assignment_service import _session_comparison_summary
 
             updates["comparison_summary"] = _session_comparison_summary(db, raw_session)
+        versions = _dashboard_version_items(
+            db,
+            row.linked_session_id,
+            submitted_by_role=row.submitted_by_role,
+        )
+        updates["versions"] = versions
+        updates["version_count"] = len(versions)
+        updates["current_version_number"] = (
+            next((item.version_number for item in versions if item.is_current), None)
+            or (versions[0].version_number if versions else None)
+        )
     return row.model_copy(update=updates)
 
 
@@ -1296,6 +1367,8 @@ def _build_quote_group_detail(
                         version_number=version.version_number,
                         submitted_at=version.submitted_at,
                         submitted_by_name=version.submitted_by_name,
+                        submitted_by_email=version.submitted_by_email,
+                        submitted_by_role=submitter_role,
                         revision_reason=version.revision_reason,
                         final_total=version.final_total,
                         status=version.status,

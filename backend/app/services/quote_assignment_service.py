@@ -88,6 +88,51 @@ def _linked_session_submission_fields(
     return submitted_at, final_total
 
 
+def _find_assignment_for_session(db: Session, session_id: UUID) -> EworksQuoteAssignment | None:
+    return db.scalar(
+        select(EworksQuoteAssignment)
+        .where(EworksQuoteAssignment.calculation_session_id == session_id)
+        .order_by(EworksQuoteAssignment.id.desc())
+        .limit(1)
+    )
+
+
+def _effective_assignment_status(row: EworksQuoteAssignment, session: CalculationSession | None) -> str:
+    if row.status == "cancelled":
+        return "cancelled"
+    if session is not None and session.submitted_at is not None:
+        if session.status in {"submitted", "revision_in_progress"} or session.locked:
+            return "submitted"
+    return row.status
+
+
+def mark_linked_assignment_submitted(db: Session, session_id: UUID) -> EworksQuoteAssignment | None:
+    """Mark the quote assignment linked to a submitted calculation session as submitted."""
+    assignment = _find_assignment_for_session(db, session_id)
+    if assignment is None or assignment.status == "cancelled":
+        return None
+
+    before_status = assignment.status
+    if assignment.status != "submitted":
+        assignment.status = "submitted"
+        record_audit(
+            db,
+            actor=None,
+            action="quote_assignment_submitted",
+            entity_type="quote_assignment",
+            entity_id=assignment.id,
+            before={"status": before_status},
+            after={"status": "submitted", "calculation_session_id": str(session_id)},
+            metadata={
+                "assignment_id": assignment.id,
+                "quote_ref": assignment.quote_ref,
+                "assignment_type": assignment.assignment_type,
+            },
+        )
+        db.flush()
+    return assignment
+
+
 def _serialize_assignment(
     row: EworksQuoteAssignment,
     *,
@@ -127,12 +172,14 @@ def _serialize_assignment(
     data["has_calculation_session"] = row.calculation_session_id is not None
     data["calculation_session_id"] = str(row.calculation_session_id) if row.calculation_session_id else None
     data["can_start_estimate"] = _can_user_start_assignment(current_user, row) if current_user else False
+    data["can_view_submission"] = False
     if db is not None and row.calculation_session_id is not None:
         submitted_at, final_total = _linked_session_submission_fields(db, row.calculation_session_id)
         data["submitted_at"] = submitted_at
         data["final_total"] = final_total
         session = db.get(CalculationSession, row.calculation_session_id)
         if session is not None:
+            data["status"] = _effective_assignment_status(row, session)
             data["current_version_number"] = max(session.current_version_number, 1 if session.submitted_at else 0)
             data["revision_in_progress"] = session.revision_in_progress
             data["active_revision_reason"] = session.active_revision_reason
@@ -140,6 +187,10 @@ def _serialize_assignment(
                 session.status == "submitted" and session.locked and not session.revision_in_progress
             )
             data["can_continue_revision"] = session.revision_in_progress and not session.locked
+            data["can_view_submission"] = bool(
+                session.submitted_at is not None
+                and session.status in ("submitted", "revision_in_progress")
+            )
     if quote is not None:
         data["quote_summary"] = _quote_summary(quote)
     return data

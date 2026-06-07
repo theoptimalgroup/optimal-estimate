@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +17,7 @@ from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
+from app.models.calculation_session_version import CalculationSessionVersion
 from app.models.client import Client
 from app.models.client_alias import ClientAlias
 from app.models.eworks_sync import EworksQuote
@@ -41,6 +43,7 @@ def db_session():
         Trade.__table__,
         RateRule.__table__,
         CalculationSession.__table__,
+        CalculationSessionVersion.__table__,
         EworksQuote.__table__,
         EworksQuoteAssignment.__table__,
     ]:
@@ -153,6 +156,75 @@ def _patch_dev_user(mock_settings, *, role: str):
     mock_settings.dev_user_role = role
     mock_settings.dev_user_is_active = True
     mock_settings.dev_auth_auto_create_user = False
+
+
+def _add_trade_default_rate_rule(session) -> RateRule:
+    trade = session.trade  # type: ignore[attr-defined]
+    rule = RateRule(
+        client_id=None,
+        trade_id=trade.id,
+        formula_source="xlsx",
+        version="trade-default-carpenter",
+        hourly_rate=Decimal("95"),
+        day_rate=Decimal("239.40"),
+        direct_hourly_cost=Decimal("30"),
+        direct_daily_cost=Decimal("239.40"),
+        client_fee_pct=Decimal("0.15"),
+        hourly_overhead_pct=Decimal("0.30"),
+        daily_overhead_pct=Decimal("0.20"),
+        daily_overhead_long_job_pct=Decimal("0.15"),
+        labourer_hourly_cost=Decimal("18.75"),
+        labourer_daily_cost=Decimal("150"),
+        material_charge_denominator=Decimal("0.20"),
+        parking_charge_denominator=Decimal("0.20"),
+        congestion_charge_denominator=Decimal("0.20"),
+        mround_increment=Decimal("5"),
+        oj_uplift_pct=Decimal("10"),
+        nhs_overhead_uplift_pct=Decimal("15"),
+        eaf_flat_fee=Decimal("1"),
+        xlsx_client_name="Trade default",
+        xlsx_trade_name="Carpenter",
+        material_markup_type="percentage",
+        material_markup_value=Decimal("20"),
+        vat_rate=Decimal("20"),
+        active_from=date(2024, 1, 1),
+        is_active=True,
+    )
+    session.add(rule)
+    session.commit()
+    return rule
+
+
+def _minimal_step2() -> dict:
+    return {
+        "works": [
+            {
+                "scope": "Install socket",
+                "selected_product_id": None,
+                "product_name": "Socket install",
+                "product_code": None,
+                "labour_hours": 2,
+                "materials": [],
+                "attachments": [],
+            }
+        ],
+        "congestion_required": True,
+        "congestion_amount": 18,
+    }
+
+
+def _submit_assignment_estimate(api_client, assignment_id: int, *, role: str) -> tuple[str, str]:
+    start = api_client.post(f"/api/v1/quote-assignments/{assignment_id}/start-estimate")
+    assert start.status_code == 200, start.text
+    session_id = start.json()["data"]["session_id"]
+    token = start.json()["data"]["session_token"]
+    submit = api_client.post(
+        f"/api/v1/calculation-session/{session_id}/submit",
+        headers={"X-Session-Token": token},
+        json={"step2": _minimal_step2()},
+    )
+    assert submit.status_code == 200, submit.text
+    return session_id, token
 
 
 def _add_quote(session, *, quote_id: int = 9001, quote_ref: str = "Q-9001") -> EworksQuote:
@@ -872,3 +944,66 @@ def test_public_start_audit_created_without_tokens(mock_settings, api_client, db
     assert metadata.get("assignee_kind") == "external"
     assert metadata.get("assigned_user_email") == "external@example.com"
     assert metadata.get("quote_ref") == "Q-9307"
+
+
+@patch("app.auth.dependencies.settings")
+def test_engineer_submit_updates_assignment_status(mock_settings, api_client, db_session):
+    _add_trade_default_rate_rule(db_session)
+    quote = _add_quote(db_session, quote_id=9401, quote_ref="Q22122")
+    engineer = db_session.users["engineer"]  # type: ignore[attr-defined]
+
+    _patch_dev_user(mock_settings, role="manager")
+    create_resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(engineer.id),
+        },
+    )
+    assignment_id = create_resp.json()["data"]["id"]
+
+    _patch_dev_user(mock_settings, role="engineer")
+    _submit_assignment_estimate(api_client, assignment_id, role="engineer")
+    db_session.expire_all()
+
+    row = db_session.get(EworksQuoteAssignment, assignment_id)
+    assert row is not None
+    assert row.status == "submitted"
+
+    list_resp = api_client.get("/api/v1/quote-assignments/my")
+    assert list_resp.status_code == 200
+    item = next(i for i in list_resp.json()["data"] if i["id"] == assignment_id)
+    assert item["status"] == "submitted"
+    assert item["submitted_at"]
+    assert item["can_view_submission"] is True
+    assert "session_token" not in list_resp.text
+
+    logs = db_session.scalars(select(AuditLog).where(AuditLog.action == "quote_assignment_submitted")).all()
+    assert len(logs) == 1
+
+
+@patch("app.auth.dependencies.settings")
+def test_estimator_submit_updates_assignment_status(mock_settings, api_client, db_session):
+    _add_trade_default_rate_rule(db_session)
+    quote = _add_quote(db_session, quote_id=9402, quote_ref="Q-9402")
+    estimator = db_session.users["estimator"]  # type: ignore[attr-defined]
+
+    _patch_dev_user(mock_settings, role="manager")
+    create_resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "estimator",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(estimator.id),
+        },
+    )
+    assignment_id = create_resp.json()["data"]["id"]
+
+    _patch_dev_user(mock_settings, role="estimator")
+    _submit_assignment_estimate(api_client, assignment_id, role="estimator")
+    db_session.expire_all()
+
+    row = db_session.get(EworksQuoteAssignment, assignment_id)
+    assert row is not None
+    assert row.status == "submitted"

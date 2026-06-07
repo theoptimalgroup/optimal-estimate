@@ -8,9 +8,12 @@ from pydantic import BaseModel, Field
 
 
 class DashboardQuoteGroupVersionItem(BaseModel):
+    version_id: str | None = None
     version_number: int
     submitted_at: datetime | None = None
     submitted_by_name: str | None = None
+    submitted_by_email: str | None = None
+    submitted_by_role: str | None = None
     revision_reason: str | None = None
     final_total: Decimal | None = None
     status: str
@@ -144,6 +147,9 @@ class DashboardQuoteGroupAssignmentSubmissionRow(BaseModel):
     can_assign_job: bool = False
     is_job_assigned: bool = False
     comparison_summary: DashboardQuoteGroupComparisonSummary | None = None
+    current_version_number: int | None = None
+    version_count: int = 0
+    versions: list[DashboardQuoteGroupVersionItem] = Field(default_factory=list)
 
 
 class DashboardQuoteGroupDetailItem(DashboardQuoteGroupItem):
