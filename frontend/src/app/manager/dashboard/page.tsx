@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { DashboardSearch } from "@/components/dashboard/dashboard-search";
 import { QuoteBucketBoard } from "@/components/manager/quote-bucket-board";
 import { QuoteDetailModal } from "@/components/manager/sync-detail-modals";
 import {
@@ -29,6 +30,8 @@ export default function ManagerDashboardPage() {
   const [dashboard, setDashboard] = useState<ManagerDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const [selectedQuoteId, setSelectedQuoteId] = useState<number | null>(null);
   const [quoteDetail, setQuoteDetail] = useState<EworksQuoteSafeDetail | null>(null);
@@ -37,18 +40,25 @@ export default function ManagerDashboardPage() {
   const [quoteAttachments, setQuoteAttachments] = useState<EworksAttachmentSafe[]>([]);
   const [quoteAttachmentsLoading, setQuoteAttachmentsLoading] = useState(false);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(searchInput.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getManagerDashboard();
+      const data = await getManagerDashboard(10, debouncedSearch || undefined);
       setDashboard(data);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load dashboard");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     void load();
@@ -76,9 +86,16 @@ export default function ManagerDashboardPage() {
     }
   }, []);
 
+  const searchActive = debouncedSearch.length > 0;
+
   return (
     <div className="space-y-6" data-testid="manager-dashboard-page">
-      <PageHeader title="Manager Dashboard" />
+      <PageHeader
+        title="Manager Dashboard"
+        subtitle="Track synced eWorks quotes and operational status."
+      />
+
+      <DashboardSearch value={searchInput} onChange={setSearchInput} />
 
       {loading ? (
         <LoadingState message="Loading dashboard…" />
@@ -123,9 +140,11 @@ export default function ManagerDashboardPage() {
           </div>
 
           <QuoteBucketBoard
+            searchActive={searchActive}
             newQuotes={{
               title: "New Quotes",
               count: dashboard.categories.new_quotes.count,
+              filteredCount: dashboard.categories.new_quotes.filtered_count,
               quotes: dashboard.categories.new_quotes.quotes,
               viewAllHref: buildQuotesFilterUrl({ type: "quotes", status: "1" }),
               testId: "category-new-quotes",
@@ -134,6 +153,7 @@ export default function ManagerDashboardPage() {
             awaitingSupplier={{
               title: "Quotes Awaiting Supplier",
               count: dashboard.categories.awaiting_supplier.count,
+              filteredCount: dashboard.categories.awaiting_supplier.filtered_count,
               quotes: dashboard.categories.awaiting_supplier.quotes,
               viewAllHref: buildQuotesFilterUrl({ type: "quotes", tag: AWAITING_SUPPLIER_TAG }),
               testId: "category-awaiting-supplier",
@@ -142,6 +162,7 @@ export default function ManagerDashboardPage() {
             readyToSend={{
               title: "Quotes Ready to Send",
               count: dashboard.categories.ready_to_send.count,
+              filteredCount: dashboard.categories.ready_to_send.filtered_count,
               quotes: dashboard.categories.ready_to_send.quotes,
               viewAllHref: buildQuotesFilterUrl({ type: "quotes", tag: READY_TO_SEND_TAG }),
               testId: "category-ready-to-send",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import Link from "next/link";
 import { AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-react";
@@ -673,9 +674,18 @@ function CustomersTab({ refreshKey }: { refreshKey: number }) {
   );
 }
 
-function QuotesTab({ refreshKey }: { refreshKey: number }) {
+function QuotesTab({
+  refreshKey,
+  initialStatus = "",
+  initialTag = "",
+}: {
+  refreshKey: number;
+  initialStatus?: string;
+  initialTag?: string;
+}) {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
+  const [tagFilter, setTagFilter] = useState(initialTag);
   const [customerFilter, setCustomerFilter] = useState("");
   const [offset, setOffset] = useState(0);
   const [items, setItems] = useState<EworksQuoteRecord[]>([]);
@@ -690,6 +700,7 @@ function QuotesTab({ refreshKey }: { refreshKey: number }) {
       const result = await listSyncedQuotes({
         search: search || undefined,
         status: statusFilter || undefined,
+        tag: tagFilter || undefined,
         customer_name: customerFilter || undefined,
         limit: PAGE_SIZE,
         offset,
@@ -701,7 +712,7 @@ function QuotesTab({ refreshKey }: { refreshKey: number }) {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, customerFilter, offset]);
+  }, [search, statusFilter, tagFilter, customerFilter, offset]);
 
   useEffect(() => {
     void load();
@@ -742,6 +753,19 @@ function QuotesTab({ refreshKey }: { refreshKey: number }) {
               setStatusFilter(e.target.value);
               setOffset(0);
             }}
+            data-testid="quotes-status-filter"
+          />
+        </FilterField>
+        <FilterField label="Tag">
+          <input
+            className={filterInputClass}
+            placeholder="Tag"
+            value={tagFilter}
+            onChange={(e) => {
+              setTagFilter(e.target.value);
+              setOffset(0);
+            }}
+            data-testid="quotes-tag-filter"
           />
         </FilterField>
       </FilterBar>
@@ -1037,7 +1061,20 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 export default function EworksSyncPage() {
-  const [activeTab, setActiveTab] = useState<TabId>("sync");
+  const searchParams = useSearchParams();
+  const initialTabParam = searchParams.get("tab");
+  const initialStatus = searchParams.get("status") ?? "";
+  const initialTag = searchParams.get("tag") ?? "";
+  const initialTab: TabId =
+    initialTabParam === "customers" ||
+    initialTabParam === "quotes" ||
+    initialTabParam === "jobs" ||
+    initialTabParam === "products" ||
+    initialTabParam === "sync"
+      ? initialTabParam
+      : "sync";
+
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab);
   const [status, setStatus] = useState<EworksSyncStatus | null>(null);
   const [runs, setRuns] = useState<EworksSyncRunRecord[]>([]);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -1257,7 +1294,9 @@ export default function EworksSyncPage() {
         {activeTab === "customers" ? <CustomersTab refreshKey={refreshKey} /> : null}
       </div>
       <div className={activeTab === "quotes" ? "block" : "hidden"} data-testid="eworks-sync-tab-quotes-panel">
-        {activeTab === "quotes" ? <QuotesTab refreshKey={refreshKey} /> : null}
+        {activeTab === "quotes" ? (
+          <QuotesTab refreshKey={refreshKey} initialStatus={initialStatus} initialTag={initialTag} />
+        ) : null}
       </div>
       <div className={activeTab === "jobs" ? "block" : "hidden"} data-testid="eworks-sync-tab-jobs-panel">
         {activeTab === "jobs" ? <JobsTab refreshKey={refreshKey} /> : null}

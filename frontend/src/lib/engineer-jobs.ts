@@ -2,16 +2,17 @@ import { apiFetch } from "@/lib/api";
 
 export type EngineerAssignedJob = {
   id: number;
-  quote_ref: string | null;
-  eworks_quote_id: number | null;
+  eworks_job_id: number;
   job_ref: string | null;
+  eworks_quote_id: number | null;
+  quote_ref: string | null;
   customer_name: string | null;
   address: string | null;
-  selected_at: string;
-  selected_estimate_total: string | null;
-  selected_session_id: string;
-  status: string;
-  assignment_id?: number | null;
+  status: string | null;
+  status_name: string | null;
+  job_date: string | null;
+  description: string | null;
+  total: string | null;
 };
 
 export async function listEngineerAssignedJobs(): Promise<EngineerAssignedJob[]> {

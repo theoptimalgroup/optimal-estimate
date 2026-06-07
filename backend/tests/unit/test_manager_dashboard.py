@@ -436,3 +436,126 @@ def test_manager_dashboard_respects_limit_per_category(mock_settings, api_client
     data = resp.json()["data"]
     assert data["categories"]["new_quotes"]["count"] == 5
     assert len(data["categories"]["new_quotes"]["quotes"]) == 2
+
+
+def _seed_search_quotes(db_session):
+    synced = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            EworksQuote(
+                eworks_quote_id=301,
+                quote_ref="Q-ALPHA",
+                customer_name="Alpha Industries",
+                status="1",
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=302,
+                quote_ref="Q-BETA",
+                customer_name="Beta Services",
+                status="1",
+                quote_date="2026-06-02",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=303,
+                quote_ref="Q-GAMMA",
+                customer_name="Gamma Ltd",
+                status="2",
+                tags=[AWAITING_SUPPLIER_TAG, "URGENT"],
+                quote_date="2026-06-03",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=304,
+                quote_ref="Q-DELTA",
+                customer_name="Delta Group",
+                status="2",
+                tags=[READY_TO_SEND_TAG],
+                quote_date="2026-06-04",
+                synced_at=synced,
+                raw_payload={"site": {"address_1": "10 High Street", "city": "London"}},
+            ),
+        ]
+    )
+    db_session.commit()
+
+
+@patch("app.auth.dependencies.settings")
+def test_dashboard_without_search_returns_existing_buckets(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _seed_search_quotes(db_session)
+
+    resp = api_client.get("/api/v1/manager/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["categories"]["new_quotes"]["count"] == 2
+    assert data["categories"]["awaiting_supplier"]["count"] == 1
+    assert data["categories"]["ready_to_send"]["count"] == 1
+    assert data["categories"]["new_quotes"]["filtered_count"] is None
+    assert len(data["categories"]["new_quotes"]["quotes"]) == 2
+
+
+@patch("app.auth.dependencies.settings")
+def test_search_by_quote_ref_returns_matching_quote(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _seed_search_quotes(db_session)
+
+    resp = api_client.get("/api/v1/manager/dashboard", params={"search": "Q-ALPHA"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["categories"]["new_quotes"]["count"] == 2
+    assert data["categories"]["new_quotes"]["filtered_count"] == 1
+    assert [q["quote_ref"] for q in data["categories"]["new_quotes"]["quotes"]] == ["Q-ALPHA"]
+    assert data["categories"]["awaiting_supplier"]["filtered_count"] == 0
+    assert data["categories"]["ready_to_send"]["filtered_count"] == 0
+
+
+@patch("app.auth.dependencies.settings")
+def test_search_by_customer_returns_matching_quote(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _seed_search_quotes(db_session)
+
+    resp = api_client.get("/api/v1/manager/dashboard", params={"search": "gamma"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["categories"]["awaiting_supplier"]["count"] == 1
+    assert data["categories"]["awaiting_supplier"]["filtered_count"] == 1
+    assert data["categories"]["awaiting_supplier"]["quotes"][0]["quote_ref"] == "Q-GAMMA"
+    assert data["categories"]["new_quotes"]["filtered_count"] == 0
+
+
+@patch("app.auth.dependencies.settings")
+def test_search_by_tag_returns_matching_quote(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _seed_search_quotes(db_session)
+
+    resp = api_client.get("/api/v1/manager/dashboard", params={"search": "urgent"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["categories"]["awaiting_supplier"]["filtered_count"] == 1
+    assert data["categories"]["awaiting_supplier"]["quotes"][0]["quote_ref"] == "Q-GAMMA"
+
+
+@patch("app.auth.dependencies.settings")
+def test_search_is_case_insensitive(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _seed_search_quotes(db_session)
+
+    resp = api_client.get("/api/v1/manager/dashboard", params={"search": "high street"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["categories"]["ready_to_send"]["filtered_count"] == 1
+    assert data["categories"]["ready_to_send"]["quotes"][0]["quote_ref"] == "Q-DELTA"
+
+
+@patch("app.auth.dependencies.settings")
+def test_search_does_not_expose_raw_payload(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _seed_search_quotes(db_session)
+
+    resp = api_client.get("/api/v1/manager/dashboard", params={"search": "high street"})
+    assert resp.status_code == 200
+    assert "raw_payload" not in resp.text
+    assert "secret" not in resp.text

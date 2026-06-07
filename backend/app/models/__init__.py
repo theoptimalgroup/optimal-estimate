@@ -5,6 +5,7 @@ from app.models.client_alias import ClientAlias
 from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksQuote, EworksSyncRun
 from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.quote_job_assignment import QuoteJobAssignment
+from app.models.selected_estimate_decision import SelectedEstimateDecision
 from app.models.job import Job, JobFinding
 from app.models.quote import Quote, QuoteCharge, QuoteLabour, QuoteMaterial, QuoteScopeItem
 from app.models.product import Product
@@ -42,4 +43,5 @@ __all__ = [
     "EworksAttachment",
     "EworksQuoteAssignment",
     "QuoteJobAssignment",
+    "SelectedEstimateDecision",
 ]

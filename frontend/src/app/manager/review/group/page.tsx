@@ -160,9 +160,10 @@ function QuoteGroupReviewContent() {
         selected_session_id: row.linked_session_id,
         assignee_name: row.assignee_name,
         assignee_email: row.assignee_email,
+        selected_assignment_id: row.assignment_id,
         assignment_id: row.assignment_id,
       });
-      const assigneeName = result?.decision?.assignee_name ?? row.assignee_name;
+      const assigneeName = result?.selected_estimate?.assignee_name ?? row.assignee_name;
       const selectedTotal =
         row.comparison_summary?.final_total ?? row.final_total ?? null;
       setSelectionSuccessMessage(`${formatSelectedEstimateSummary(assigneeName, selectedTotal)}.`);
@@ -181,7 +182,7 @@ function QuoteGroupReviewContent() {
   const selectedRows = assignmentSubmissions.filter(
     (row) => row.linked_session_id != null && selectedSessionIds.has(row.linked_session_id),
   );
-  const selectedEstimateDecision = group?.job_assignment_decision;
+  const selectedEstimateDecision = group?.selected_estimate_decision;
   const selectedSubmissionRow = findSelectedSubmissionRow(
     assignmentSubmissions,
     selectedEstimateDecision?.selected_session_id,

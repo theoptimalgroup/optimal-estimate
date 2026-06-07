@@ -21,7 +21,7 @@ from app.schemas.dashboard_quote_groups import (
     DashboardQuoteGroupSessionItem,
     DashboardQuoteGroupVersionItem,
     DashboardQuoteGroupsResponse,
-    DashboardQuoteJobAssignmentDecision,
+    DashboardSelectedEstimateDecision,
 )
 from app.schemas.eworks_link import (
     AggregatedQuoteSummary,
@@ -1110,7 +1110,7 @@ def _assignee_display_name(
     return "Unassigned"
 
 
-def _can_assign_job_row(
+def _can_select_estimate_row(
     *,
     assignment_status: str,
     linked_session_id: UUID | None,
@@ -1153,12 +1153,12 @@ def _enrich_assignment_submission_row(
     assigned_session_id: UUID | None,
 ) -> DashboardQuoteGroupAssignmentSubmissionRow:
     updates: dict = {
-        "can_assign_job": _can_assign_job_row(
+        "can_select_estimate": _can_select_estimate_row(
             assignment_status=row.assignment_status,
             linked_session_id=row.linked_session_id,
             assignee_name=row.assignee_name,
         ),
-        "is_job_assigned": assigned_session_id is not None and row.linked_session_id == assigned_session_id,
+        "is_selected_estimate": assigned_session_id is not None and row.linked_session_id == assigned_session_id,
     }
     if row.linked_session_id is not None:
         raw_session = raw_sessions_by_id.get(row.linked_session_id)
@@ -1187,12 +1187,12 @@ def _build_assignment_submission_rows(
     detail_sessions: list[DashboardQuoteGroupSessionDetailItem],
     *,
     raw_sessions_by_id: dict[UUID, CalculationSession],
-    job_assignment_decision: DashboardQuoteJobAssignmentDecision | None = None,
+    selected_estimate_decision: DashboardSelectedEstimateDecision | None = None,
 ) -> list[DashboardQuoteGroupAssignmentSubmissionRow]:
     sessions_by_id = {item.session_id: item for item in detail_sessions}
     linked_session_ids: set[UUID] = set()
     assigned_session_id = (
-        job_assignment_decision.selected_session_id if job_assignment_decision is not None else None
+        selected_estimate_decision.selected_session_id if selected_estimate_decision is not None else None
     )
 
     rows: list[DashboardQuoteGroupAssignmentSubmissionRow] = []
@@ -1332,17 +1332,17 @@ def _build_quote_group_detail(
     session_ids = [item.session_id for item in group.sessions]
     sessions_by_id = _load_linked_sessions(db, session_ids)
 
-    from app.services.quote_job_assignment_service import (
-        build_dashboard_job_assignment_decision,
-        get_job_assignment_for_quote,
+    from app.services.selected_estimate_decision_service import (
+        build_dashboard_selected_estimate_decision,
+        get_selected_estimate_for_quote,
     )
 
-    job_assignment_row = get_job_assignment_for_quote(
+    selected_estimate_row = get_selected_estimate_for_quote(
         db,
         quote_ref=group.quote_ref,
         eworks_quote_id=group.eworks_quote_id,
     )
-    job_assignment_decision = build_dashboard_job_assignment_decision(db, job_assignment_row)
+    selected_estimate_decision = build_dashboard_selected_estimate_decision(db, selected_estimate_row)
 
     detail_sessions: list[DashboardQuoteGroupSessionDetailItem] = []
     for item in group.sessions:
@@ -1391,9 +1391,9 @@ def _build_quote_group_detail(
             assignments,
             detail_sessions,
             raw_sessions_by_id=sessions_by_id,
-            job_assignment_decision=job_assignment_decision,
+            selected_estimate_decision=selected_estimate_decision,
         ),
-        job_assignment_decision=job_assignment_decision,
+        selected_estimate_decision=selected_estimate_decision,
     )
 
 

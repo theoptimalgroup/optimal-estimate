@@ -8,9 +8,9 @@ from app.core.exceptions import AppError, success_response
 from app.core.security import UserRole
 from app.db.session import DbSession
 from app.schemas.engineer_session import EngineerSiteVisitUpdate
-from app.schemas.quote_job_assignment import EngineerAssignedJobRead
+from app.schemas.selected_estimate_decision import EngineerAssignedJobRead
 from app.services.engineer_session_service import get_engineer_session, update_engineer_site_visit
-from app.services.quote_job_assignment_service import list_assigned_jobs_for_engineer
+from app.services.engineer_assigned_jobs_service import list_assigned_jobs_for_engineer
 
 router = APIRouter(prefix="/engineer", tags=["engineer"])
 

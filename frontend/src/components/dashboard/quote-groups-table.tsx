@@ -271,7 +271,7 @@ export function QuoteGroupAssignmentSubmissionsTable({
                 key={rowKey}
                 className={cn(
                   "rounded-xl border px-3 py-2.5 transition-colors sm:px-4 sm:py-3",
-                  row.is_job_assigned
+                  row.is_selected_estimate
                     ? "border-l-4 border-emerald-500 bg-emerald-50/70"
                     : isSelected
                       ? "border-blue-200 bg-blue-50"
@@ -336,7 +336,7 @@ export function QuoteGroupAssignmentSubmissionsTable({
                               Latest
                             </StatusBadge>
                           ) : null}
-                          {row.is_job_assigned && sessionId ? (
+                          {(row.is_selected_estimate || row.is_job_assigned) && sessionId ? (
                             <StatusBadge tone="success" data-testid={`submission-assigned-job-${sessionId}`}>
                               Selected Estimate
                             </StatusBadge>

@@ -9,11 +9,11 @@ from app.core.exceptions import AppError, success_response
 from app.core.security import UserRole
 from app.db.session import DbSession
 from app.schemas.manager_dashboard import ManagerDashboardRead
-from app.schemas.quote_job_assignment import AssignQuoteJobRequest, AssignQuoteJobResponse
+from app.schemas.selected_estimate_decision import SelectEstimateRequest, SelectEstimateResponse
 from app.services.audit_helpers import record_audit
 from app.services.manager_dashboard_service import get_manager_dashboard
 from app.services.manager_quote_pdf_service import render_manager_quote_pdf
-from app.services.quote_job_assignment_service import assign_quote_job
+from app.services.selected_estimate_decision_service import select_quote_estimate
 from app.schemas.calculation_session_revision import SessionVersionHistoryResponse
 from app.services.calculation_session_revision_service import list_session_version_history
 
@@ -24,26 +24,53 @@ router = APIRouter(prefix="/manager", tags=["manager"])
 def get_manager_dashboard_endpoint(
     db: DbSession,
     limit_per_category: int = Query(default=10, ge=1, le=50),
+    search: str | None = Query(default=None, max_length=200),
     _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER)),
 ):
     """Return synced eWorks quote categories for the manager dashboard (local DB only)."""
-    data = get_manager_dashboard(db, limit_per_category=limit_per_category)
+    data = get_manager_dashboard(
+        db,
+        limit_per_category=limit_per_category,
+        search=search,
+    )
     return success_response(ManagerDashboardRead.model_validate(data).model_dump())
+
+
+def _select_estimate_handler(
+    quote_ref: str,
+    body: SelectEstimateRequest,
+    db: DbSession,
+    user: AuthenticatedUser,
+):
+    try:
+        selected_estimate = select_quote_estimate(db, quote_ref=quote_ref, payload=body, actor=user)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return success_response(
+        SelectEstimateResponse(selected_estimate=selected_estimate).model_dump(mode="json")
+    )
+
+
+@router.post("/quotes/{quote_ref}/select-estimate")
+def select_quote_estimate_endpoint(
+    quote_ref: str,
+    body: SelectEstimateRequest,
+    db: DbSession,
+    user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER)),
+):
+    """Record manager decision to select a submitted estimate for a quote."""
+    return _select_estimate_handler(quote_ref, body, db, user)
 
 
 @router.post("/quotes/{quote_ref}/assign-job")
 def assign_quote_job_endpoint(
     quote_ref: str,
-    body: AssignQuoteJobRequest,
+    body: SelectEstimateRequest,
     db: DbSession,
     user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    """Record manager decision to select a submitted estimate (not an eWorks job assignment)."""
-    try:
-        decision = assign_quote_job(db, quote_ref=quote_ref, payload=body, actor=user)
-    except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    return success_response(AssignQuoteJobResponse(decision=decision).model_dump(mode="json"))
+    """Deprecated alias for select-estimate."""
+    return _select_estimate_handler(quote_ref, body, db, user)
 
 
 @router.get("/quotes/sessions/{session_id}/versions")

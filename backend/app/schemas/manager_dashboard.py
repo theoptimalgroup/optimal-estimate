@@ -20,6 +20,7 @@ class ManagerDashboardQuoteRow(BaseModel):
 
 class ManagerDashboardCategory(BaseModel):
     count: int
+    filtered_count: int | None = None
     quotes: list[ManagerDashboardQuoteRow]
 
 

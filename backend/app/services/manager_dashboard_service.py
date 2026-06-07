@@ -195,6 +195,7 @@ def _sort_key(row: EworksQuote) -> tuple:
 
 class DashboardCategory(TypedDict):
     count: int
+    filtered_count: int | None
     quotes: list[dict]
 
 
@@ -204,7 +205,97 @@ class ManagerDashboardData(TypedDict):
     totals: dict[str, int]
 
 
-def get_manager_dashboard(db: Session, *, limit_per_category: int = 10) -> ManagerDashboardData:
+def _as_search_text(value: object | None) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return text
+
+
+def _collect_raw_search_parts(raw: dict) -> list[str]:
+    """Collect searchable site/contact strings from raw_payload (internal use only)."""
+    parts: list[str] = []
+    for key in (
+        "site_address",
+        "address",
+        "address_1",
+        "address_2",
+        "site_name",
+        "contact_name",
+        "customer_contact_name",
+        "city",
+        "county",
+        "postcode",
+    ):
+        value = raw.get(key)
+        if value is not None and not isinstance(value, (dict, list)):
+            parts.append(str(value).strip())
+
+    site = raw.get("site") or raw.get("address")
+    if isinstance(site, dict):
+        for key in (
+            "name",
+            "site_name",
+            "address_1",
+            "address1",
+            "address",
+            "address_2",
+            "address2",
+            "city",
+            "county",
+            "postcode",
+        ):
+            value = site.get(key)
+            if value is not None:
+                parts.append(str(value).strip())
+
+    contact = raw.get("contact") or raw.get("customer_contact")
+    if isinstance(contact, dict):
+        for key in ("name", "contact_name", "email", "phone"):
+            value = contact.get(key)
+            if value is not None:
+                parts.append(str(value).strip())
+
+    return parts
+
+
+def build_quote_search_text(quote: EworksQuote) -> str:
+    """Build a case-insensitive haystack for dashboard search (internal use only)."""
+    parts = [
+        _as_search_text(quote.quote_ref),
+        _as_search_text(quote.eworks_quote_id),
+        _as_search_text(quote.customer_name),
+        _as_search_text(quote.quote_date),
+        _as_search_text(quote.expiry_date),
+        _as_search_text(quote.status),
+        _as_search_text(quote.status_name),
+        _as_search_text(quote.customer_ref),
+        _as_search_text(quote.po_ref),
+        _as_search_text(quote.wo_ref),
+    ]
+    parts.extend(extract_all_tags(quote))
+
+    raw = quote.raw_payload
+    if isinstance(raw, dict):
+        parts.extend(_collect_raw_search_parts(raw))
+
+    return " ".join(part for part in parts if part).casefold()
+
+
+def quote_matches_search(quote: EworksQuote, search: str | None) -> bool:
+    """True when quote matches optional dashboard search text."""
+    if search is None or not str(search).strip():
+        return True
+    needle = str(search).strip().casefold()
+    return needle in build_quote_search_text(quote)
+
+
+def get_manager_dashboard(
+    db: Session,
+    *,
+    limit_per_category: int = 10,
+    search: str | None = None,
+) -> ManagerDashboardData:
     """Build manager dashboard from local eWorks quote mirror only."""
     rows = (
         db.query(EworksQuote)
@@ -227,19 +318,33 @@ def get_manager_dashboard(db: Session, *, limit_per_category: int = 10) -> Manag
     for bucket_rows in buckets.values():
         bucket_rows.sort(key=lambda item: _sort_key(item[0]), reverse=True)
 
+    search_active = search is not None and bool(str(search).strip())
     last_sync = db.query(func.max(EworksQuote.synced_at)).scalar()
 
+    categories: dict[QuoteBucket, DashboardCategory] = {}
+    for key, bucket_rows in buckets.items():
+        total_count = len(bucket_rows)
+        if search_active:
+            matched_rows = [
+                item for item in bucket_rows if quote_matches_search(item[0], search)
+            ]
+            filtered_count = len(matched_rows)
+            display_rows = matched_rows[:limit_per_category]
+        else:
+            filtered_count = None
+            display_rows = bucket_rows[:limit_per_category]
+
+        categories[key] = {
+            "count": total_count,
+            "filtered_count": filtered_count,
+            "quotes": [
+                _serialize_dashboard_quote(row, matched_reason=reason)
+                for row, reason in display_rows
+            ],
+        }
+
     return {
-        "categories": {
-            key: {
-                "count": len(bucket_rows),
-                "quotes": [
-                    _serialize_dashboard_quote(row, matched_reason=reason)
-                    for row, reason in bucket_rows[:limit_per_category]
-                ],
-            }
-            for key, bucket_rows in buckets.items()
-        },
+        "categories": categories,
         "last_synced_at": str(last_sync) if last_sync else None,
         "totals": {
             "all_open_quotes": sum(len(b) for b in buckets.values()),

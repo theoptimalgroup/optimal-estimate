@@ -78,16 +78,17 @@ const MOCK_SUBMITTED_ASSIGNMENT = {
 
 const MOCK_ASSIGNED_JOB = {
   id: 1,
-  quote_ref: "Q22100",
-  eworks_quote_id: 29204,
+  eworks_job_id: 5001,
   job_ref: "JOB-001",
+  eworks_quote_id: 29204,
+  quote_ref: "Q22100",
   customer_name: "ACME Ltd",
   address: "1 Test Street",
-  selected_at: "2026-06-06T12:00:00.000Z",
-  selected_estimate_total: "100.00",
-  selected_session_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-  status: "assigned",
-  assignment_id: 10,
+  status: "open",
+  status_name: "Open",
+  job_date: "2026-06-01",
+  description: "Kitchen refit",
+  total: "100.00",
 };
 
 async function mockMyAssignments(page: Page, items: unknown[]) {
@@ -194,7 +195,7 @@ test.describe("engineer estimate pages", () => {
 });
 
 test.describe("engineer job pages", () => {
-  test("assigned jobs shows mocked job cards", async ({ page }) => {
+  test("assigned jobs shows mocked eWorks job cards", async ({ page }) => {
     await mockAuthMe(page, "engineer");
     await mockAssignedJobs(page, [MOCK_ASSIGNED_JOB]);
     await page.goto("/engineer/assigned-jobs");
@@ -202,7 +203,7 @@ test.describe("engineer job pages", () => {
     await expect(page.getByTestId("engineer-assigned-job-1")).toBeVisible();
     await expect(page.getByText("Q22100")).toBeVisible();
     await expect(page.getByText("Job JOB-001")).toBeVisible();
-    await expect(page.getByTestId("engineer-assigned-job-open-1")).toHaveText("Open Job");
+    await expect(page.getByTestId("engineer-assigned-job-open-1")).toHaveCount(0);
   });
 
   test("assigned jobs empty state", async ({ page }) => {
@@ -242,5 +243,7 @@ test.describe("engineer job pages", () => {
     expect(bodyText).not.toContain("session_token");
     expect(bodyText).not.toContain("assignment_token");
     expect(bodyText).not.toContain("raw_payload");
+    expect(bodyText).not.toContain("selected_session_id");
+    expect(bodyText).not.toContain("selected_estimate_total");
   });
 });

@@ -8,7 +8,7 @@ import type {
   DashboardQuoteGroupAssignmentSubmissionRow,
   DashboardQuoteGroupComparisonChargeLine,
   DashboardQuoteGroupComparisonWorkBreakdown,
-  DashboardQuoteJobAssignmentDecision,
+  DashboardSelectedEstimateDecision,
   ManagerQuotePdfView,
 } from "@/lib/dashboard";
 import { downloadManagerQuotePdf } from "@/lib/dashboard-auth";
@@ -70,16 +70,16 @@ function nonZeroCharges(charges: DashboardQuoteGroupComparisonChargeLine[]): Das
 
 function isRowEstimateSelected(
   row: DashboardQuoteGroupAssignmentSubmissionRow,
-  selectedEstimateDecision?: DashboardQuoteJobAssignmentDecision | null,
+  selectedEstimateDecision?: DashboardSelectedEstimateDecision | null,
 ): boolean {
-  if (row.is_job_assigned) return true;
+  if (row.is_selected_estimate || row.is_job_assigned) return true;
   if (!row.linked_session_id || !selectedEstimateDecision?.selected_session_id) return false;
   return selectedEstimateDecision.selected_session_id === row.linked_session_id;
 }
 
 function isEstimateSelectedElsewhere(
   row: DashboardQuoteGroupAssignmentSubmissionRow,
-  selectedEstimateDecision?: DashboardQuoteJobAssignmentDecision | null,
+  selectedEstimateDecision?: DashboardSelectedEstimateDecision | null,
 ): boolean {
   if (!selectedEstimateDecision?.selected_session_id || !row.linked_session_id) return false;
   return selectedEstimateDecision.selected_session_id !== row.linked_session_id;
@@ -158,7 +158,10 @@ export function SubmissionComparePanel({
           const isSelected = isRowEstimateSelected(row, selectedEstimateDecision);
           const selectedElsewhere = isEstimateSelectedElsewhere(row, selectedEstimateDecision);
           const showSelectButton =
-            row.can_assign_job && row.linked_session_id != null && !isSelected && !selectedElsewhere;
+            (row.can_select_estimate ?? row.can_assign_job) &&
+            row.linked_session_id != null &&
+            !isSelected &&
+            !selectedElsewhere;
           const roleLabel = row.submitted_by_role
             ? formatRole(row.submitted_by_role)
             : formatRole(row.assignment_type);
@@ -378,14 +381,14 @@ export function SubmissionComparePanel({
                   className="mt-auto w-full rounded-lg bg-blue-600 px-4 py-2 pt-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                   disabled={selectingSessionId === row.linked_session_id}
                   onClick={() => void onSelectEstimate(row)}
-                  data-testid={`assign-job-${row.linked_session_id}`}
+                  data-testid={`select-estimate-${row.linked_session_id}`}
                 >
                   {selectingSessionId === row.linked_session_id ? "Selecting…" : "Select this estimate"}
                 </button>
               ) : selectedElsewhere && selectedEstimateDecision ? (
                 <p
                   className="mt-auto pt-4 text-sm text-slate-500"
-                  data-testid={`compare-job-assigned-elsewhere-${sessionId}`}
+                  data-testid={`compare-selected-elsewhere-${sessionId}`}
                 >
                   Selected estimate: {selectedEstimateDecision.assignee_name}
                 </p>

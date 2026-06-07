@@ -152,10 +152,47 @@ const MOCK_QUOTE_SAFE_DETAIL = {
 
 async function mockDashboardApi(page: Page) {
   await page.route("**/api/v1/manager/dashboard**", async (route) => {
+    const url = new URL(route.request().url());
+    const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+
+    const matchesQuote = (quote: (typeof MOCK_DASHBOARD.categories.new_quotes.quotes)[number]) => {
+      if (!search) return true;
+      const haystack = [
+        quote.quote_ref,
+        String(quote.eworks_quote_id),
+        quote.customer_name,
+        quote.quote_date,
+        ...(quote.tags || []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(search);
+    };
+
+    const filterCategory = (category: (typeof MOCK_DASHBOARD.categories)["new_quotes"]) => {
+      const filteredQuotes = category.quotes.filter(matchesQuote);
+      return {
+        count: category.count,
+        filtered_count: search ? filteredQuotes.length : null,
+        quotes: filteredQuotes,
+      };
+    };
+
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: MOCK_DASHBOARD }),
+      body: JSON.stringify({
+        success: true,
+        data: {
+          ...MOCK_DASHBOARD,
+          categories: {
+            new_quotes: filterCategory(MOCK_DASHBOARD.categories.new_quotes),
+            awaiting_supplier: filterCategory(MOCK_DASHBOARD.categories.awaiting_supplier),
+            ready_to_send: filterCategory(MOCK_DASHBOARD.categories.ready_to_send),
+          },
+        },
+      }),
     });
   });
 
@@ -363,6 +400,40 @@ test.describe("Manager dashboard", () => {
     await expect(page.getByText("raw_payload")).toHaveCount(0);
     await expect(page.getByText("api_key")).toHaveCount(0);
     await expect(page.getByText("session_token")).toHaveCount(0);
+  });
+
+  test("search input visible and filters bucket cards", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockDashboardApi(page);
+    await page.goto("/manager/dashboard");
+
+    await expect(page.getByTestId("dashboard-search")).toBeVisible();
+    await expect(page.getByTestId("dashboard-search-input")).toBeVisible();
+    await expect(page.getByTestId("kpi-new-quotes")).toBeVisible();
+
+    await page.getByTestId("dashboard-search-input").fill("Q-NEW");
+    await expect(page.getByTestId("dashboard-quote-card-1")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("dashboard-quote-card-2")).toHaveCount(0);
+    await expect(page.getByTestId("dashboard-quote-card-3")).toHaveCount(0);
+    await expect(page.getByTestId("category-new-quotes-count")).toContainText("Showing 1 of 1");
+    await expect(page.getByTestId("category-awaiting-supplier-empty")).toContainText(
+      "No matching quotes in this category.",
+    );
+  });
+
+  test("clear search restores all bucket cards", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockDashboardApi(page);
+    await page.goto("/manager/dashboard");
+
+    await page.getByTestId("dashboard-search-input").fill("Q-NEW");
+    await expect(page.getByTestId("dashboard-quote-card-2")).toHaveCount(0, { timeout: 10000 });
+
+    await page.getByTestId("dashboard-search-clear").click();
+    await expect(page.getByTestId("dashboard-quote-card-1")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("dashboard-quote-card-2")).toBeVisible();
+    await expect(page.getByTestId("dashboard-quote-card-3")).toBeVisible();
+    await expect(page.getByTestId("category-new-quotes-count")).toContainText("1");
   });
 
   test("engineer blocked from manager dashboard", async ({ page }) => {

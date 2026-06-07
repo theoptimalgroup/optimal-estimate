@@ -270,7 +270,7 @@ test.describe("Manager grouped quote review", () => {
               ...MOCK_GROUP_DETAIL,
               assignment_submissions: MOCK_GROUP_DETAIL.assignment_submissions.map((row) =>
                 row.linked_session_id
-                  ? { ...row, can_assign_job: true, is_job_assigned: false, works_count: 1 }
+                  ? { ...row, can_select_estimate: true, is_selected_estimate: false, works_count: 1 }
                   : row,
               ),
             },

@@ -29,7 +29,7 @@ export default function EngineerAssignedJobsPage() {
     <div className="mx-auto max-w-2xl space-y-6" data-testid="engineer-assigned-jobs-page">
       <PageHeader
         title="Assigned Jobs"
-        description="Jobs where your estimate was selected by a manager."
+        description="Jobs assigned to you in eWorks."
       />
 
       <SectionCard title="Assigned Jobs" testId="engineer-assigned-jobs-list">

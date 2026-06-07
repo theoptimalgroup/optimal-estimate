@@ -21,7 +21,7 @@ from app.models.client import Client
 from app.models.client_alias import ClientAlias
 from app.models.eworks_sync import EworksQuote
 from app.models.quote_assignment import EworksQuoteAssignment
-from app.models.quote_job_assignment import QuoteJobAssignment
+from app.models.selected_estimate_decision import SelectedEstimateDecision
 from app.models.support import AuditLog
 from app.models.trade import Trade
 from app.models.user import User
@@ -104,7 +104,7 @@ def review_db_session():
         AuditLog,
         EworksQuote,
         EworksQuoteAssignment,
-        QuoteJobAssignment,
+        SelectedEstimateDecision,
     ):
         model.__table__.create(engine)
     Session = sessionmaker(bind=engine)

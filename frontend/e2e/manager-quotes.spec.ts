@@ -1152,19 +1152,19 @@ test.describe("Manager quote group comparison and estimate selection", () => {
 
   const COMPARABLE_GROUP_DETAIL = {
     ...MOCK_GROUP_DETAIL,
-    job_assignment_decision: null,
+    selected_estimate_decision: null,
     assignment_submissions: [
       {
         ...MOCK_GROUP_DETAIL.assignment_submissions[0],
-        can_assign_job: true,
-        is_job_assigned: false,
+        can_select_estimate: true,
+        is_selected_estimate: false,
         works_count: 1,
         comparison_summary: COMPARISON_SUMMARY_HIGH,
       },
       {
         ...MOCK_GROUP_DETAIL.assignment_submissions[1],
-        can_assign_job: true,
-        is_job_assigned: false,
+        can_select_estimate: true,
+        is_selected_estimate: false,
         works_count: 1,
         comparison_summary: COMPARISON_SUMMARY_LOW,
       },
@@ -1230,8 +1230,8 @@ test.describe("Manager quote group comparison and estimate selection", () => {
           final_total: "50",
           can_view_details: true,
           can_reopen: true,
-          can_assign_job: true,
-          is_job_assigned: false,
+          can_select_estimate: true,
+          is_selected_estimate: false,
           works_count: 1,
         },
         {
@@ -1246,8 +1246,8 @@ test.describe("Manager quote group comparison and estimate selection", () => {
           final_total: "60",
           can_view_details: true,
           can_reopen: true,
-          can_assign_job: true,
-          is_job_assigned: false,
+          can_select_estimate: true,
+          is_selected_estimate: false,
           works_count: 1,
         },
       ],
@@ -1312,7 +1312,7 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     expect(await isDomAfter(`compare-works-${sessionId}`, `compare-charge-lines-${sessionId}`)).toBe(true);
     expect(await isDomAfter(`compare-charge-lines-${sessionId}`, `compare-calculation-${sessionId}`)).toBe(true);
     expect(await isDomAfter(`compare-calculation-${sessionId}`, `compare-final-total-${sessionId}`)).toBe(true);
-    expect(await isDomAfter(`compare-final-total-${sessionId}`, `assign-job-${sessionId}`)).toBe(true);
+    expect(await isDomAfter(`compare-final-total-${sessionId}`, `select-estimate-${sessionId}`)).toBe(true);
   });
 
   test("compare panel shows only non-zero additional charge rows", async ({ page }) => {
@@ -1363,7 +1363,7 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     await expect(page.getByTestId("submission-compare-panel")).toBeVisible();
     await expect(page.getByTestId("compare-latest-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
     await expect(page.getByTestId("compare-lowest-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toBeVisible();
-    await expect(page.getByTestId("assign-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toContainText(
+    await expect(page.getByTestId("select-estimate-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toContainText(
       "Select this estimate",
     );
     await expect(page.getByText("Assign Job", { exact: false })).toHaveCount(0);
@@ -1388,16 +1388,16 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     const sessionId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
     await mockComparableGroupDetailApi(page, {
       ...COMPARABLE_GROUP_DETAIL,
-      job_assignment_decision: {
+      selected_estimate_decision: {
         id: 1,
         selected_session_id: sessionId,
         assignee_name: "Rohit",
         assignee_email: "rohit@example.com",
         assignment_id: null,
-        assigned_at: "2026-06-06T10:00:00Z",
+        selected_at: "2026-06-06T10:00:00Z",
       },
       assignment_submissions: COMPARABLE_GROUP_DETAIL.assignment_submissions.map((row) =>
-        row.linked_session_id === sessionId ? { ...row, is_job_assigned: true } : row,
+        row.linked_session_id === sessionId ? { ...row, is_selected_estimate: true } : row,
       ),
     });
     await page.goto("/manager/review/group?quote_ref=Q22100");
@@ -1412,7 +1412,7 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     const assignedCard = page.getByTestId(`compare-card-${sessionId}`);
     await expect(assignedCard).toHaveClass(/border-emerald-400/);
     await expect(assignedCard.getByTestId(`compare-assigned-${sessionId}`)).toHaveText("Selected Estimate");
-    await expect(assignedCard.getByTestId(`assign-job-${sessionId}`)).toHaveCount(0);
+    await expect(assignedCard.getByTestId(`select-estimate-${sessionId}`)).toHaveCount(0);
     await expect(assignedCard.getByTestId(`compare-download-pdfs-${sessionId}`)).toBeVisible();
     await expect(assignedCard.getByText("Download PDFs")).toBeVisible();
     await expect(assignedCard.getByTestId(`download-pdf-client-${sessionId}`)).toHaveText("Download Client PDF");
@@ -1441,20 +1441,20 @@ test.describe("Manager quote group comparison and estimate selection", () => {
       });
     });
 
-    await page.route("**/api/v1/manager/quotes/Q22100/assign-job", async (route) => {
+    await page.route("**/api/v1/manager/quotes/Q22100/select-estimate", async (route) => {
       currentGroup = {
         ...COMPARABLE_GROUP_DETAIL,
-        job_assignment_decision: {
+        selected_estimate_decision: {
           id: 1,
           selected_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
           assignee_name: "Rohit",
           assignee_email: "rohit@example.com",
           assignment_id: null,
-          assigned_at: "2026-06-06T10:00:00Z",
+          selected_at: "2026-06-06T10:00:00Z",
         },
         assignment_submissions: COMPARABLE_GROUP_DETAIL.assignment_submissions.map((row) =>
           row.linked_session_id === "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-            ? { ...row, is_job_assigned: true }
+            ? { ...row, is_selected_estimate: true }
             : row,
         ),
       };
@@ -1464,7 +1464,7 @@ test.describe("Manager quote group comparison and estimate selection", () => {
         body: JSON.stringify({
           success: true,
           data: {
-            decision: currentGroup.job_assignment_decision,
+            selected_estimate: currentGroup.selected_estimate_decision,
           },
         }),
       });
@@ -1472,7 +1472,7 @@ test.describe("Manager quote group comparison and estimate selection", () => {
 
     await page.goto("/manager/review/group?quote_ref=Q22100");
     await page.getByTestId("compare-select-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").check();
-    await page.getByTestId("assign-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").click();
+    await page.getByTestId("select-estimate-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").click();
 
     await expect(page.getByTestId("job-assignment-success-banner")).toContainText(
       "Selected estimate: Rohit — £174.24.",
@@ -1481,7 +1481,7 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     await expect(page.getByTestId("submission-assigned-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
     await expect(page.getByTestId("change-job-assignment")).toBeVisible();
     await expect(page.getByTestId("change-job-assignment")).toContainText("Change selection");
-    await expect(page.getByTestId("assign-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveCount(0);
+    await expect(page.getByTestId("select-estimate-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveCount(0);
     await expect(page.getByTestId("compare-download-pdfs-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
     await expect(page.getByTestId("download-pdf-client-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
     await expect(page.getByTestId("download-pdf-internal-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
@@ -1493,17 +1493,17 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     await mockAuthMe(page, "manager");
     await mockComparableGroupDetailApi(page, {
       ...COMPARABLE_GROUP_DETAIL,
-      job_assignment_decision: {
+      selected_estimate_decision: {
         id: 1,
         selected_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         assignee_name: "Rohit",
         assignee_email: "rohit@example.com",
         assignment_id: null,
-        assigned_at: "2026-06-06T10:00:00Z",
+        selected_at: "2026-06-06T10:00:00Z",
       },
       assignment_submissions: COMPARABLE_GROUP_DETAIL.assignment_submissions.map((row) =>
         row.linked_session_id === "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-          ? { ...row, is_job_assigned: true }
+          ? { ...row, is_selected_estimate: true }
           : row,
       ),
     });
@@ -1537,13 +1537,13 @@ test.describe("Manager quote group comparison and estimate selection", () => {
       assignedCard.getByTestId("compare-download-pdfs-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").locator(".grid-cols-2"),
     ).toHaveCount(0);
     await expect(assignedCard.getByText("All Trades Combined PDF")).toHaveCount(0);
-    await expect(assignedCard.getByTestId("assign-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveCount(0);
+    await expect(assignedCard.getByTestId("select-estimate-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveCount(0);
 
     const otherCard = page.getByTestId("compare-card-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-    await expect(otherCard.getByTestId("compare-job-assigned-elsewhere-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toContainText(
+    await expect(otherCard.getByTestId("compare-selected-elsewhere-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toContainText(
       "Selected estimate: Rohit",
     );
-    await expect(otherCard.getByTestId("assign-job-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveCount(0);
+    await expect(otherCard.getByTestId("select-estimate-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveCount(0);
     await expect(page.getByTestId("quote-group-job-assignment")).toContainText("Rohit — £174.24");
     await expect(page.getByText("Assign Job", { exact: false })).toHaveCount(0);
     await expect(page.getByText("Assigned Job", { exact: false })).toHaveCount(0);
@@ -1560,16 +1560,16 @@ test.describe("Manager quote group comparison and estimate selection", () => {
 
     await mockComparableGroupDetailApi(page, {
       ...COMPARABLE_GROUP_DETAIL,
-      job_assignment_decision: {
+      selected_estimate_decision: {
         id: 1,
         selected_session_id: sessionId,
         assignee_name: "Rohit",
         assignee_email: "rohit@example.com",
         assignment_id: null,
-        assigned_at: "2026-06-06T10:00:00Z",
+        selected_at: "2026-06-06T10:00:00Z",
       },
       assignment_submissions: COMPARABLE_GROUP_DETAIL.assignment_submissions.map((row) =>
-        row.linked_session_id === sessionId ? { ...row, is_job_assigned: true } : row,
+        row.linked_session_id === sessionId ? { ...row, is_selected_estimate: true } : row,
       ),
     });
 

@@ -131,16 +131,21 @@ export type DashboardQuoteGroupComparisonSummary = {
   additional_charges?: DashboardQuoteGroupComparisonChargeLine[];
 };
 
-export type DashboardQuoteJobAssignmentDecision = {
+export type DashboardSelectedEstimateDecision = {
   id: number;
   selected_session_id: string;
   assignee_name: string;
   assignee_email?: string | null;
   assignment_id?: number | null;
-  assigned_at: string;
-  assigned_by_name?: string | null;
-  assigned_by_email?: string | null;
+  assignee_type?: string | null;
+  final_total?: number | string | null;
+  selected_at: string;
+  selected_by_name?: string | null;
+  selected_by_email?: string | null;
 };
+
+/** @deprecated Use DashboardSelectedEstimateDecision */
+export type DashboardQuoteJobAssignmentDecision = DashboardSelectedEstimateDecision;
 
 export type DashboardQuoteGroupAssignmentSubmissionRow = {
   assignment_id: number | null;
@@ -161,7 +166,11 @@ export type DashboardQuoteGroupAssignmentSubmissionRow = {
   is_latest?: boolean;
   can_view_details?: boolean;
   can_reopen?: boolean;
+  can_select_estimate?: boolean;
+  is_selected_estimate?: boolean;
+  /** @deprecated Use can_select_estimate */
   can_assign_job?: boolean;
+  /** @deprecated Use is_selected_estimate */
   is_job_assigned?: boolean;
   comparison_summary?: DashboardQuoteGroupComparisonSummary | null;
   current_version_number?: number | null;
@@ -202,7 +211,9 @@ export type DashboardQuoteGroupDetailItem = DashboardQuoteGroupItem & {
   assignment_summary?: DashboardQuoteGroupAssignmentSummary;
   assignments?: DashboardQuoteGroupAssignmentItem[];
   assignment_submissions?: DashboardQuoteGroupAssignmentSubmissionRow[];
-  job_assignment_decision?: DashboardQuoteJobAssignmentDecision | null;
+  selected_estimate_decision?: DashboardSelectedEstimateDecision | null;
+  /** @deprecated Use selected_estimate_decision */
+  job_assignment_decision?: DashboardSelectedEstimateDecision | null;
   sessions: DashboardQuoteGroupSessionDetailItem[];
 };
 
@@ -214,10 +225,10 @@ export type DashboardQuoteGroupDetailResponse = {
   group: DashboardQuoteGroupDetailItem;
 };
 
-/** Manager selected-estimate request (legacy API name: assign-job). */
 export type SelectQuoteEstimateRequest = {
   selected_session_id: string;
-  assignee_name: string;
+  selected_assignment_id?: number | null;
+  assignee_name?: string;
   assignee_email?: string | null;
   assignment_id?: number | null;
 };
@@ -226,7 +237,7 @@ export type SelectQuoteEstimateRequest = {
 export type AssignQuoteJobRequest = SelectQuoteEstimateRequest;
 
 export type SelectQuoteEstimateResponse = {
-  decision: DashboardQuoteJobAssignmentDecision;
+  selected_estimate: DashboardSelectedEstimateDecision;
 };
 
 /** @deprecated Use SelectQuoteEstimateResponse */

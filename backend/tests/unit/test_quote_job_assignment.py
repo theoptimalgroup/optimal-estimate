@@ -16,11 +16,13 @@ from sqlalchemy.pool import StaticPool
 from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
+from app.models.calculation_session_version import CalculationSessionVersion
 from app.models.client import Client
 from app.models.client_alias import ClientAlias
-from app.models.eworks_sync import EworksQuote
+from app.models.eworks_sync import EworksJob, EworksQuote
 from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.quote_job_assignment import QuoteJobAssignment
+from app.models.selected_estimate_decision import SelectedEstimateDecision
 from app.models.support import AuditLog
 from app.models.trade import Trade
 from app.models.user import User
@@ -95,10 +97,13 @@ def assign_db_session():
         ClientAlias,
         Trade,
         CalculationSession,
+        CalculationSessionVersion,
         AuditLog,
         EworksQuote,
+        EworksJob,
         EworksQuoteAssignment,
         QuoteJobAssignment,
+        SelectedEstimateDecision,
     ):
         model.__table__.create(engine)
     Session = sessionmaker(bind=engine)
@@ -225,8 +230,8 @@ def test_manager_can_assign_job(mock_settings, assign_api_client, assign_db_sess
         },
     )
     assert response.status_code == 200
-    decision = response.json()["data"]["decision"]
-    assert decision["assignee_name"] == "Rohit"
+    decision = response.json()["data"]["selected_estimate"]
+    assert decision["selected_assignee_name"] == "Rohit"
     assert decision["selected_session_id"] == str(session_a)
 
 
@@ -295,7 +300,7 @@ def test_assign_job_updates_existing_decision(mock_settings, assign_api_client, 
         },
     )
     assert first.status_code == 200
-    first_id = first.json()["data"]["decision"]["id"]
+    first_id = first.json()["data"]["selected_estimate"]["id"]
 
     second = assign_api_client.post(
         "/api/v1/manager/quotes/Q22100/assign-job",
@@ -306,9 +311,9 @@ def test_assign_job_updates_existing_decision(mock_settings, assign_api_client, 
         },
     )
     assert second.status_code == 200
-    second_id = second.json()["data"]["decision"]["id"]
+    second_id = second.json()["data"]["selected_estimate"]["id"]
     assert second_id == first_id
-    assert db_session.query(QuoteJobAssignment).count() == 1
+    assert db_session.query(SelectedEstimateDecision).count() == 1
 
 
 @patch("app.auth.dependencies.settings")
@@ -326,7 +331,7 @@ def test_assign_job_creates_audit_event(mock_settings, assign_api_client, assign
     assert response.status_code == 200
 
     audit = db_session.query(AuditLog).filter(AuditLog.action == "quote_estimate_selected").one()
-    assert audit.entity_type == "quote_job_assignment"
+    assert audit.entity_type == "selected_estimate_decision"
     assert audit.new_value is not None
     assert "session_token" not in (audit.new_value or {})
     assert "assignment_token" not in (audit.new_value or {})
@@ -353,7 +358,7 @@ def test_assign_job_response_excludes_tokens(mock_settings, assign_api_client, a
 
 
 @patch("app.auth.dependencies.settings")
-def test_group_detail_includes_job_assignment_decision(mock_settings, assign_api_client, assign_db_session):
+def test_group_detail_includes_selected_estimate_decision(mock_settings, assign_api_client, assign_db_session):
     _patch_dev_user(mock_settings, role="manager")
     _, session_a, _, assignment = assign_db_session
 
@@ -370,11 +375,11 @@ def test_group_detail_includes_job_assignment_decision(mock_settings, assign_api
     response = assign_api_client.get("/api/v1/dashboard/quote-groups/detail", params={"quote_ref": "Q22100"})
     assert response.status_code == 200
     group = response.json()["data"]["group"]
-    assert group["job_assignment_decision"]["assignee_name"] == "Rohit"
-    assigned_rows = [row for row in group["assignment_submissions"] if row["is_job_assigned"]]
+    assert group["selected_estimate_decision"]["assignee_name"] == "Rohit"
+    assigned_rows = [row for row in group["assignment_submissions"] if row["is_selected_estimate"]]
     assert len(assigned_rows) == 1
     assert assigned_rows[0]["linked_session_id"] == str(session_a)
-    assert assigned_rows[0]["can_assign_job"] is True
+    assert assigned_rows[0]["can_select_estimate"] is True
     assert assigned_rows[0]["comparison_summary"] is not None
     assert "session_token" not in response.text
 
@@ -419,12 +424,12 @@ def test_group_detail_comparison_summary_has_breakdown(mock_settings, assign_api
 
 
 @patch("app.auth.dependencies.settings")
-def test_engineer_lists_own_assigned_jobs(mock_settings, assign_api_client, assign_db_session):
+def test_select_estimate_does_not_create_engineer_assigned_job(mock_settings, assign_api_client, assign_db_session):
     _, session_a, _, assignment = assign_db_session
 
     _patch_dev_user(mock_settings, role="manager")
     assign_resp = assign_api_client.post(
-        "/api/v1/manager/quotes/Q22100/assign-job",
+        "/api/v1/manager/quotes/Q22100/select-estimate",
         json={
             "selected_session_id": str(session_a),
             "assignee_name": "Rohit",
@@ -437,33 +442,71 @@ def test_engineer_lists_own_assigned_jobs(mock_settings, assign_api_client, assi
     _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com")
     response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
     assert response.status_code == 200
-    items = response.json()["data"]
-    assert len(items) == 1
-    assert items[0]["quote_ref"] == "Q22100"
-    assert items[0]["selected_session_id"] == str(session_a)
-    assert items[0]["selected_estimate_total"] == "100.00"
-    assert items[0]["customer_name"] == "ACME Ltd"
-    assert items[0]["status"] == "assigned"
+    assert response.json()["data"] == []
 
 
 @patch("app.auth.dependencies.settings")
-def test_engineer_does_not_see_other_engineers_jobs(mock_settings, assign_api_client, assign_db_session):
-    _patch_dev_user(mock_settings, role="manager")
-    _, session_a, _, assignment = assign_db_session
-
-    assign_api_client.post(
-        "/api/v1/manager/quotes/Q22100/assign-job",
-        json={
-            "selected_session_id": str(session_a),
-            "assignee_name": "Other Engineer",
-            "assignee_email": "other@example.com",
-        },
+def test_engineer_lists_eworks_assigned_jobs(mock_settings, assign_api_client, assign_db_session):
+    db_session, _, _, _ = assign_db_session
+    db_session.add(
+        EworksJob(
+            eworks_job_id=29226,
+            job_ref="29226",
+            eworks_quote_id=29204,
+            customer_name="Douglas & Gordon",
+            address="1 High Street",
+            status_name="Assigned",
+            raw_payload={"engineer": "rohit@example.com"},
+        )
     )
+    db_session.commit()
+
+    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com")
+    response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
+    assert response.status_code == 200
+    items = response.json()["data"]
+    assert len(items) == 1
+    assert items[0]["eworks_job_id"] == 29226
+    assert items[0]["customer_name"] == "Douglas & Gordon"
+    assert "selected_session_id" not in items[0]
+    assert "selected_estimate_total" not in items[0]
+
+
+@patch("app.auth.dependencies.settings")
+def test_engineer_does_not_see_other_engineers_eworks_jobs(mock_settings, assign_api_client, assign_db_session):
+    db_session, _, _, _ = assign_db_session
+    db_session.add(
+        EworksJob(
+            eworks_job_id=29227,
+            job_ref="29227",
+            customer_name="Other Client",
+            raw_payload={"engineer": "other@example.com"},
+        )
+    )
+    db_session.commit()
 
     _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com")
     response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
     assert response.status_code == 200
     assert response.json()["data"] == []
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_can_select_estimate_via_primary_endpoint(mock_settings, assign_api_client, assign_db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _, session_a, _, assignment = assign_db_session
+
+    response = assign_api_client.post(
+        "/api/v1/manager/quotes/Q22100/select-estimate",
+        json={
+            "selected_session_id": str(session_a),
+            "selected_assignment_id": assignment.id,
+        },
+    )
+    assert response.status_code == 200
+    selected = response.json()["data"]["selected_estimate"]
+    assert selected["selected_session_id"] == str(session_a)
+    assert selected["selected_assignee_name"]
 
 
 @patch("app.auth.dependencies.settings")
@@ -480,7 +523,7 @@ def test_engineer_assigned_jobs_response_excludes_tokens(mock_settings, assign_a
     _, session_a, _, assignment = assign_db_session
 
     assign_api_client.post(
-        "/api/v1/manager/quotes/Q22100/assign-job",
+        "/api/v1/manager/quotes/Q22100/select-estimate",
         json={
             "selected_session_id": str(session_a),
             "assignee_name": "Rohit",
@@ -493,5 +536,6 @@ def test_engineer_assigned_jobs_response_excludes_tokens(mock_settings, assign_a
     response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
     body = response.text
     assert response.status_code == 200
+    assert response.json()["data"] == []
     for forbidden in ("session_token", "assignment_token", "raw_payload", "profit", "margin", "formula", "denominator"):
         assert forbidden not in body

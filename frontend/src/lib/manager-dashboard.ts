@@ -1,41 +1,30 @@
 import { apiFetch } from "@/lib/api";
+import {
+  AWAITING_SUPPLIER_TAG,
+  READY_TO_SEND_TAG,
+  type DashboardCategory,
+  type DashboardQuoteRow,
+  type OperationalDashboardData,
+} from "@/lib/dashboard-quotes";
 
-export const AWAITING_SUPPLIER_TAG = "Awaiting Supplier Info (Quotes)";
-export const READY_TO_SEND_TAG = "Quotes Ready to send (Quotes)";
-
-export type ManagerDashboardQuoteRow = {
-  id: number;
-  eworks_quote_id: number;
-  quote_ref: string | null;
-  customer_name: string | null;
-  status: string | null;
-  status_name: string | null;
-  tags: string[];
-  quote_date: string | null;
-  expiry_date: string | null;
-  total: number | null;
-  synced_at: string | null;
+export {
+  AWAITING_SUPPLIER_TAG,
+  READY_TO_SEND_TAG,
+  type DashboardCategory,
+  type DashboardQuoteRow,
+  type OperationalDashboardData,
 };
 
-export type ManagerDashboardCategory = {
-  count: number;
-  quotes: ManagerDashboardQuoteRow[];
-};
+export type ManagerDashboardQuoteRow = DashboardQuoteRow;
+export type ManagerDashboardCategory = DashboardCategory;
+export type ManagerDashboard = OperationalDashboardData;
 
-export type ManagerDashboard = {
-  categories: {
-    new_quotes: ManagerDashboardCategory;
-    awaiting_supplier: ManagerDashboardCategory;
-    ready_to_send: ManagerDashboardCategory;
-  };
-  last_synced_at: string | null;
-  totals: {
-    all_open_quotes: number;
-  };
-};
-
-export async function getManagerDashboard(limitPerCategory = 10): Promise<ManagerDashboard> {
+export async function getManagerDashboard(
+  limitPerCategory = 10,
+  search?: string,
+): Promise<ManagerDashboard> {
   const params = new URLSearchParams({ limit_per_category: String(limitPerCategory) });
+  if (search?.trim()) params.set("search", search.trim());
   const res = await apiFetch<ManagerDashboard>(`/api/v1/manager/dashboard?${params}`);
   return res.data;
 }

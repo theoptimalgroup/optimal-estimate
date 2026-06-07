@@ -114,15 +114,21 @@ class DashboardQuoteGroupComparisonSummary(BaseModel):
     additional_charges: list[DashboardQuoteGroupComparisonChargeLine] = Field(default_factory=list)
 
 
-class DashboardQuoteJobAssignmentDecision(BaseModel):
+class DashboardSelectedEstimateDecision(BaseModel):
     id: int
     selected_session_id: UUID
     assignee_name: str
     assignee_email: str | None = None
     assignment_id: int | None = None
-    assigned_at: datetime
-    assigned_by_name: str | None = None
-    assigned_by_email: str | None = None
+    assignee_type: str | None = None
+    final_total: Decimal | None = None
+    selected_at: datetime
+    selected_by_name: str | None = None
+    selected_by_email: str | None = None
+
+
+class DashboardQuoteJobAssignmentDecision(DashboardSelectedEstimateDecision):
+    """Deprecated alias for selected estimate decision."""
 
 
 class DashboardQuoteGroupAssignmentSubmissionRow(BaseModel):
@@ -144,8 +150,8 @@ class DashboardQuoteGroupAssignmentSubmissionRow(BaseModel):
     is_latest: bool = False
     can_view_details: bool = False
     can_reopen: bool = False
-    can_assign_job: bool = False
-    is_job_assigned: bool = False
+    can_select_estimate: bool = False
+    is_selected_estimate: bool = False
     comparison_summary: DashboardQuoteGroupComparisonSummary | None = None
     current_version_number: int | None = None
     version_count: int = 0
@@ -160,7 +166,7 @@ class DashboardQuoteGroupDetailItem(DashboardQuoteGroupItem):
     assignments: list[DashboardQuoteGroupAssignmentItem] = Field(default_factory=list)
     sessions: list[DashboardQuoteGroupSessionDetailItem] = Field(default_factory=list)
     assignment_submissions: list[DashboardQuoteGroupAssignmentSubmissionRow] = Field(default_factory=list)
-    job_assignment_decision: DashboardQuoteJobAssignmentDecision | None = None
+    selected_estimate_decision: DashboardSelectedEstimateDecision | None = None
 
 
 class DashboardQuoteGroupsResponse(BaseModel):

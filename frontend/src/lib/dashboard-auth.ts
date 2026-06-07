@@ -55,10 +55,10 @@ export async function reopenQuoteForRefill(sessionId: string) {
   return response.data;
 }
 
-/** Record manager's selected submitted estimate (uses legacy assign-job API path). */
+/** Record manager's selected submitted estimate for a quote group. */
 export async function selectQuoteEstimate(quoteRef: string, payload: SelectQuoteEstimateRequest) {
   const response = await apiFetch<SelectQuoteEstimateResponse>(
-    `/api/v1/manager/quotes/${encodeURIComponent(quoteRef)}/assign-job`,
+    `/api/v1/manager/quotes/${encodeURIComponent(quoteRef)}/select-estimate`,
     {
       method: "POST",
       body: JSON.stringify(payload),
