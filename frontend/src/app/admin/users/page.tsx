@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { EworksInput, EworksLabel } from "@/components/eworks-ui";
 import {
+  BackLink,
   DataTable,
   DataTableBody,
   DataTableCell,
@@ -220,20 +221,30 @@ function UserEditPanel({
       data-testid="user-edit-modal"
     >
       <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
-          <div>
-            <h2 id="user-edit-title" className="text-lg font-semibold text-slate-900">
-              Edit User
-            </h2>
-            <p className="mt-1 text-sm text-slate-600">{user.email}</p>
+        <div className="border-b border-slate-100 px-6 py-5">
+          <BackLink
+            href="/admin/users"
+            label="Back to Users & Roles"
+            onClick={(event) => {
+              event.preventDefault();
+              onClose();
+            }}
+          />
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 id="user-edit-title" className="text-lg font-semibold text-slate-900">
+                Edit User
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">{user.email}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            >
+              Close
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
-          >
-            Close
-          </button>
         </div>
 
         <div className="space-y-5 px-6 py-6">

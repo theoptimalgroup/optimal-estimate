@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ document_title }} — {{ quote_number }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 12mm 14mm 16mm;
+      background: #000000;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000000;
+      color: #ffffff;
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 10pt;
+      line-height: 1.4;
+    }
+
+    .page {
+      position: relative;
+      min-height: 255mm;
+      background: #000000;
+    }
+
+    .doc-header {
+      display: table;
+      width: 100%;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+    }
+
+    .doc-header-main,
+    .doc-header-brand {
+      display: table-cell;
+      vertical-align: top;
+    }
+
+    .doc-header-brand {
+      text-align: right;
+      width: 38%;
+      color: #f9a825;
+      font-size: 11pt;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .doc-title {
+      margin: 0;
+      font-size: 18pt;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #ffffff;
+    }
+
+    .doc-subtitle {
+      margin: 4px 0 0;
+      color: #9ca3af;
+      font-size: 10pt;
+    }
+
+    .meta-grid {
+      display: table;
+      width: 100%;
+      margin-bottom: 16px;
+    }
+
+    .meta-row {
+      display: table-row;
+    }
+
+    .meta-cell {
+      display: table-cell;
+      padding: 4px 12px 4px 0;
+      color: #d1d5db;
+      font-size: 9.5pt;
+    }
+
+    .meta-cell strong {
+      color: #f9a825;
+      font-weight: 600;
+    }
+
+    .section-title {
+      margin: 14px 0 8px;
+      color: #f9a825;
+      font-size: 11pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .works-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #cfd2d6;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+
+    .works-table th {
+      padding: 8px 10px;
+      text-align: left;
+      color: #000000;
+      font-size: 8pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      background: #b8bcc2;
+    }
+
+    .works-table td {
+      padding: 8px 10px;
+      color: #1f2937;
+      font-size: 9pt;
+      vertical-align: top;
+      border-top: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .works-table td.num,
+    .works-table th.num {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .work-product-name {
+      font-weight: 600;
+      color: #111827;
+    }
+
+    .work-scope {
+      margin-top: 4px;
+      color: #4b5563;
+      font-size: 8.5pt;
+    }
+
+    .summary-box {
+      border: 1px solid rgba(249, 168, 37, 0.35);
+      background: #141414;
+      border-radius: 8px;
+      padding: 14px;
+      max-width: 360px;
+      margin-left: auto;
+    }
+
+    .summary-row {
+      display: table;
+      width: 100%;
+      margin: 6px 0;
+      color: #ffffff;
+    }
+
+    .summary-row > span {
+      display: table-cell;
+    }
+
+    .summary-row > span:last-child {
+      text-align: right;
+      font-weight: 600;
+    }
+
+    .summary-total {
+      margin-top: 10px;
+      background: #f9a825;
+      color: #000000;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-weight: 700;
+      font-size: 12pt;
+    }
+
+    .summary-total .summary-row > span {
+      color: #000000;
+    }
+  </style>
+</head>
+<body>
+  <section class="page">
+    <div class="doc-header">
+      <div class="doc-header-main">
+        <h1 class="doc-title">{{ document_title }}</h1>
+        <p class="doc-subtitle">Quote {{ quote_number }}{% if job_number %} · Job {{ job_number }}{% endif %}</p>
+      </div>
+      <div class="doc-header-brand">OPTIMAL GROUP</div>
+    </div>
+
+    <div class="meta-grid">
+      <div class="meta-row">
+        <div class="meta-cell"><strong>Client</strong> {{ client_name }}</div>
+        <div class="meta-cell"><strong>Property</strong> {{ property_address }}</div>
+      </div>
+      {% if engineer_name and engineer_name != "—" %}
+      <div class="meta-row">
+        <div class="meta-cell"><strong>Engineer</strong> {{ engineer_name }}</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <p class="section-title">All Trades / Skills</p>
+    <table class="works-table">
+      <thead>
+        <tr>
+          <th class="num" style="width:4%;">#</th>
+          <th style="width:14%;">Trade/Skill</th>
+          <th style="width:34%;">Work/Product</th>
+          <th class="num" style="width:12%;">Labour</th>
+          <th class="num" style="width:12%;">Materials</th>
+          <th class="num" style="width:12%;">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for work in all_trades_works %}
+        <tr>
+          <td class="num">{{ work.index }}</td>
+          <td>{{ work.trade_name }}</td>
+          <td>
+            <div class="work-product-name">{{ work.trade_name }} — {{ work.product_label }}</div>
+            {% if work.scope_preview and work.scope_preview != "—" %}
+            <div class="work-scope">{{ work.scope_preview }}</div>
+            {% endif %}
+          </td>
+          <td class="num">{{ work.labour_subtotal }}</td>
+          <td class="num">{{ work.materials_subtotal }}</td>
+          <td class="num">{{ work.work_subtotal }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="summary-box">
+      <div class="summary-row">
+        <span>Works subtotal</span>
+        <span>{{ summary.works_subtotal }}</span>
+      </div>
+      {% for charge in additional_charges %}
+      <div class="summary-row">
+        <span>{{ charge.label }}</span>
+        <span>{{ charge.amount }}</span>
+      </div>
+      {% endfor %}
+      {% if not additional_charges and summary.additional_charges_total != "—" %}
+      <div class="summary-row">
+        <span>Additional charges</span>
+        <span>{{ summary.additional_charges_total }}</span>
+      </div>
+      {% endif %}
+      <div class="summary-row">
+        <span>VAT{% if summary.vat_rate is not none %} ({{ summary.vat_rate }}%){% endif %}</span>
+        <span>{{ summary.vat_total }}</span>
+      </div>
+      <div class="summary-total">
+        <div class="summary-row">
+          <span>Final total</span>
+          <span>{{ summary.final_total }}</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

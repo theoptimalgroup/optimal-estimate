@@ -218,6 +218,34 @@
     width: 100%;
   }
 
+  .rich-text {
+    white-space: normal;
+  }
+
+  .rich-text strong,
+  .rich-text b {
+    font-weight: 700;
+  }
+
+  .rich-text em,
+  .rich-text i {
+    font-style: italic;
+  }
+
+  .rich-text u {
+    text-decoration: underline;
+  }
+
+  .rich-text p {
+    margin: 0 0 0.5em;
+  }
+
+  .rich-text ul,
+  .rich-text ol {
+    margin: 0.25em 0 0.5em 1.25em;
+    padding: 0;
+  }
+
   table.items {
     width: 100%;
     border-collapse: collapse;
@@ -329,7 +357,7 @@
 
   <div class="content-block">
     <h2 class="section-heading">Report Notes</h2>
-    <div class="report-notes-box">{{ report_notes }}</div>
+    <div class="report-notes-box rich-text">{% if report_notes_html %}{{ report_notes_html | safe }}{% else %}{{ report_notes }}{% endif %}</div>
   </div>
 
   {{ caller() }}

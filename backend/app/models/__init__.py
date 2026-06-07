@@ -1,4 +1,5 @@
 from app.models.calculation_session import CalculationSession
+from app.models.calculation_session_version import CalculationSessionVersion
 from app.models.client import Client
 from app.models.client_alias import ClientAlias
 from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksQuote, EworksSyncRun
@@ -17,6 +18,7 @@ __all__ = [
     "Client",
     "ClientAlias",
     "CalculationSession",
+    "CalculationSessionVersion",
     "Trade",
     "Product",
     "RateRule",

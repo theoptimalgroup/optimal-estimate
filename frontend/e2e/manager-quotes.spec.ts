@@ -489,6 +489,37 @@ async function mockManagerReviewQuoteApi(page: Page) {
 }
 
 test.describe("Manager quote review detail", () => {
+  test("shows single back link above page header that navigates to quote review", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockManagerReviewQuoteApi(page);
+    await page.goto("/manager/review/cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+    const backLink = page.getByTestId("back-link");
+    await expect(backLink).toBeVisible();
+    await expect(backLink).toHaveText("← Back to Quote Review");
+    await expect(backLink).toHaveAttribute("href", "/manager/review");
+
+    const isDomBefore = (earlierId: string, laterSelector: string) =>
+      page.evaluate(
+        ([earlier, later]) => {
+          const a = document.querySelector(`[data-testid="${earlier}"]`);
+          const b = document.querySelector(later);
+          return Boolean(a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+        },
+        [earlierId, "h1"],
+      );
+    expect(await isDomBefore("back-link", "h1")).toBe(true);
+    await expect(page.getByTestId("back-link")).toHaveCount(1);
+    await expect(page.getByRole("link", { name: /Back to quotes/i })).toHaveCount(0);
+    await expect(backLink).toHaveClass(/text-blue-600/);
+    await expect(backLink).not.toHaveClass(/rounded-lg/);
+    await expect(backLink).not.toHaveClass(/border/);
+    await expect(page.getByRole("button", { name: /Back to Quote Review/i })).toHaveCount(0);
+
+    await backLink.click();
+    await expect(page).toHaveURL(/\/manager\/review$/);
+  });
+
   test("summary card uses neutral title and trade as secondary metadata", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await mockManagerReviewQuoteApi(page);
@@ -656,6 +687,83 @@ test.describe("Manager quote review detail", () => {
     await expect(page.getByTestId("work-section-details-0")).toHaveCount(0);
     await expect(page.getByTestId("work-section-details-1")).toHaveCount(0);
   });
+
+  test("combined internal notes modal shows PDF buttons with updated labels", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockManagerReviewQuoteApi(page);
+
+    const combineNotesRequests: unknown[] = [];
+    const combinedPdfRequests: { view_type: string; work_indexes: number[] }[] = [];
+    const fullEstimatePdfRequests: string[] = [];
+
+    await page.route("**/api/v1/dashboard/quotes/*/combine-notes", async (route) => {
+      combineNotesRequests.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            quote_number: "Q-REVIEW",
+            job_number: "J-REVIEW",
+            client_name: "ACME Ltd",
+            internal_notes: "Combined internal notes text",
+          },
+        }),
+      });
+    });
+
+    await page.route("**/api/v1/dashboard/quotes/*/combined-pdf", async (route) => {
+      const payload = route.request().postDataJSON() as { view_type: string; work_indexes: number[] };
+      combinedPdfRequests.push(payload);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        headers: {
+          "Content-Disposition": `attachment; filename="Q-REVIEW_${payload.view_type}.pdf"`,
+        },
+        body: Buffer.from("%PDF-1.4 combined notes pdf"),
+      });
+    });
+
+    await page.route("**/api/v1/manager/quotes/cccccccc-cccc-cccc-cccc-cccccccccccc/pdf/*", async (route) => {
+      const view = route.request().url().split("/pdf/")[1]?.split("?")[0] ?? "";
+      fullEstimatePdfRequests.push(view);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        headers: {
+          "Content-Disposition": 'attachment; filename="Q-REVIEW_combined.pdf"',
+        },
+        body: Buffer.from("%PDF-1.4 full estimate pdf"),
+      });
+    });
+
+    await page.goto("/manager/review/cccccccc-cccc-cccc-cccc-cccccccccccc");
+    await page.getByTestId("work-section-checkbox-0").click();
+    await page.getByRole("button", { name: "Calculate combined Internal Notes" }).click();
+
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByTestId("combined-notes-download-client-pdf")).toHaveText("Client PDF");
+    await expect(page.getByTestId("combined-notes-download-internal-pdf")).toHaveText("Internal PDF");
+    await expect(page.getByTestId("combined-notes-download-full-estimate-pdf")).toHaveText("Full Estimate PDF");
+    await expect(page.getByTestId("combined-notes-download-all-trades-pdf")).toHaveText("All Trades PDF");
+    await expect(page.getByText("Download Client View PDF")).toHaveCount(0);
+    await expect(page.getByText("Download Optimal View PDF")).toHaveCount(0);
+
+    await page.getByTestId("combined-notes-download-client-pdf").click();
+    await page.getByTestId("combined-notes-download-internal-pdf").click();
+    await page.getByTestId("combined-notes-download-full-estimate-pdf").click();
+    await page.getByTestId("combined-notes-download-all-trades-pdf").click();
+
+    await expect.poll(() => combinedPdfRequests.map((item) => item.view_type).sort().join(",")).toBe(
+      "all_trades,client,optimal",
+    );
+    expect(combinedPdfRequests.every((item) => item.work_indexes.join(",") === "0")).toBe(true);
+    await expect.poll(() => fullEstimatePdfRequests.join(",")).toBe("combined");
+    await expect(page.getByText("secret-session-token")).toHaveCount(0);
+    await expect(page.getByText("session_token")).toHaveCount(0);
+  });
 });
 
 const MOCK_GROUP_DETAIL = {
@@ -739,6 +847,36 @@ async function mockQuoteGroupDetailApi(page: Page) {
 }
 
 test.describe("Manager quote group review", () => {
+  test("shows single back link above page header without bordered button", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockQuoteGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    const backLink = page.getByTestId("back-link");
+    await expect(backLink).toBeVisible();
+    await expect(backLink).toHaveText("← Back to Quote Review");
+    await expect(backLink).toHaveAttribute("href", "/manager/review");
+
+    const isDomBefore = (earlierId: string, laterSelector: string) =>
+      page.evaluate(
+        ([earlier, later]) => {
+          const a = document.querySelector(`[data-testid="${earlier}"]`);
+          const b = document.querySelector(later);
+          return Boolean(a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+        },
+        [earlierId, "h1"],
+      );
+    expect(await isDomBefore("back-link", "h1")).toBe(true);
+    await expect(page.getByTestId("back-link")).toHaveCount(1);
+    await expect(backLink).toHaveClass(/text-blue-600/);
+    await expect(backLink).not.toHaveClass(/rounded-lg/);
+    await expect(backLink).not.toHaveClass(/border/);
+    await expect(page.getByRole("button", { name: /Back to Quote Review/i })).toHaveCount(0);
+
+    await backLink.click();
+    await expect(page).toHaveURL(/\/manager\/review$/);
+  });
+
   test("assignment submissions section visible without separate cards", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await mockQuoteGroupDetailApi(page);
@@ -795,7 +933,7 @@ test.describe("Manager quote group review", () => {
   });
 });
 
-test.describe("Manager quote group comparison and job assignment", () => {
+test.describe("Manager quote group comparison and estimate selection", () => {
   const COMPARISON_SUMMARY_HIGH = {
     final_total: "174.24",
     works_subtotal: "145.20",
@@ -1052,7 +1190,7 @@ test.describe("Manager quote group comparison and job assignment", () => {
     );
   });
 
-  test("compare panel shows badges and assign buttons without secrets", async ({ page }) => {
+  test("compare panel shows badges and select buttons without secrets", async ({ page }) => {
     await mockAuthMe(page, "manager");
     await mockComparableGroupDetailApi(page);
     await page.goto("/manager/review/group?quote_ref=Q22100");
@@ -1064,15 +1202,72 @@ test.describe("Manager quote group comparison and job assignment", () => {
     await expect(page.getByTestId("compare-latest-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
     await expect(page.getByTestId("compare-lowest-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toBeVisible();
     await expect(page.getByTestId("assign-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toContainText(
-      "Assign Job to Unknown",
+      "Select this estimate",
     );
+    await expect(page.getByText("Assign Job", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("Assigned Job", { exact: false })).toHaveCount(0);
 
     for (const label of ["session_token", "assignment_token", "raw_payload", "profit", "margin", "denominator"]) {
       await expect(page.getByText(label, { exact: false })).toHaveCount(0);
     }
   });
 
-  test("assign job success updates banner summary and row badge", async ({ page }) => {
+  test("quote summary shows no estimate selected before selection", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockComparableGroupDetailApi(page);
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    await expect(page.getByTestId("quote-group-job-assignment")).toContainText("No estimate selected");
+    await expect(page.getByTestId("change-job-assignment")).toHaveCount(0);
+  });
+
+  test("selected submission row and compare card show Selected Estimate highlight", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    const sessionId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    await mockComparableGroupDetailApi(page, {
+      ...COMPARABLE_GROUP_DETAIL,
+      job_assignment_decision: {
+        id: 1,
+        selected_session_id: sessionId,
+        assignee_name: "Rohit",
+        assignee_email: "rohit@example.com",
+        assignment_id: null,
+        assigned_at: "2026-06-06T10:00:00Z",
+      },
+      assignment_submissions: COMPARABLE_GROUP_DETAIL.assignment_submissions.map((row) =>
+        row.linked_session_id === sessionId ? { ...row, is_job_assigned: true } : row,
+      ),
+    });
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    const assignedRow = page.getByTestId(`assignment-submission-row-${sessionId}`);
+    await expect(assignedRow).toHaveClass(/border-emerald-500/);
+    await expect(assignedRow).toHaveClass(/bg-emerald-50/);
+    await expect(page.getByTestId(`submission-assigned-job-${sessionId}`)).toHaveText("Selected Estimate");
+    await expect(page.getByTestId(`view-session-detail-${sessionId}`)).toBeVisible();
+
+    await page.getByTestId(`compare-select-${sessionId}`).check();
+    const assignedCard = page.getByTestId(`compare-card-${sessionId}`);
+    await expect(assignedCard).toHaveClass(/border-emerald-400/);
+    await expect(assignedCard.getByTestId(`compare-assigned-${sessionId}`)).toHaveText("Selected Estimate");
+    await expect(assignedCard.getByTestId(`assign-job-${sessionId}`)).toHaveCount(0);
+    await expect(assignedCard.getByTestId(`compare-download-pdfs-${sessionId}`)).toBeVisible();
+    await expect(assignedCard.getByText("Download PDFs")).toBeVisible();
+    await expect(assignedCard.getByTestId(`download-pdf-client-${sessionId}`)).toHaveText("Download Client PDF");
+    await expect(assignedCard.getByTestId(`download-pdf-internal-${sessionId}`)).toHaveText("Internal PDF");
+    await expect(assignedCard.getByTestId(`download-pdf-combined-${sessionId}`)).toHaveText("Full Estimate");
+    await expect(assignedCard.getByTestId(`download-pdf-all-trades-${sessionId}`)).toHaveText("All Trades");
+    await expect(assignedCard.getByTestId(`compare-download-pdfs-${sessionId}`).locator(".grid-cols-2")).toHaveCount(0);
+    await expect(assignedCard.getByText("All Trades Combined PDF")).toHaveCount(0);
+
+    await expect(page.getByTestId("quote-group-job-assignment")).toContainText("Rohit — £174.24");
+
+    for (const label of ["session_token", "assignment_token", "raw_payload", "profit", "margin", "denominator"]) {
+      await expect(page.getByText(label, { exact: false })).toHaveCount(0);
+    }
+  });
+
+  test("select estimate success updates banner summary and row badge", async ({ page }) => {
     await mockAuthMe(page, "manager");
     let currentGroup = COMPARABLE_GROUP_DETAIL;
 
@@ -1117,9 +1312,126 @@ test.describe("Manager quote group comparison and job assignment", () => {
     await page.getByTestId("compare-select-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").check();
     await page.getByTestId("assign-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").click();
 
-    await expect(page.getByTestId("job-assignment-success-banner")).toContainText("Job assigned to Rohit.");
-    await expect(page.getByTestId("quote-group-job-assignment")).toContainText("Assigned to Rohit");
+    await expect(page.getByTestId("job-assignment-success-banner")).toContainText(
+      "Selected estimate: Rohit — £174.24.",
+    );
+    await expect(page.getByTestId("quote-group-job-assignment")).toContainText("Rohit — £174.24");
     await expect(page.getByTestId("submission-assigned-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
     await expect(page.getByTestId("change-job-assignment")).toBeVisible();
+    await expect(page.getByTestId("change-job-assignment")).toContainText("Change selection");
+    await expect(page.getByTestId("assign-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveCount(0);
+    await expect(page.getByTestId("compare-download-pdfs-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(page.getByTestId("download-pdf-client-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(page.getByTestId("download-pdf-internal-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(page.getByTestId("download-pdf-combined-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(page.getByTestId("download-pdf-all-trades-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+  });
+
+  test("selected submission shows PDF buttons and non-selected shows estimate selected elsewhere", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockComparableGroupDetailApi(page, {
+      ...COMPARABLE_GROUP_DETAIL,
+      job_assignment_decision: {
+        id: 1,
+        selected_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        assignee_name: "Rohit",
+        assignee_email: "rohit@example.com",
+        assignment_id: null,
+        assigned_at: "2026-06-06T10:00:00Z",
+      },
+      assignment_submissions: COMPARABLE_GROUP_DETAIL.assignment_submissions.map((row) =>
+        row.linked_session_id === "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+          ? { ...row, is_job_assigned: true }
+          : row,
+      ),
+    });
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    await page.getByTestId("compare-select-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").check();
+    await page.getByTestId("compare-select-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").check();
+
+    const assignedRow = page.getByTestId("assignment-submission-row-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    await expect(assignedRow.getByTestId("submission-assigned-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveText(
+      "Selected Estimate",
+    );
+
+    const assignedCard = page.getByTestId("compare-card-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    await expect(assignedCard.getByTestId("compare-assigned-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(assignedCard.getByTestId("compare-download-pdfs-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toBeVisible();
+    await expect(assignedCard.getByText("Download PDFs")).toBeVisible();
+    await expect(assignedCard.getByTestId("download-pdf-client-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveText(
+      "Download Client PDF",
+    );
+    await expect(assignedCard.getByTestId("download-pdf-internal-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveText(
+      "Internal PDF",
+    );
+    await expect(assignedCard.getByTestId("download-pdf-combined-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveText(
+      "Full Estimate",
+    );
+    await expect(assignedCard.getByTestId("download-pdf-all-trades-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveText(
+      "All Trades",
+    );
+    await expect(
+      assignedCard.getByTestId("compare-download-pdfs-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").locator(".grid-cols-2"),
+    ).toHaveCount(0);
+    await expect(assignedCard.getByText("All Trades Combined PDF")).toHaveCount(0);
+    await expect(assignedCard.getByTestId("assign-job-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveCount(0);
+
+    const otherCard = page.getByTestId("compare-card-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    await expect(otherCard.getByTestId("compare-job-assigned-elsewhere-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toContainText(
+      "Selected estimate: Rohit",
+    );
+    await expect(otherCard.getByTestId("assign-job-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toHaveCount(0);
+    await expect(page.getByTestId("quote-group-job-assignment")).toContainText("Rohit — £174.24");
+    await expect(page.getByText("Assign Job", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("Assigned Job", { exact: false })).toHaveCount(0);
+
+    for (const label of ["session_token", "assignment_token", "raw_payload", "profit", "margin", "denominator"]) {
+      await expect(page.getByText(label, { exact: false })).toHaveCount(0);
+    }
+  });
+
+  test("PDF download buttons trigger manager PDF endpoints", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    const sessionId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const downloadedViews: string[] = [];
+
+    await mockComparableGroupDetailApi(page, {
+      ...COMPARABLE_GROUP_DETAIL,
+      job_assignment_decision: {
+        id: 1,
+        selected_session_id: sessionId,
+        assignee_name: "Rohit",
+        assignee_email: "rohit@example.com",
+        assignment_id: null,
+        assigned_at: "2026-06-06T10:00:00Z",
+      },
+      assignment_submissions: COMPARABLE_GROUP_DETAIL.assignment_submissions.map((row) =>
+        row.linked_session_id === sessionId ? { ...row, is_job_assigned: true } : row,
+      ),
+    });
+
+    await page.route(`**/api/v1/manager/quotes/${sessionId}/pdf/*`, async (route) => {
+      const view = route.request().url().split("/pdf/")[1]?.split("?")[0] ?? "";
+      downloadedViews.push(view);
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'attachment; filename="Q22100_Client_view.pdf"',
+        },
+        body: Buffer.from("%PDF-1.4 test"),
+      });
+    });
+
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+    await page.getByTestId(`compare-select-${sessionId}`).check();
+
+    await page.getByTestId(`download-pdf-client-${sessionId}`).click();
+    await page.getByTestId(`download-pdf-internal-${sessionId}`).click();
+    await page.getByTestId(`download-pdf-combined-${sessionId}`).click();
+    await page.getByTestId(`download-pdf-all-trades-${sessionId}`).click();
+
+    await expect.poll(() => downloadedViews.sort().join(",")).toBe("all-trades,client,combined,internal");
   });
 });

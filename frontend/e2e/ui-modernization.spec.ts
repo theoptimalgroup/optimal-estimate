@@ -244,12 +244,19 @@ test.describe("Phase 21 UI modernization smoke tests", () => {
     await expect(page.getByTestId("estimator-dashboard-page")).toBeVisible({ timeout: 15000 });
   });
 
-  test("/engineer/jobs still loads with mocked auth", async ({ page }) => {
+  test("/engineer/assigned-estimates still loads with mocked auth", async ({ page }) => {
+    await mockAuthMe(page, "engineer");
+    await page.goto("/engineer/assigned-estimates");
+    await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("engineer-advanced-session")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Assigned Estimates", level: 1 })).toBeVisible();
+  });
+
+  test("legacy /engineer/jobs redirects to assigned estimates", async ({ page }) => {
     await mockAuthMe(page, "engineer");
     await page.goto("/engineer/jobs");
-    await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByTestId("engineer-open-session-card")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "My Jobs" })).toBeVisible();
+    await page.waitForURL("**/engineer/assigned-estimates");
+    await expect(page.getByRole("heading", { name: "Assigned Estimates", level: 1 })).toBeVisible();
   });
 
   test("/client/quote mocked page hides forbidden strings", async ({ page }) => {

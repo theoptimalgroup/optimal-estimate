@@ -6,8 +6,12 @@ export default function EngineerSiteNotesPage() {
       testId="engineer-site-notes-placeholder"
       title="Site Visit Notes"
       message="Site notes are currently captured inside each assigned job."
-      primaryAction={{ label: "Go to My Jobs", href: "/engineer/jobs", testId: "engineer-site-notes-go-jobs" }}
-      workflowNote="Open a job from My Jobs to add or review site visit notes for that assignment."
+      primaryAction={{
+        label: "Go to Assigned Estimates",
+        href: "/engineer/assigned-estimates",
+        testId: "engineer-site-notes-go-jobs",
+      }}
+      workflowNote="Open an assignment to add or review site visit notes."
     />
   );
 }

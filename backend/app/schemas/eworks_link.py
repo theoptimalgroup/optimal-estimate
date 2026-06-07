@@ -407,6 +407,11 @@ class CalculationSessionRead(BaseModel):
     resolved: ResolvedRuleInfo
     expires_at: datetime
     ui_state: SessionUiState | None = None
+    status: str = "in_progress"
+    locked: bool = False
+    revision_in_progress: bool = False
+    active_revision_reason: str | None = None
+    current_version_number: int = 0
 
 
 class AggregatedQuoteSummary(BaseModel):
@@ -434,6 +439,8 @@ class CalculateSessionResponse(BaseModel):
 
 class SubmitSessionResponse(BaseModel):
     submitted: bool = True
+    version_number: int | None = None
+    revision: bool = False
 
 
 class RewordScopeRequest(BaseModel):
@@ -507,6 +514,13 @@ class DashboardQuoteItem(BaseModel):
     breakdown: DashboardQuoteSummaryBreakdown | None = None
     works: list[DashboardWorkItem] = Field(default_factory=list)
     acceptance: QuoteAcceptanceStatusRead = Field(default_factory=QuoteAcceptanceStatusRead)
+    status: str = "submitted"
+    locked: bool = True
+    current_version_number: int = 1
+    revision_in_progress: bool = False
+    active_revision_reason: str | None = None
+    can_revise: bool = False
+    can_continue_revision: bool = False
 
 
 class DashboardQuotesResponse(BaseModel):
@@ -531,7 +545,7 @@ class CombineWorkNotesResponse(BaseModel):
 
 class CombinedPdfRequest(BaseModel):
     work_indexes: list[int] = Field(min_length=1)
-    view_type: Literal["client", "optimal"] = "client"
+    view_type: Literal["client", "optimal", "all_trades"] = "client"
 
 
 def step2_to_calculation_inputs(

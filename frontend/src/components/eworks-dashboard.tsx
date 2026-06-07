@@ -424,8 +424,12 @@ export function CombinedNotesModal({
   title = "Combined internal notes",
   onDownloadClient,
   onDownloadOptimal,
+  onDownloadFullEstimate,
+  onDownloadAllTrades,
   downloadingClient = false,
   downloadingOptimal = false,
+  downloadingFullEstimate = false,
+  downloadingAllTrades = false,
   pdfError = null,
 }: {
   notesText: string;
@@ -433,8 +437,12 @@ export function CombinedNotesModal({
   title?: string;
   onDownloadClient?: () => void | Promise<void>;
   onDownloadOptimal?: () => void | Promise<void>;
+  onDownloadFullEstimate?: () => void | Promise<void>;
+  onDownloadAllTrades?: () => void | Promise<void>;
   downloadingClient?: boolean;
   downloadingOptimal?: boolean;
+  downloadingFullEstimate?: boolean;
+  downloadingAllTrades?: boolean;
   pdfError?: string | null;
 }) {
   const [copied, setCopied] = useState(false);
@@ -484,8 +492,9 @@ export function CombinedNotesModal({
               variant="secondary"
               disabled={downloadingClient}
               onClick={() => void onDownloadClient()}
+              data-testid="combined-notes-download-client-pdf"
             >
-              {downloadingClient ? "Generating…" : "Download Client View PDF"}
+              {downloadingClient ? "Generating…" : "Client PDF"}
             </EworksButton>
           )}
           {onDownloadOptimal && (
@@ -493,8 +502,29 @@ export function CombinedNotesModal({
               variant="secondary"
               disabled={downloadingOptimal}
               onClick={() => void onDownloadOptimal()}
+              data-testid="combined-notes-download-internal-pdf"
             >
-              {downloadingOptimal ? "Generating…" : "Download Optimal View PDF"}
+              {downloadingOptimal ? "Generating…" : "Internal PDF"}
+            </EworksButton>
+          )}
+          {onDownloadFullEstimate && (
+            <EworksButton
+              variant="secondary"
+              disabled={downloadingFullEstimate}
+              onClick={() => void onDownloadFullEstimate()}
+              data-testid="combined-notes-download-full-estimate-pdf"
+            >
+              {downloadingFullEstimate ? "Generating…" : "Full Estimate PDF"}
+            </EworksButton>
+          )}
+          {onDownloadAllTrades && (
+            <EworksButton
+              variant="secondary"
+              disabled={downloadingAllTrades}
+              onClick={() => void onDownloadAllTrades()}
+              data-testid="combined-notes-download-all-trades-pdf"
+            >
+              {downloadingAllTrades ? "Generating…" : "All Trades PDF"}
             </EworksButton>
           )}
           <EworksButton onClick={onClose}>Close</EworksButton>

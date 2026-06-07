@@ -148,6 +148,34 @@
       min-height: 72px;
     }
 
+    .rich-text {
+      white-space: normal;
+    }
+
+    .rich-text strong,
+    .rich-text b {
+      font-weight: 700;
+    }
+
+    .rich-text em,
+    .rich-text i {
+      font-style: italic;
+    }
+
+    .rich-text u {
+      text-decoration: underline;
+    }
+
+    .rich-text p {
+      margin: 0 0 0.5em;
+    }
+
+    .rich-text ul,
+    .rich-text ol {
+      margin: 0.25em 0 0.5em 1.25em;
+      padding: 0;
+    }
+
     .work-card {
       border: 1px solid rgba(255, 255, 255, 0.12);
       background: #141414;
@@ -379,10 +407,10 @@
     </div>
 
     <p class="section-title">Description of what quoting for</p>
-    <div class="field-box tall">{{ quote_description }}</div>
+    <div class="field-box tall rich-text">{% if quote_description_html %}{{ quote_description_html | safe }}{% else %}{{ quote_description }}{% endif %}</div>
 
     <p class="section-title">Findings Report for what has been requested</p>
-    <div class="field-box tall">{{ findings_report }}</div>
+    <div class="field-box tall rich-text">{% if findings_report_html %}{{ findings_report_html | safe }}{% else %}{{ findings_report }}{% endif %}</div>
 
     <p class="muted">Trade: {{ trade_name }}</p>
     <div class="page-footer">-- 1 of {{ total_pages }} --</div>
@@ -402,7 +430,7 @@
       <h2 class="work-card-title">{{ work.title }}{% if work.product_label %} — {{ work.product_label }}{% endif %}</h2>
 
       <p class="section-title">Scope of Works</p>
-      <div class="field-box tall">{{ work.scope }}</div>
+      <div class="field-box tall rich-text">{% if work.scope_html %}{{ work.scope_html | safe }}{% else %}{{ work.scope }}{% endif %}</div>
 
       <p class="section-title">Materials to Order and Cost</p>
       {% for supplier in work.material_suppliers %}
@@ -544,7 +572,7 @@
       {% endif %}
 
       <p class="section-title">Any Other Notes</p>
-      <div class="field-box">{{ work.other_notes }}</div>
+      <div class="field-box rich-text">{% if work.other_notes_html %}{{ work.other_notes_html | safe }}{% else %}{{ work.other_notes }}{% endif %}</div>
     </div>
     {% endfor %}
 
@@ -621,7 +649,7 @@
       </div>
       {% if work.internal_notes %}
       <p class="section-title">Internal notes</p>
-      <div class="notes-block">{{ work.internal_notes }}</div>
+      <div class="notes-block rich-text">{% if work.internal_notes_html %}{{ work.internal_notes_html | safe }}{% else %}{{ work.internal_notes }}{% endif %}</div>
       {% endif %}
     </div>
     {% endfor %}
@@ -687,7 +715,7 @@
       <div class="doc-header-brand">OPTIMAL GROUP</div>
     </div>
 
-    <div class="notes-block">{{ results.internal_notes }}</div>
+    <div class="notes-block rich-text">{% if results.internal_notes_html %}{{ results.internal_notes_html | safe }}{% else %}{{ results.internal_notes }}{% endif %}</div>
 
     <div class="page-footer">-- {{ notes_page }} of {{ total_pages }} --</div>
   </section>

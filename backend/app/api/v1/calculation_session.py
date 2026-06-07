@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Uplo
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import AuthenticatedUser, require_roles
+from app.auth.dependencies import AuthenticatedUser, require_roles, try_get_optional_current_user
 from app.core.config import settings
 from app.core.security import UserRole
 from app.db.session import DbSession
 from app.core.exceptions import AppError, success_response
+from app.schemas.calculation_session_revision import ReviseEstimateRequest, ReviseEstimateResponse
 from app.schemas.eworks_link import (
     CalculateSessionRequest,
     CalculateSessionResponse,
@@ -31,6 +32,7 @@ from app.schemas.eworks_link import (
 from app.services.audit_helpers import record_audit
 from app.services.manual_calculation_session_service import create_manual_calculation_session
 from app.services.calculation_session_pdf_service import render_session_quote_pdf
+from app.services.calculation_session_revision_service import start_estimate_revision
 from app.services.calculation_session_service import (
     add_session_attachment,
     calculate_session,
@@ -50,6 +52,8 @@ StaffEstimateCreator = Annotated[
     Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.ESTIMATOR)),
 ]
 
+OptionalStaffUser = Annotated[AuthenticatedUser | None, Depends(try_get_optional_current_user)]
+
 
 def _session_read(db: Session, session) -> CalculationSessionRead:
     from app.services.calculation_session_service import _resolved_from_session
@@ -63,6 +67,11 @@ def _session_read(db: Session, session) -> CalculationSessionRead:
         resolved=_resolved_from_session(db, session),
         expires_at=session.expires_at,
         ui_state=ui_state,
+        status=session.status,
+        locked=session.locked,
+        revision_in_progress=session.revision_in_progress,
+        active_revision_reason=session.active_revision_reason,
+        current_version_number=session.current_version_number,
     )
 
 
@@ -247,6 +256,43 @@ def reword_scope(
     return success_response(RewordScopeResponse(reworded_text=reworded_text))
 
 
+@router.post("/{session_id}/revise")
+def revise_estimate(
+    session_id: UUID,
+    payload: ReviseEstimateRequest,
+    db: DbSession,
+    session=Depends(_require_session_token),
+    actor: OptionalStaffUser = None,
+):
+    if actor is not None and actor.role not in {UserRole.ADMIN, UserRole.ESTIMATOR, UserRole.ENGINEER}:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    try:
+        owner_user_id = UUID(str(actor.id)) if actor is not None else None
+        result = start_estimate_revision(
+            db,
+            session_id=session_id,
+            session_token=session.session_token,
+            payload=payload,
+            owner_user_id=owner_user_id,
+        )
+        record_audit(
+            db,
+            actor=actor,
+            action="estimate_revision_started",
+            entity_type="calculation_session",
+            entity_id=session_id,
+            after={
+                "revision_in_progress": True,
+                "active_revision_reason": payload.reason.strip(),
+                "current_version_number": result.current_version_number,
+            },
+        )
+        db.commit()
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return success_response(ReviseEstimateResponse.model_validate(result))
+
+
 @router.post("/{session_id}/submit")
 def submit_quote(
     session_id: UUID,
@@ -255,6 +301,8 @@ def submit_quote(
     body: CalculateSessionRequest | None = None,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
+    was_revision = session.revision_in_progress
+    previous_version = session.current_version_number
     try:
         submit_session(
             db,
@@ -263,10 +311,28 @@ def submit_quote(
             step2=body.step2 if body else None,
             idempotency_key=idempotency_key,
         )
+        session = get_session_by_token(db, session_id, session.session_token)
+        record_audit(
+            db,
+            actor=None,
+            action="estimate_revision_submitted" if was_revision else "estimate_submitted",
+            entity_type="calculation_session",
+            entity_id=session_id,
+            after={
+                "version_number": session.current_version_number,
+                "revision": was_revision,
+            },
+        )
         db.commit()
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    return success_response(SubmitSessionResponse())
+    return success_response(
+        SubmitSessionResponse(
+            submitted=True,
+            version_number=session.current_version_number,
+            revision=was_revision and session.current_version_number > max(previous_version, 0),
+        )
+    )
 
 
 @router.post("/{session_id}/calculate")

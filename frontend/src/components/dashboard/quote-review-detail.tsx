@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -15,6 +14,7 @@ import {
 import { ClientLinkPanel } from "@/components/dashboard/client-link-panel";
 import { QuoteAcceptancePanel } from "@/components/quote-acceptance-panel";
 import {
+  BackLink,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -26,22 +26,49 @@ import {
 } from "@/components/ui";
 import { retryEworksAcceptanceSync } from "@/lib/client-quotes";
 import { normalizeQuoteAcceptance } from "@/lib/quote-acceptance";
-import {
-  EworksButton,
-  DashboardPageShell,
-  EworksSectionTitle,
-  cn,
-} from "@/components/eworks-ui";
+import { DashboardPageShell, EworksSectionTitle, cn } from "@/components/eworks-ui";
 import type { DashboardClient } from "@/lib/dashboard-client";
 import type { DashboardQuoteItem, ReopenQuoteResponse } from "@/lib/dashboard";
+import { downloadManagerQuotePdf } from "@/lib/dashboard-auth";
 import { downloadSessionPdf } from "@/lib/eworks-session";
 import { defaultOpenWorkIndexes, formatQuoteSummaryTitle } from "@/lib/work-label";
+
+function defaultBackLabel(backHref: string): string {
+  if (backHref === "/manager/review" || backHref.startsWith("/manager/review?")) {
+    return "Back to Quote Review";
+  }
+  if (backHref === "/manager/quotes" || backHref.startsWith("/manager/quotes")) {
+    return "Back to Quotes";
+  }
+  if (backHref === "/manager/dashboard" || backHref.startsWith("/manager/dashboard")) {
+    return "Back to Dashboard";
+  }
+  if (backHref === "/eworks/dashboard" || backHref.startsWith("/eworks/dashboard")) {
+    return "Back to Dashboard";
+  }
+  if (backHref === "/estimator/dashboard" || backHref.startsWith("/estimator/dashboard")) {
+    return "Back to Estimator Dashboard";
+  }
+  if (backHref === "/estimator/quotes" || backHref.startsWith("/estimator/quotes")) {
+    return "Back to Quotes";
+  }
+  if (
+    backHref === "/engineer/assigned-estimates" ||
+    backHref.startsWith("/engineer/assigned-estimates") ||
+    backHref === "/engineer/jobs" ||
+    backHref.startsWith("/engineer/jobs")
+  ) {
+    return "Back to Assigned Estimates";
+  }
+  return "Back to Dashboard";
+}
 
 type QuoteReviewDetailProps = {
   sessionId: string;
   client: DashboardClient;
   backHref: string;
   listHref: string;
+  backLabel?: string;
   onUnlockSuccess?: (reopened: ReopenQuoteResponse, quote: DashboardQuoteItem) => void;
   shell?: "dashboard" | "embedded";
   enableClientLink?: boolean;
@@ -53,11 +80,13 @@ export function QuoteReviewDetail({
   client,
   backHref,
   listHref,
+  backLabel,
   onUnlockSuccess,
   shell = "dashboard",
   enableClientLink = false,
   showClientAcceptance = false,
 }: QuoteReviewDetailProps) {
+  const resolvedBackLabel = backLabel ?? defaultBackLabel(backHref);
   const router = useRouter();
   const [quote, setQuote] = useState<DashboardQuoteItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,6 +101,8 @@ export function QuoteReviewDetail({
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingClientPdf, setDownloadingClientPdf] = useState(false);
   const [downloadingOptimalPdf, setDownloadingOptimalPdf] = useState(false);
+  const [downloadingFullEstimatePdf, setDownloadingFullEstimatePdf] = useState(false);
+  const [downloadingAllTradesPdf, setDownloadingAllTradesPdf] = useState(false);
   const [combinedPdfError, setCombinedPdfError] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [refilling, setRefilling] = useState(false);
@@ -144,9 +175,14 @@ export function QuoteReviewDetail({
     }
   };
 
-  const handleDownloadCombinedPdf = async (viewType: "client" | "optimal") => {
+  const handleDownloadCombinedPdf = async (viewType: "client" | "optimal" | "all_trades") => {
     if (!quote || selectedWorks.size === 0) return;
-    const setLoadingState = viewType === "client" ? setDownloadingClientPdf : setDownloadingOptimalPdf;
+    const setLoadingState =
+      viewType === "client"
+        ? setDownloadingClientPdf
+        : viewType === "optimal"
+          ? setDownloadingOptimalPdf
+          : setDownloadingAllTradesPdf;
     setLoadingState(true);
     setCombinedPdfError(null);
     try {
@@ -160,6 +196,23 @@ export function QuoteReviewDetail({
       setCombinedPdfError(err instanceof Error ? err.message : "PDF download failed");
     } finally {
       setLoadingState(false);
+    }
+  };
+
+  const handleDownloadFullEstimatePdf = async () => {
+    if (!quote) return;
+    setDownloadingFullEstimatePdf(true);
+    setCombinedPdfError(null);
+    try {
+      if (client.mode === "role") {
+        await downloadManagerQuotePdf(quote.session_id, "combined", quote.quote_number);
+      } else {
+        await downloadSessionPdf(quote.session_id, quote.session_token);
+      }
+    } catch (err) {
+      setCombinedPdfError(err instanceof Error ? err.message : "PDF download failed");
+    } finally {
+      setDownloadingFullEstimatePdf(false);
     }
   };
 
@@ -240,11 +293,7 @@ export function QuoteReviewDetail({
         <EmptyState
           title="Quote not found"
           description="The requested quote is not available or has been removed."
-          action={
-            <Link href={backHref}>
-              <SecondaryButton>Back to quotes</SecondaryButton>
-            </Link>
-          }
+          action={<BackLink href={backHref} label={resolvedBackLabel} className="mb-0" />}
         />
       );
     }
@@ -359,8 +408,12 @@ export function QuoteReviewDetail({
             onClose={() => setShowNotesModal(false)}
             onDownloadClient={() => handleDownloadCombinedPdf("client")}
             onDownloadOptimal={() => handleDownloadCombinedPdf("optimal")}
+            onDownloadFullEstimate={() => void handleDownloadFullEstimatePdf()}
+            onDownloadAllTrades={() => handleDownloadCombinedPdf("all_trades")}
             downloadingClient={downloadingClientPdf}
             downloadingOptimal={downloadingOptimalPdf}
+            downloadingFullEstimate={downloadingFullEstimatePdf}
+            downloadingAllTrades={downloadingAllTradesPdf}
             pdfError={combinedPdfError}
           />
         )}
@@ -381,34 +434,9 @@ export function QuoteReviewDetail({
     ) : null;
 
   const footer =
-    quote && !loading && !notFound && !error && !unlockMessage ? (
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href={backHref}>
-          <EworksButton variant="secondary">Back to quotes</EworksButton>
-        </Link>
-        {actionButtons}
-      </div>
+    quote && !loading && !notFound && !error && !unlockMessage && actionButtons ? (
+      <div className="flex flex-wrap items-center justify-end gap-3">{actionButtons}</div>
     ) : undefined;
-
-  if (shell === "embedded") {
-    return (
-      <div className="space-y-6" data-testid="manager-quote-review-detail">
-        <Link href={backHref} className="text-sm font-medium text-blue-600 hover:text-blue-700">
-          ← Back to quotes
-        </Link>
-        {quote && !loading && !notFound && !error && !unlockMessage ? (
-          <PageHeader
-            title={`Quote ${quote.quote_number}`}
-            description={`Job ${quote.job_number} · ${quote.client_name}`}
-            actions={actionButtons}
-          />
-        ) : (
-          <PageHeader title="Quote details" />
-        )}
-        {content}
-      </div>
-    );
-  }
 
   const title =
     unlockMessage
@@ -431,8 +459,28 @@ export function QuoteReviewDetail({
           ? "Unable to load quote"
           : `Job ${quote.job_number} · ${quote.client_name}`);
 
+  if (shell === "embedded") {
+    return (
+      <div className="space-y-6" data-testid="manager-quote-review-detail">
+        <PageHeader
+          backHref={backHref}
+          backLabel={resolvedBackLabel}
+          title={title}
+          subtitle={subtitle}
+          actions={actionButtons ?? undefined}
+        />
+        {content}
+      </div>
+    );
+  }
+
   return (
-    <DashboardPageShell title={title} subtitle={subtitle} footer={footer}>
+    <DashboardPageShell
+      title={title}
+      subtitle={subtitle}
+      footer={footer}
+      backLink={<BackLink href={backHref} label={resolvedBackLabel} />}
+    >
       {content}
     </DashboardPageShell>
   );

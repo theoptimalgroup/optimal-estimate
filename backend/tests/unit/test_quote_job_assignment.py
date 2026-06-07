@@ -26,11 +26,11 @@ from app.models.trade import Trade
 from app.models.user import User
 
 
-def _patch_dev_user(mock_settings, *, role: str):
+def _patch_dev_user(mock_settings, *, role: str, email: str | None = None):
     mock_settings.auth_provider = "dev"
     mock_settings.dev_auth_enabled = True
     mock_settings.dev_user_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    mock_settings.dev_user_email = "staff@optimal.example"
+    mock_settings.dev_user_email = email or "staff@optimal.example"
     mock_settings.dev_user_name = "Staff User"
     mock_settings.dev_user_role = role
     mock_settings.dev_user_is_active = True
@@ -325,7 +325,7 @@ def test_assign_job_creates_audit_event(mock_settings, assign_api_client, assign
     )
     assert response.status_code == 200
 
-    audit = db_session.query(AuditLog).filter(AuditLog.action == "quote_job_assigned").one()
+    audit = db_session.query(AuditLog).filter(AuditLog.action == "quote_estimate_selected").one()
     assert audit.entity_type == "quote_job_assignment"
     assert audit.new_value is not None
     assert "session_token" not in (audit.new_value or {})
@@ -416,3 +416,82 @@ def test_group_detail_comparison_summary_has_breakdown(mock_settings, assign_api
     assert summary["additional_charges"][1]["amount"] == "0"
     assert "ULEZ" not in response.text
     assert "Waste Disposal" not in response.text
+
+
+@patch("app.auth.dependencies.settings")
+def test_engineer_lists_own_assigned_jobs(mock_settings, assign_api_client, assign_db_session):
+    _, session_a, _, assignment = assign_db_session
+
+    _patch_dev_user(mock_settings, role="manager")
+    assign_resp = assign_api_client.post(
+        "/api/v1/manager/quotes/Q22100/assign-job",
+        json={
+            "selected_session_id": str(session_a),
+            "assignee_name": "Rohit",
+            "assignee_email": "rohit@example.com",
+            "assignment_id": assignment.id,
+        },
+    )
+    assert assign_resp.status_code == 200
+
+    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com")
+    response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
+    assert response.status_code == 200
+    items = response.json()["data"]
+    assert len(items) == 1
+    assert items[0]["quote_ref"] == "Q22100"
+    assert items[0]["selected_session_id"] == str(session_a)
+    assert items[0]["selected_estimate_total"] == "100.00"
+    assert items[0]["customer_name"] == "ACME Ltd"
+    assert items[0]["status"] == "assigned"
+
+
+@patch("app.auth.dependencies.settings")
+def test_engineer_does_not_see_other_engineers_jobs(mock_settings, assign_api_client, assign_db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _, session_a, _, assignment = assign_db_session
+
+    assign_api_client.post(
+        "/api/v1/manager/quotes/Q22100/assign-job",
+        json={
+            "selected_session_id": str(session_a),
+            "assignee_name": "Other Engineer",
+            "assignee_email": "other@example.com",
+        },
+    )
+
+    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com")
+    response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
+    assert response.status_code == 200
+    assert response.json()["data"] == []
+
+
+@patch("app.auth.dependencies.settings")
+def test_engineer_assigned_jobs_unauthenticated_blocked(mock_settings, assign_api_client):
+    mock_settings.auth_provider = "dev"
+    mock_settings.dev_auth_enabled = False
+    response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
+    assert response.status_code == 401
+
+
+@patch("app.auth.dependencies.settings")
+def test_engineer_assigned_jobs_response_excludes_tokens(mock_settings, assign_api_client, assign_db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _, session_a, _, assignment = assign_db_session
+
+    assign_api_client.post(
+        "/api/v1/manager/quotes/Q22100/assign-job",
+        json={
+            "selected_session_id": str(session_a),
+            "assignee_name": "Rohit",
+            "assignee_email": "rohit@example.com",
+            "assignment_id": assignment.id,
+        },
+    )
+
+    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com")
+    response = assign_api_client.get("/api/v1/engineer/jobs/assigned")
+    body = response.text
+    assert response.status_code == 200
+    for forbidden in ("session_token", "assignment_token", "raw_payload", "profit", "margin", "formula", "denominator"):
+        assert forbidden not in body

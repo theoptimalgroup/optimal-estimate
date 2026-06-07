@@ -27,10 +27,10 @@
         {% for item in items %}
         <tr>
           <td class="num">{{ item.index }}</td>
-          <td>{{ item.description }}</td>
-          <td>{{ item.findings }}</td>
-          <td>{{ item.scope }}</td>
-          <td>{{ item.notes_exclusions }}</td>
+          <td class="rich-text">{% if item.description_html %}{{ item.description_html | safe }}{% else %}{{ item.description }}{% endif %}</td>
+          <td class="rich-text">{% if item.findings_html %}{{ item.findings_html | safe }}{% else %}{{ item.findings }}{% endif %}</td>
+          <td class="rich-text">{% if item.scope_html %}{{ item.scope_html | safe }}{% else %}{{ item.scope }}{% endif %}</td>
+          <td class="rich-text">{% if item.notes_exclusions_html %}{{ item.notes_exclusions_html | safe }}{% else %}{{ item.notes_exclusions }}{% endif %}</td>
           <td class="num">{{ item.quoted_price }}</td>
         </tr>
         {% endfor %}

@@ -94,10 +94,10 @@
           {% for item in items %}
           <tr>
             <td class="num">{{ item.index }}</td>
-            <td>{{ item.description }}</td>
-            <td>{{ item.findings }}</td>
-            <td>{{ item.scope }}</td>
-            <td>{{ item.notes_exclusions }}</td>
+            <td class="rich-text">{% if item.description_html %}{{ item.description_html | safe }}{% else %}{{ item.description }}{% endif %}</td>
+            <td class="rich-text">{% if item.findings_html %}{{ item.findings_html | safe }}{% else %}{{ item.findings }}{% endif %}</td>
+            <td class="rich-text">{% if item.scope_html %}{{ item.scope_html | safe }}{% else %}{{ item.scope }}{% endif %}</td>
+            <td class="rich-text">{% if item.notes_exclusions_html %}{{ item.notes_exclusions_html | safe }}{% else %}{{ item.notes_exclusions }}{% endif %}</td>
             <td class="num">{{ item.material_cost }}</td>
             <td class="num">{{ item.labour_charge }}</td>
             <td class="num">{{ item.materials_charge }}</td>
@@ -105,7 +105,7 @@
             <td class="num">{{ item.optimal_cost }}</td>
             <td class="num">{{ item.profit_gbp }}</td>
             <td class="num">{{ item.margin_pct }}</td>
-            <td>{{ item.internal_notes }}</td>
+            <td class="rich-text">{% if item.internal_notes_html %}{{ item.internal_notes_html | safe }}{% else %}{{ item.internal_notes }}{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>

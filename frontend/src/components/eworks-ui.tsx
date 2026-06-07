@@ -280,12 +280,14 @@ export function DashboardPageShell({
   meta,
   children,
   footer,
+  backLink,
 }: {
   title: string;
   subtitle?: string;
   meta?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
+  backLink?: ReactNode;
 }) {
   return (
     <div className="min-h-screen bg-slate-50">
@@ -293,6 +295,7 @@ export function DashboardPageShell({
         <div className="mx-auto w-full px-6 py-6 lg:px-8 lg:py-7">
           <div className="flex items-start justify-between gap-6">
             <div className="min-w-0 flex-1 space-y-1.5">
+              {backLink}
               <h1 className="text-2xl font-bold uppercase tracking-wide text-slate-900 lg:text-3xl">{title}</h1>
               {subtitle && <p className="text-sm text-slate-600 lg:text-base">{subtitle}</p>}
               {meta && <div className="pt-0.5 text-xs text-slate-500">{meta}</div>}

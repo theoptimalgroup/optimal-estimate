@@ -28,7 +28,8 @@ export function DevAuthStatus() {
   if (!user) {
     return (
       <p className="text-xs text-gray-500" data-testid="dev-auth-status">
-        Dev Auth: not authenticated (enable DEV_AUTH_ENABLED on backend)
+        Dev Auth: not authenticated — check Configuration below (dev backend needs DEV_AUTH_ENABLED; azure
+        backend needs sign-in at /login)
       </p>
     );
   }

@@ -263,7 +263,11 @@ export function QuoteGroupAssignmentSubmissionsTable({
             return (
               <tr
                 key={rowKey}
-                className="transition-colors hover:bg-slate-50"
+                className={
+                  row.is_job_assigned
+                    ? "border-l-4 border-emerald-500 bg-emerald-50/70 transition-colors hover:bg-emerald-50"
+                    : "transition-colors hover:bg-slate-50"
+                }
                 data-testid={`assignment-submission-row-${statusId}`}
               >
                 {onToggleSelect ? (
@@ -317,8 +321,8 @@ export function QuoteGroupAssignmentSubmissionsTable({
                   )}
                   {row.is_job_assigned ? (
                     <div className="mt-1">
-                      <StatusBadge tone="info" data-testid={`submission-assigned-job-${sessionId}`}>
-                        Assigned Job
+                      <StatusBadge tone="success" data-testid={`submission-assigned-job-${sessionId}`}>
+                        Selected Estimate
                       </StatusBadge>
                     </div>
                   ) : null}

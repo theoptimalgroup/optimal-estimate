@@ -26,3 +26,17 @@ class QuoteJobAssignmentDecisionRead(BaseModel):
 
 class AssignQuoteJobResponse(BaseModel):
     decision: QuoteJobAssignmentDecisionRead
+
+
+class EngineerAssignedJobRead(BaseModel):
+    id: int
+    quote_ref: str | None = None
+    eworks_quote_id: int | None = None
+    job_ref: str | None = None
+    customer_name: str | None = None
+    address: str | None = None
+    selected_at: datetime
+    selected_estimate_total: str | None = None
+    selected_session_id: UUID
+    status: str = "assigned"
+    assignment_id: int | None = None

@@ -48,6 +48,13 @@ export type QuoteAssignment = {
   has_calculation_session?: boolean;
   calculation_session_id?: string | null;
   can_start_estimate?: boolean;
+  submitted_at?: string | null;
+  final_total?: string | null;
+  current_version_number?: number | null;
+  revision_in_progress?: boolean;
+  active_revision_reason?: string | null;
+  can_revise?: boolean;
+  can_continue_revision?: boolean;
 };
 
 export type AssignmentStartEstimateResult = {
@@ -169,6 +176,49 @@ export async function submitPublicAssignment(
     null,
   );
   return resp.data;
+}
+
+export function formatAssignmentStatusLabel(status: AssignmentStatus | string): string {
+  switch (status) {
+    case "assigned":
+      return "Assigned";
+    case "in_progress":
+      return "In Progress";
+    case "submitted":
+      return "Submitted";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return status.replace(/_/g, " ");
+  }
+}
+
+export function assignmentStatusTone(
+  status: AssignmentStatus | string,
+): "warning" | "info" | "success" | "error" | "neutral" {
+  switch (status) {
+    case "assigned":
+      return "warning";
+    case "in_progress":
+      return "info";
+    case "submitted":
+      return "success";
+    case "cancelled":
+      return "error";
+    default:
+      return "neutral";
+  }
+}
+
+export function formatAssignedAt(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(date);
 }
 
 export function buildAssignmentLink(link: string | null | undefined): string {

@@ -1,4 +1,4 @@
-"""Service for manager quote job assignment decisions."""
+"""Service for manager selected-estimate decisions (local only; not eWorks job assignment)."""
 
 from __future__ import annotations
 
@@ -21,14 +21,15 @@ from app.schemas.dashboard_quote_groups import (
 from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot
 from app.schemas.quote_job_assignment import AssignQuoteJobRequest, QuoteJobAssignmentDecisionRead
 from app.services.audit_helpers import record_audit, snapshot_model
-from app.services.quote_assignment_service import _as_uuid
 from app.services.calculation_session_service import (
     _dashboard_last_result,
     _dashboard_quote_summary_breakdown,
     _quote_group_identity,
     _resolve_work_product_fields,
+    _session_final_total,
     _work_subtotals_from_breakdown,
 )
+from app.services.quote_assignment_service import _as_uuid
 
 
 def _normalize_quote_ref(value: str | None) -> str | None:
@@ -319,7 +320,7 @@ def assign_quote_job(
     record_audit(
         db,
         actor=actor,
-        action="quote_job_assigned",
+        action="quote_estimate_selected",
         entity_type="quote_job_assignment",
         entity_id=row.id,
         before=before,
@@ -332,8 +333,86 @@ def assign_quote_job(
         },
     )
 
-    # TODO: Phase 2 — push job assignment decision to eWorks when integration is ready.
+    # TODO: Phase 2 — push selected estimate decision to eWorks when integration is ready.
 
     db.commit()
     db.refresh(row)
     return build_job_assignment_decision_read(db, row)
+
+
+def _engineer_owns_job_assignment(
+    db: Session,
+    row: QuoteJobAssignment,
+    *,
+    user_id: UUID,
+    user_email: str,
+) -> bool:
+    assignee_email = (row.assignee_email or "").strip().lower()
+    if assignee_email:
+        return assignee_email == user_email
+    if row.assignment_id is not None:
+        assignment = db.get(EworksQuoteAssignment, row.assignment_id)
+        if assignment is not None and assignment.assigned_user_id == user_id:
+            return True
+    return False
+
+
+def _quote_customer_and_address(db: Session, row: QuoteJobAssignment, step1: Step1Snapshot) -> tuple[str | None, str | None]:
+    customer_name = (step1.client_name or "").strip() or None
+    address = (step1.property_address or "").strip() or None
+    if row.eworks_quote_id is not None:
+        from app.models.eworks_sync import EworksQuote
+
+        quote = (
+            db.query(EworksQuote)
+            .filter(EworksQuote.eworks_quote_id == row.eworks_quote_id)
+            .order_by(EworksQuote.id.desc())
+            .first()
+        )
+        if quote is not None:
+            if not customer_name and quote.customer_name:
+                customer_name = quote.customer_name.strip() or None
+            if not address and isinstance(quote.raw_payload, dict):
+                raw_address = quote.raw_payload.get("site_address") or quote.raw_payload.get("address")
+                if isinstance(raw_address, str) and raw_address.strip():
+                    address = raw_address.strip()
+    return customer_name, address
+
+
+def build_engineer_assigned_job_read(db: Session, row: QuoteJobAssignment) -> dict:
+    session = db.get(CalculationSession, row.selected_session_id)
+    step1 = Step1Snapshot.model_validate(session.step1_snapshot) if session is not None else Step1Snapshot()
+    customer_name, address = _quote_customer_and_address(db, row, step1)
+    job_ref = (step1.job_number or step1.external_job_id or "").strip() or None
+    selected_total = None
+    if session is not None:
+        total = _session_final_total(db, session)
+        if total is not None:
+            selected_total = str(total)
+    return {
+        "id": row.id,
+        "quote_ref": row.quote_ref,
+        "eworks_quote_id": row.eworks_quote_id,
+        "job_ref": job_ref,
+        "customer_name": customer_name,
+        "address": address,
+        "selected_at": row.assigned_at,
+        "selected_estimate_total": selected_total,
+        "selected_session_id": row.selected_session_id,
+        "status": "assigned",
+        "assignment_id": row.assignment_id,
+    }
+
+
+def list_assigned_jobs_for_engineer(db: Session, user: AuthenticatedUser) -> list[dict]:
+    user_id = _as_uuid(user.id)
+    if user_id is None:
+        return []
+    user_email = (user.email or "").strip().lower()
+    rows = db.query(QuoteJobAssignment).order_by(QuoteJobAssignment.assigned_at.desc()).all()
+    results: list[dict] = []
+    for row in rows:
+        if not _engineer_owns_job_assignment(db, row, user_id=user_id, user_email=user_email):
+            continue
+        results.append(build_engineer_assigned_job_read(db, row))
+    return results

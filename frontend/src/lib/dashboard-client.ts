@@ -2,6 +2,7 @@ import * as passwordDashboard from "@/lib/dashboard";
 import * as roleDashboard from "@/lib/dashboard-auth";
 import type {
   CombineWorkNotesResponse,
+  CombinedWorksPdfViewType,
   DashboardQuotesResponse,
   ReopenQuoteResponse,
 } from "@/lib/dashboard";
@@ -16,7 +17,7 @@ export type DashboardClient = {
   downloadCombinedWorksPdf: (
     sessionId: string,
     workIndexes: number[],
-    viewType: "client" | "optimal",
+    viewType: CombinedWorksPdfViewType,
     quoteNumber?: string,
   ) => Promise<void>;
 };

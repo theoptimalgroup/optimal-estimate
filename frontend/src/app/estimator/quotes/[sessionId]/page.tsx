@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -71,10 +70,9 @@ export default function EstimatorQuoteDetailPage({ params }: { params: { session
 
   return (
     <div className="space-y-6" data-testid="estimator-quote-detail-page">
-      <Link href="/estimator/quotes" className="text-sm font-medium text-blue-600 hover:text-blue-700">
-        ← Back to quotes
-      </Link>
       <PageHeader
+        backHref="/estimator/quotes"
+        backLabel="Back to Quotes"
         title="Quote Details"
         description={quote?.quote_ref}
         actions={

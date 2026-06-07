@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,14 @@ class CalculationSession(Base):
     eworks_customer_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="in_progress", index=True)
+    locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    current_version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    revision_in_progress: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    active_revision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_revised_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    submitted_by_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    submitted_by_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     public_quote_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
     public_quote_token_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

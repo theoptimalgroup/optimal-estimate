@@ -60,6 +60,23 @@ def render_combined_works_document(context: dict, *, view_type: str) -> tuple[by
         return html_content.encode("utf-8"), html_name, "text/html"
 
 
+def render_all_trades_document(context: dict) -> tuple[bytes, str, str]:
+    """Render flat all-trades combined PDF/HTML for manager quote review."""
+    template = _template_env().get_template("eworks_all_trades_pdf.html")
+    html_content = template.render(**context, logo_src=_company_logo_data_uri())
+    quote_number = context.get("quote_number") or "quote"
+    safe_quote_id = str(quote_number).replace("/", "-").replace("\\", "-").strip() or "quote"
+    file_name = f"{safe_quote_id}_all_trades.pdf"
+
+    try:
+        from weasyprint import HTML
+
+        return HTML(string=html_content).write_pdf(), file_name, "application/pdf"
+    except (ImportError, OSError):
+        html_name = file_name.replace(".pdf", ".html")
+        return html_content.encode("utf-8"), html_name, "text/html; charset=utf-8"
+
+
 def render_eworks_estimate_document(context: dict, *, is_draft: bool) -> tuple[bytes, str, str]:
     """Render eWorks estimation PDF/HTML matching the field document layout."""
     template = _template_env().get_template("eworks_estimate_pdf.html")

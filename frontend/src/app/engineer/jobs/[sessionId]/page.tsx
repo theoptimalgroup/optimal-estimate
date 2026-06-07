@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -77,6 +76,8 @@ export default function EngineerSiteVisitPage() {
     return (
       <div className="mx-auto max-w-lg space-y-6">
         <PageHeader
+          backHref="/engineer/assigned-estimates"
+          backLabel="Back to Assigned Estimates"
           title="Connect to site visit"
           description={`Enter the session token for job ${sessionId}.`}
         />
@@ -91,14 +92,9 @@ export default function EngineerSiteVisitPage() {
               />
             </EworksLabel>
             {loadError ? <ErrorState title="Connection failed" message={loadError} className="py-3" /> : null}
-            <div className="flex flex-wrap items-center gap-3">
-              <PrimaryButton type="button" onClick={handleConnect} data-testid="engineer-detail-connect-button">
-                Load session
-              </PrimaryButton>
-              <Link href="/engineer/jobs" className="text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900">
-                Back to jobs
-              </Link>
-            </div>
+            <PrimaryButton type="button" onClick={handleConnect} data-testid="engineer-detail-connect-button">
+              Load session
+            </PrimaryButton>
           </div>
         </SectionCard>
       </div>
@@ -112,13 +108,10 @@ export default function EngineerSiteVisitPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
+        backHref="/engineer/assigned-estimates"
+        backLabel="Back to Assigned Estimates"
         title="Site visit"
         description={`${session.job.quote_number} · ${session.job.client_name}`}
-        actions={
-          <Link href="/engineer/jobs" className="text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900">
-            All jobs
-          </Link>
-        }
       />
       {loadError ? <ErrorState message={loadError} onRetry={() => void loadSession(sessionToken)} /> : null}
       <SiteVisitForm

@@ -71,6 +71,13 @@ class AssignmentRead(BaseModel):
     has_calculation_session: bool = False
     calculation_session_id: str | None = None
     can_start_estimate: bool = False
+    submitted_at: str | None = None
+    final_total: str | None = None
+    current_version_number: int | None = None
+    revision_in_progress: bool = False
+    active_revision_reason: str | None = None
+    can_revise: bool = False
+    can_continue_revision: bool = False
 
 
 class AssignmentStartEstimateRead(BaseModel):

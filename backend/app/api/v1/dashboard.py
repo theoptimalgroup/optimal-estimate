@@ -14,6 +14,8 @@ from app.schemas.eworks_link import (
     ReopenQuoteResponse,
 )
 from app.services.audit_helpers import record_dashboard_audit
+from app.schemas.calculation_session_revision import SessionVersionHistoryResponse
+from app.services.calculation_session_revision_service import list_session_version_history
 from app.services.calculation_session_service import (
     combine_selected_work_internal_notes,
     get_submitted_quote_group_detail,
@@ -62,6 +64,15 @@ def get_submitted_quote_group_detail_endpoint(
         eworks_quote_id=eworks_quote_id,
     )
     return success_response(DashboardQuoteGroupDetailResponse.model_validate(result).model_dump(mode="json"))
+
+
+@router.get("/quotes/{session_id}/versions")
+def get_quote_version_history(session_id: UUID, db: DbSession, _auth=Depends(require_dashboard_access)):
+    try:
+        result = list_session_version_history(db, session_id)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return success_response(SessionVersionHistoryResponse.model_validate(result).model_dump(mode="json"))
 
 
 @router.post("/quotes/{session_id}/reopen")

@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.utils.html_text import html_to_plain_text, prepare_pdf_rich_text
 from app.utils.work_label import format_work_label
 from app.core.config import settings
 from app.core.exceptions import AppError
@@ -18,6 +19,7 @@ from app.schemas.dashboard_quote_groups import (
     DashboardQuoteGroupItem,
     DashboardQuoteGroupSessionDetailItem,
     DashboardQuoteGroupSessionItem,
+    DashboardQuoteGroupVersionItem,
     DashboardQuoteGroupsResponse,
     DashboardQuoteJobAssignmentDecision,
 )
@@ -76,6 +78,12 @@ from app.services.eworks_questionnaire_service import (
     work_block_to_step2_snapshot,
 )
 from app.services.idempotency_service import check_idempotency, hash_payload, store_idempotency
+from app.services.calculation_session_revision_service import (
+    assert_session_editable,
+    apply_submitter_to_session,
+    complete_revision_submit,
+    list_session_version_history,
+)
 from app.services.quote_acceptance_helpers import staff_acceptance_from_session
 from app.engines.rules_engine import find_active_rule
 
@@ -212,9 +220,8 @@ def update_session_step2(
             return CalculationSessionRead.model_validate(replay.payload)
 
     session = get_session_by_token(db, session_id, session_token)
+    assert_session_editable(session)
     if payload.step2 is not None:
-        if session.status == "submitted":
-            raise AppError("SESSION_SUBMITTED", "Cannot update questionnaire after submission", 409)
         session.step2_snapshot = payload.step2.model_dump(mode="json")
     if payload.findings_report is not None:
         current_step1 = dict(session.step1_snapshot or {})
@@ -262,6 +269,7 @@ async def add_session_attachment(
     from app.services.eworks_attachment_service import save_session_attachment
 
     session = get_session_by_token(db, session_id, session_token)
+    assert_session_editable(session)
     attachment = await save_session_attachment(session_id, upload)
     step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else Step2Snapshot()
     if not step2.works:
@@ -312,6 +320,7 @@ async def delete_session_attachment(
     from app.services.eworks_attachment_service import delete_stored_attachment
 
     session = get_session_by_token(db, session_id, session_token)
+    assert_session_editable(session)
     if not session.step2_snapshot:
         raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
 
@@ -414,6 +423,7 @@ def calculate_session(
             return CalculateSessionResponse.model_validate(replay.payload)
 
     session = get_session_by_token(db, session_id, session_token)
+    assert_session_editable(session)
     if step2 is not None:
         session.step2_snapshot = step2.model_dump(mode="json")
     if not session.step2_snapshot:
@@ -611,8 +621,10 @@ def submit_session(
         idempotency_key=idempotency_key,
     )
     session = get_session_by_token(db, session_id, session_token)
+    apply_submitter_to_session(db, session)
     session.status = "submitted"
     session.submitted_at = datetime.now(timezone.utc)
+    complete_revision_submit(db, session)
     db.flush()
 
 
@@ -668,7 +680,10 @@ def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
 
     sessions = db.scalars(
         select(CalculationSession)
-        .where(CalculationSession.status == "submitted")
+        .where(
+            CalculationSession.status.in_(("submitted", "revision_in_progress")),
+            CalculationSession.submitted_at.is_not(None),
+        )
         .order_by(CalculationSession.submitted_at.desc())
     ).all()
 
@@ -726,6 +741,13 @@ def list_submitted_quotes(db: Session) -> DashboardQuotesResponse:
                 breakdown=summary_breakdown,
                 works=works,
                 acceptance=staff_acceptance_from_session(session),
+                status=session.status,
+                locked=session.locked,
+                current_version_number=max(session.current_version_number, 1),
+                revision_in_progress=session.revision_in_progress,
+                active_revision_reason=session.active_revision_reason,
+                can_revise=session.status == "submitted" and session.locked and not session.revision_in_progress,
+                can_continue_revision=session.revision_in_progress and not session.locked,
             )
         )
 
@@ -789,6 +811,8 @@ def _build_quote_group_session_item(db: Session, session: CalculationSession) ->
         client_accepted_at=session.client_accepted_at,
         created_at=session.created_at,
         updated_at=session.updated_at,
+        current_version_number=max(session.current_version_number, 1),
+        revision_in_progress=session.revision_in_progress,
     )
 
 
@@ -855,7 +879,10 @@ def list_submitted_quote_groups(db: Session) -> DashboardQuoteGroupsResponse:
 
     sessions = db.scalars(
         select(CalculationSession)
-        .where(CalculationSession.status == "submitted")
+        .where(
+            CalculationSession.status.in_(("submitted", "revision_in_progress")),
+            CalculationSession.submitted_at.is_not(None),
+        )
         .order_by(CalculationSession.submitted_at.desc())
     ).all()
     return DashboardQuoteGroupsResponse(groups=_build_quote_groups(db, list(sessions)))
@@ -1264,6 +1291,18 @@ def _build_quote_group_detail(
                 submitted_by_email=submitter_email,
                 submitted_by_role=submitter_role,
                 is_latest=item.session_id == group.latest_session_id,
+                version_history=[
+                    DashboardQuoteGroupVersionItem(
+                        version_number=version.version_number,
+                        submitted_at=version.submitted_at,
+                        submitted_by_name=version.submitted_by_name,
+                        revision_reason=version.revision_reason,
+                        final_total=version.final_total,
+                        status=version.status,
+                        is_current=version.is_current,
+                    )
+                    for version in list_session_version_history(db, item.session_id).versions
+                ],
             )
         )
 
@@ -1488,17 +1527,22 @@ def _work_item_row(
     if margin_pct is None and client_price > 0:
         margin_pct = (profit_gbp / client_price) * Decimal("100")
 
-    scope_text = (block.scope or "").strip()
-    description = scope_text.split("\n", 1)[0].strip() if scope_text else (step1.original_job_description or "Work item")
-    findings = (block.findings or step1.findings_report or "").strip()
-    notes_exclusions = (block.other_notes or "").strip()
+    scope_text = html_to_plain_text(block.scope or "").strip()
+    description = scope_text.split("\n", 1)[0].strip() if scope_text else html_to_plain_text(step1.original_job_description or "").strip() or "Work item"
+    findings = html_to_plain_text(block.findings or step1.findings_report or "").strip()
+    notes_exclusions = html_to_plain_text(block.other_notes or "").strip()
+    internal_notes_text = (breakdown.internal_notes or "").strip()
 
     return {
         "index": display_index,
         "description": description,
+        "description_html": prepare_pdf_rich_text(block.scope or description),
         "findings": findings,
+        "findings_html": prepare_pdf_rich_text(block.findings or step1.findings_report or ""),
         "scope": scope_text,
+        "scope_html": prepare_pdf_rich_text(block.scope or ""),
         "notes_exclusions": notes_exclusions,
+        "notes_exclusions_html": prepare_pdf_rich_text(block.other_notes or ""),
         "materials_link": materials_link,
         "qty": materials_link,
         "material_cost": _format_gbp(material_cost),
@@ -1509,7 +1553,8 @@ def _work_item_row(
         "optimal_cost": _format_gbp(optimal_cost),
         "profit_gbp": _format_gbp(profit_gbp),
         "margin_pct": _format_pct(margin_pct),
-        "internal_notes": (breakdown.internal_notes or "").strip(),
+        "internal_notes": internal_notes_text,
+        "internal_notes_html": prepare_pdf_rich_text(internal_notes_text),
         "_subtotal": client_price,
         "_vat_total": breakdown.vat_total,
         "_grand_total": breakdown.final_total,
@@ -1519,6 +1564,55 @@ def _work_item_row(
         "_optimal_cost": optimal_cost,
         "_profit_gbp": profit_gbp,
     }
+
+
+def render_combined_all_trades_pdf(
+    db: Session,
+    *,
+    session_id: UUID,
+    work_indexes: list[int],
+) -> tuple[bytes, str, str]:
+    from app.adapters.pdf_renderer import render_all_trades_document
+    from app.services.eworks_pdf_context_service import build_all_trades_pdf_context
+
+    session = db.get(CalculationSession, session_id)
+    if session is None:
+        raise AppError("SESSION_NOT_FOUND", "Quote session not found", 404)
+    if not session.step2_snapshot:
+        raise AppError("STEP2_REQUIRED", "No saved work data for this quote", 400)
+
+    last_result = _dashboard_last_result(db, session)
+    if not last_result:
+        raise AppError("CALCULATION_REQUIRED", "No calculation result available for this quote", 400)
+
+    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
+    if not step2.works:
+        raise AppError("WORKS_REQUIRED", "No works found for this quote", 400)
+
+    unique_indexes = sorted({index for index in work_indexes})
+    for index in unique_indexes:
+        if index < 0 or index >= len(step2.works):
+            raise AppError("WORK_INDEX_INVALID", f"Invalid work index: {index}", 400)
+
+    all_work_indexes = set(range(len(step2.works)))
+    filtered_indexes = unique_indexes if set(unique_indexes) != all_work_indexes else None
+
+    breakdown = last_result.get("breakdown") or {}
+    work_breakdowns = last_result.get("work_breakdowns") or []
+    try:
+        context = build_all_trades_pdf_context(
+            db=db,
+            step1=step1,
+            step2=step2,
+            breakdown=breakdown,
+            work_breakdowns=work_breakdowns,
+            work_indexes=filtered_indexes,
+        )
+    except ValueError as exc:
+        raise AppError("CALCULATION_REQUIRED", str(exc), 400) from exc
+
+    return render_all_trades_document(context)
 
 
 def render_combined_works_pdf(
@@ -1535,8 +1629,14 @@ def render_combined_works_pdf(
         raise AppError("SESSION_NOT_FOUND", "Quote session not found", 404)
     if not session.step2_snapshot:
         raise AppError("STEP2_REQUIRED", "No saved work data for this quote", 400)
+    if view_type == "all_trades":
+        return render_combined_all_trades_pdf(
+            db,
+            session_id=session_id,
+            work_indexes=work_indexes,
+        )
     if view_type not in {"client", "optimal"}:
-        raise AppError("VIEW_TYPE_INVALID", "view_type must be 'client' or 'optimal'", 400)
+        raise AppError("VIEW_TYPE_INVALID", "view_type must be 'client', 'optimal', or 'all_trades'", 400)
 
     step1 = Step1Snapshot.model_validate(session.step1_snapshot)
     step2 = Step2Snapshot.model_validate(session.step2_snapshot)
@@ -1560,7 +1660,11 @@ def render_combined_works_pdf(
         block = step2.works[index]
         breakdown = _breakdown_for_work_block(db, session=session, step1=step1, block=block)
         row = _work_item_row(display_index=position, block=block, step1=step1, breakdown=breakdown)
-        items.append({key: value for key, value in row.items() if not key.startswith("_")})
+        item = {key: value for key, value in row.items() if not key.startswith("_")}
+        if view_type == "client":
+            item.pop("internal_notes", None)
+            item.pop("internal_notes_html", None)
+        items.append(item)
         subtotal += row["_subtotal"]
         vat_total += row["_vat_total"]
         grand_total += row["_grand_total"]
@@ -1573,6 +1677,7 @@ def render_combined_works_pdf(
     overall_margin = (total_profit / subtotal * Decimal("100")) if subtotal > 0 else Decimal("0")
     generated_at = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
 
+    report_notes = _build_report_notes(step1)
     context = {
         "quote_number": step1.quote_number,
         "job_number": step1.job_number,
@@ -1585,7 +1690,8 @@ def render_combined_works_pdf(
         "total_items": len(items),
         "vat_label": "VAT + 20%",
         "document_title": "QUOTE SUMMARY" if view_type == "client" else "OPTIMAL QUOTE SUMMARY",
-        "report_notes": _build_report_notes(step1),
+        "report_notes": report_notes,
+        "report_notes_html": prepare_pdf_rich_text(report_notes),
         "subtotal": _format_gbp(subtotal),
         "vat_total": _format_gbp(vat_total),
         "grand_total": _format_gbp(grand_total),

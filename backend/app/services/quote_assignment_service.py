@@ -68,12 +68,33 @@ def _assignment_link(token: str | None) -> str | None:
     return f"/assignment/{token}"
 
 
+def _linked_session_submission_fields(
+    db: Session,
+    session_id: UUID | None,
+) -> tuple[str | None, str | None]:
+    if session_id is None:
+        return None, None
+    session = db.get(CalculationSession, session_id)
+    if session is None:
+        return None, None
+    submitted_at = str(session.submitted_at) if session.submitted_at else None
+    final_total = None
+    ui_state = session.ui_state if isinstance(session.ui_state, dict) else {}
+    last_result = ui_state.get("last_result") if isinstance(ui_state.get("last_result"), dict) else {}
+    breakdown = last_result.get("breakdown") if isinstance(last_result.get("breakdown"), dict) else {}
+    raw_total = breakdown.get("final_total")
+    if raw_total is not None:
+        final_total = str(raw_total)
+    return submitted_at, final_total
+
+
 def _serialize_assignment(
     row: EworksQuoteAssignment,
     *,
     quote: EworksQuote | None = None,
     include_token: bool = False,
     current_user: AuthenticatedUser | None = None,
+    db: Session | None = None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": row.id,
@@ -106,6 +127,19 @@ def _serialize_assignment(
     data["has_calculation_session"] = row.calculation_session_id is not None
     data["calculation_session_id"] = str(row.calculation_session_id) if row.calculation_session_id else None
     data["can_start_estimate"] = _can_user_start_assignment(current_user, row) if current_user else False
+    if db is not None and row.calculation_session_id is not None:
+        submitted_at, final_total = _linked_session_submission_fields(db, row.calculation_session_id)
+        data["submitted_at"] = submitted_at
+        data["final_total"] = final_total
+        session = db.get(CalculationSession, row.calculation_session_id)
+        if session is not None:
+            data["current_version_number"] = max(session.current_version_number, 1 if session.submitted_at else 0)
+            data["revision_in_progress"] = session.revision_in_progress
+            data["active_revision_reason"] = session.active_revision_reason
+            data["can_revise"] = (
+                session.status == "submitted" and session.locked and not session.revision_in_progress
+            )
+            data["can_continue_revision"] = session.revision_in_progress and not session.locked
     if quote is not None:
         data["quote_summary"] = _quote_summary(quote)
     return data
@@ -279,7 +313,10 @@ def list_assignments_for_user(db: Session, user: AuthenticatedUser) -> list[dict
     else:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    return [_serialize_assignment(assignment, quote=quote, current_user=user) for assignment, quote in rows]
+    return [
+        _serialize_assignment(assignment, quote=quote, current_user=user, db=db)
+        for assignment, quote in rows
+    ]
 
 
 def get_assignment_by_token(db: Session, token: str) -> EworksQuoteAssignment:

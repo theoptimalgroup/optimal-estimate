@@ -184,12 +184,12 @@ test.describe("role-based navigation and access", () => {
     await expect(page.getByText("You do not have access to this page.")).toBeVisible();
   });
 
-  test("engineer can access engineer jobs", async ({ page }) => {
+  test("engineer can access assigned estimates", async ({ page }) => {
     await mockAuthMe(page, "engineer");
-    await page.goto("/engineer/jobs");
-    await expect(page.getByTestId("nav-item-my-jobs")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "My Jobs" })).toBeVisible();
-    await expect(page.getByTestId("engineer-open-session-card")).toBeVisible();
+    await page.goto("/engineer/assigned-estimates");
+    await expect(page.getByTestId("nav-item-assigned-estimates")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Assigned Estimates", level: 1 })).toBeVisible();
+    await expect(page.getByTestId("engineer-advanced-session")).toBeVisible();
   });
 
   test("unauthenticated user sees sign-in prompt on protected page", async ({ page }) => {
@@ -252,11 +252,13 @@ test.describe("navigation UX", () => {
 
   test("engineer sidebar shows all job navigation items", async ({ page }) => {
     await mockAuthMe(page, "engineer");
-    await page.goto("/engineer/jobs");
-    await expect(page.getByTestId("nav-item-my-jobs")).toBeVisible();
-    await expect(page.getByTestId("nav-item-site-visit-notes")).toBeVisible();
-    await expect(page.getByTestId("nav-item-upload-photos")).toBeVisible();
+    await page.goto("/engineer/assigned-estimates");
+    await expect(page.getByTestId("nav-item-assigned-estimates")).toBeVisible();
+    await expect(page.getByTestId("nav-item-assigned-jobs")).toBeVisible();
+    await expect(page.getByTestId("nav-item-submitted-estimates")).toBeVisible();
     await expect(page.getByTestId("nav-item-submitted-jobs")).toBeVisible();
+    await expect(page.getByTestId("nav-item-site-visit-notes")).toHaveCount(0);
+    await expect(page.getByTestId("nav-item-upload-photos")).toHaveCount(0);
   });
 
   test("placeholder pages show guidance and working buttons", async ({ page }) => {
@@ -270,8 +272,8 @@ test.describe("navigation UX", () => {
     await expect(page.getByTestId("engineer-site-notes-go-jobs")).toBeVisible();
     await page.goto("/engineer/uploads");
     await expect(page.getByTestId("engineer-uploads-go-jobs")).toBeVisible();
-    await page.goto("/engineer/submitted");
-    await expect(page.getByTestId("engineer-submitted-go-jobs")).toBeVisible();
+    await page.goto("/engineer/submitted-jobs");
+    await expect(page.getByTestId("engineer-submitted-jobs-go-jobs")).toBeVisible();
   });
 
   test("authenticated user sees back to dashboard on eworks calculate without app shell", async ({ page }) => {

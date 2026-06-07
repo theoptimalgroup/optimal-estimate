@@ -1,4 +1,4 @@
-"""Manager job assignment decisions for quote groups (local only; no eWorks writes)."""
+"""Manager selected-estimate decisions for quote groups (local only; no eWorks writes)."""
 
 from __future__ import annotations
 

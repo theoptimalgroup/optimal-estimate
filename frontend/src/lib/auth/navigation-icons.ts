@@ -44,10 +44,12 @@ const ICON_BY_HREF: Record<string, LucideIcon> = {
   "/admin/audit-logs": Shield,
   "/admin/settings": Settings,
   "/manager/reports": BarChart3,
-  "/engineer/jobs": Briefcase,
+  "/engineer/assigned-estimates": Briefcase,
+  "/engineer/assigned-jobs": ClipboardList,
+  "/engineer/submitted-estimates": FileText,
+  "/engineer/submitted-jobs": ClipboardCheck,
   "/engineer/site-notes": ClipboardList,
   "/engineer/uploads": Upload,
-  "/engineer/submitted": ClipboardCheck,
 };
 
 export function withNavIcons(items: NavItem[]): NavItemWithIcon[] {

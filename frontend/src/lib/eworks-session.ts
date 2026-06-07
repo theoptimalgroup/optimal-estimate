@@ -170,6 +170,11 @@ export type FromLinkResponse = {
   expires_at: string;
   ui_state?: SessionUiState | null;
   resumed?: boolean;
+  status?: string;
+  locked?: boolean;
+  revision_in_progress?: boolean;
+  active_revision_reason?: string | null;
+  current_version_number?: number;
 };
 
 type CalculationSessionRead = {
@@ -179,6 +184,11 @@ type CalculationSessionRead = {
   resolved: ResolvedRuleInfo;
   expires_at: string;
   ui_state?: SessionUiState | null;
+  status?: string;
+  locked?: boolean;
+  revision_in_progress?: boolean;
+  active_revision_reason?: string | null;
+  current_version_number?: number;
 };
 
 export type CalculationBreakdown = {
@@ -338,6 +348,11 @@ export async function fetchSession(sessionId: string, sessionToken: string): Pro
     expires_at: data.expires_at,
     ui_state: data.ui_state,
     resumed: true,
+    status: data.status,
+    locked: data.locked,
+    revision_in_progress: data.revision_in_progress,
+    active_revision_reason: data.active_revision_reason,
+    current_version_number: data.current_version_number,
   };
 }
 
@@ -466,10 +481,27 @@ export async function deleteSessionAttachment(sessionId: string, sessionToken: s
 export async function submitSession(sessionId: string, sessionToken: string, step2?: Step2Snapshot) {
   const body = step2 ? { step2 } : {};
   const idempotencyKey = buildIdempotencyKey(`eworks-${sessionId}-submit`, body);
-  return sessionFetch<{ submitted: boolean }>(`/api/v1/calculation-session/${sessionId}/submit`, sessionToken, {
+  return sessionFetch<{ submitted: boolean; version_number?: number; revision?: boolean }>(
+    `/api/v1/calculation-session/${sessionId}/submit`,
+    sessionToken,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "Idempotency-Key": idempotencyKey },
+    },
+  );
+}
+
+export async function reviseEstimate(sessionId: string, sessionToken: string, reason: string) {
+  return sessionFetch<{
+    session_id: string;
+    resume_url: string;
+    revision_in_progress: boolean;
+    active_revision_reason: string;
+    current_version_number: number;
+  }>(`/api/v1/calculation-session/${sessionId}/revise`, sessionToken, {
     method: "POST",
-    body: JSON.stringify(body),
-    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ reason }),
   });
 }
 

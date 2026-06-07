@@ -49,7 +49,11 @@ export default function EngineerAssignmentDetailPage({ params }: { params: { ass
 
   return (
     <div className="mx-auto max-w-2xl space-y-6" data-testid="engineer-assignment-detail-page">
-      <PageHeader title="Assignment Details" />
+      <PageHeader
+        backHref="/engineer/assigned-estimates"
+        backLabel="Back to Assigned Estimates"
+        title="Assignment Details"
+      />
 
       {loading ? (
         <LoadingState message="Loading assignment…" />

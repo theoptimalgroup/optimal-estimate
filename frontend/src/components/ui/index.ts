@@ -1,3 +1,4 @@
+export { BackLink } from "@/components/ui/back-link";
 export { CompanyLogo } from "@/components/ui/company-logo";
 export { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 export { PageHeader } from "@/components/ui/page-header";

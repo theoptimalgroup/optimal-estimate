@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -1272,6 +1273,33 @@ def test_dashboard_combined_pdf_download(eworks_api_client, monkeypatch):
                 assert b"OPTIMAL QUOTE SUMMARY" in body
             else:
                 assert b"QUOTE SUMMARY" in body
+
+    all_trades_response = test_client.post(
+        f"/api/v1/dashboard/quotes/{session_id}/combined-pdf",
+        headers={"X-Dashboard-Password": "test-dashboard-pass"},
+        json={"work_indexes": [0, 1], "view_type": "all_trades"},
+    )
+    assert all_trades_response.status_code == 200
+    all_trades_disposition = all_trades_response.headers["content-disposition"]
+    assert (
+        'filename="Q-PDF_all_trades.pdf"' in all_trades_disposition
+        or 'filename="Q-PDF_all_trades.html"' in all_trades_disposition
+    )
+    all_trades_body = all_trades_response.content
+    assert len(all_trades_body) > 100
+    if all_trades_response.headers["content-type"].startswith("text/html"):
+        assert b"All Trades / Skills" in all_trades_body
+        assert b"PDF work one" in all_trades_body
+        assert b"PDF work two" in all_trades_body
+        visible_body = re.sub(
+            rb"<style[^>]*>.*?</style>",
+            b"",
+            all_trades_body,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).lower()
+        forbidden = (b"profit", b"margin", b"session_token", b"formula", b"denominator")
+        for token in forbidden:
+            assert token not in visible_body
 
 
 def test_patch_ui_state_preserves_last_result_after_submit(eworks_api_client):

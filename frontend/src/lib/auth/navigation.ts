@@ -38,10 +38,10 @@ const MANAGER_NAV: NavItem[] = [
 ];
 
 const ENGINEER_NAV: NavItem[] = [
-  { label: "My Jobs", href: "/engineer/jobs" },
-  { label: "Site Visit Notes", href: "/engineer/site-notes" },
-  { label: "Upload Photos", href: "/engineer/uploads" },
-  { label: "Submitted Jobs", href: "/engineer/submitted" },
+  { label: "Assigned Estimates", href: "/engineer/assigned-estimates" },
+  { label: "Assigned Jobs", href: "/engineer/assigned-jobs" },
+  { label: "Submitted Estimates", href: "/engineer/submitted-estimates" },
+  { label: "Submitted Jobs", href: "/engineer/submitted-jobs" },
 ];
 
 export function getNavigationForRole(role: UserRole | null): NavItem[] {

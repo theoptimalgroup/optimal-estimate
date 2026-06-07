@@ -7,6 +7,16 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+class DashboardQuoteGroupVersionItem(BaseModel):
+    version_number: int
+    submitted_at: datetime | None = None
+    submitted_by_name: str | None = None
+    revision_reason: str | None = None
+    final_total: Decimal | None = None
+    status: str
+    is_current: bool = False
+
+
 class DashboardQuoteGroupSessionItem(BaseModel):
     session_id: UUID
     submitted_at: datetime
@@ -17,6 +27,8 @@ class DashboardQuoteGroupSessionItem(BaseModel):
     client_accepted_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    current_version_number: int = 1
+    revision_in_progress: bool = False
 
 
 class DashboardQuoteGroupSessionDetailItem(DashboardQuoteGroupSessionItem):
@@ -25,6 +37,7 @@ class DashboardQuoteGroupSessionDetailItem(DashboardQuoteGroupSessionItem):
     submitted_by_email: str | None = None
     submitted_by_role: str | None = None
     is_latest: bool = False
+    version_history: list[DashboardQuoteGroupVersionItem] = Field(default_factory=list)
 
 
 class DashboardQuoteGroupAssignmentItem(BaseModel):

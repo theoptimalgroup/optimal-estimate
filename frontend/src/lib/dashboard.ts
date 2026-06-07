@@ -39,10 +39,27 @@ export type DashboardQuoteItem = {
   breakdown?: DashboardQuoteSummaryBreakdown | null;
   works: DashboardWorkItem[];
   acceptance?: QuoteAcceptanceStatus;
+  status?: string;
+  locked?: boolean;
+  current_version_number?: number;
+  revision_in_progress?: boolean;
+  active_revision_reason?: string | null;
+  can_revise?: boolean;
+  can_continue_revision?: boolean;
 };
 
 export type DashboardQuotesResponse = {
   quotes: DashboardQuoteItem[];
+};
+
+export type DashboardQuoteGroupVersionItem = {
+  version_number: number;
+  submitted_at?: string | null;
+  submitted_by_name?: string | null;
+  revision_reason?: string | null;
+  final_total?: number | string | null;
+  status: string;
+  is_current?: boolean;
 };
 
 export type DashboardQuoteGroupSessionItem = {
@@ -55,6 +72,8 @@ export type DashboardQuoteGroupSessionItem = {
   client_accepted_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  current_version_number?: number;
+  revision_in_progress?: boolean;
 };
 
 export type DashboardQuoteGroupSessionDetailItem = DashboardQuoteGroupSessionItem & {
@@ -63,6 +82,7 @@ export type DashboardQuoteGroupSessionDetailItem = DashboardQuoteGroupSessionIte
   submitted_by_email?: string | null;
   submitted_by_role?: string | null;
   is_latest?: boolean;
+  version_history?: DashboardQuoteGroupVersionItem[];
 };
 
 export type DashboardQuoteGroupAssignmentItem = {
@@ -188,16 +208,25 @@ export type DashboardQuoteGroupDetailResponse = {
   group: DashboardQuoteGroupDetailItem;
 };
 
-export type AssignQuoteJobRequest = {
+/** Manager selected-estimate request (legacy API name: assign-job). */
+export type SelectQuoteEstimateRequest = {
   selected_session_id: string;
   assignee_name: string;
   assignee_email?: string | null;
   assignment_id?: number | null;
 };
 
-export type AssignQuoteJobResponse = {
+/** @deprecated Use SelectQuoteEstimateRequest */
+export type AssignQuoteJobRequest = SelectQuoteEstimateRequest;
+
+export type SelectQuoteEstimateResponse = {
   decision: DashboardQuoteJobAssignmentDecision;
 };
+
+/** @deprecated Use SelectQuoteEstimateResponse */
+export type AssignQuoteJobResponse = SelectQuoteEstimateResponse;
+
+export type ManagerQuotePdfView = "client" | "internal" | "combined" | "all-trades";
 
 export function buildQuoteGroupHref(group: Pick<DashboardQuoteGroupItem, "quote_ref" | "eworks_quote_id">): string {
   const params = new URLSearchParams();
@@ -209,6 +238,22 @@ export function buildQuoteGroupHref(group: Pick<DashboardQuoteGroupItem, "quote_
   const query = params.toString();
   return query ? `/manager/review/group?${query}` : "/manager/review/group";
 }
+
+export type ReviseEstimateResponse = {
+  session_id: string;
+  resume_url: string;
+  revision_in_progress: boolean;
+  active_revision_reason: string;
+  current_version_number: number;
+};
+
+export type SessionVersionHistoryResponse = {
+  session_id: string;
+  current_version_number: number;
+  revision_in_progress: boolean;
+  active_revision_reason?: string | null;
+  versions: DashboardQuoteGroupVersionItem[];
+};
 
 export type ReopenQuoteResponse = {
   session_id: string;
@@ -283,16 +328,20 @@ export async function fetchCombinedWorkNotes(
   return payload.data as CombineWorkNotesResponse;
 }
 
-export function buildCombinedWorksPdfFileName(quoteNumber: string, viewType: "client" | "optimal"): string {
+export type CombinedWorksPdfViewType = "client" | "optimal" | "all_trades";
+
+export function buildCombinedWorksPdfFileName(quoteNumber: string, viewType: CombinedWorksPdfViewType): string {
   const safeQuoteId = quoteNumber.replace(/[/\\]/g, "-").trim() || "quote";
-  return viewType === "client" ? `${safeQuoteId}_Client_view.pdf` : `${safeQuoteId}_optimal_view.pdf`;
+  if (viewType === "client") return `${safeQuoteId}_Client_view.pdf`;
+  if (viewType === "all_trades") return `${safeQuoteId}_all_trades.pdf`;
+  return `${safeQuoteId}_optimal_view.pdf`;
 }
 
 export async function downloadCombinedWorksPdf(
   password: string,
   sessionId: string,
   workIndexes: number[],
-  viewType: "client" | "optimal",
+  viewType: CombinedWorksPdfViewType,
   quoteNumber?: string,
 ): Promise<void> {
   const response = await fetch(`${getApiUrl()}/api/v1/dashboard/quotes/${sessionId}/combined-pdf`, {

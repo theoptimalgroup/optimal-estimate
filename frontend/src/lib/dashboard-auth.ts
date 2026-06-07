@@ -2,12 +2,14 @@ import { apiFetch, getApiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth/token-provider";
 import {
   buildCombinedWorksPdfFileName,
-  type AssignQuoteJobRequest,
-  type AssignQuoteJobResponse,
+  type CombinedWorksPdfViewType,
+  type SelectQuoteEstimateRequest,
+  type SelectQuoteEstimateResponse,
   type CombineWorkNotesResponse,
   type DashboardQuoteGroupDetailResponse,
   type DashboardQuoteGroupsResponse,
   type DashboardQuotesResponse,
+  type ManagerQuotePdfView,
   type ReopenQuoteResponse,
 } from "@/lib/dashboard";
 
@@ -46,8 +48,9 @@ export async function reopenQuoteForRefill(sessionId: string) {
   return response.data;
 }
 
-export async function assignQuoteJob(quoteRef: string, payload: AssignQuoteJobRequest) {
-  const response = await apiFetch<AssignQuoteJobResponse>(
+/** Record manager's selected submitted estimate (uses legacy assign-job API path). */
+export async function selectQuoteEstimate(quoteRef: string, payload: SelectQuoteEstimateRequest) {
+  const response = await apiFetch<SelectQuoteEstimateResponse>(
     `/api/v1/manager/quotes/${encodeURIComponent(quoteRef)}/assign-job`,
     {
       method: "POST",
@@ -71,7 +74,7 @@ export async function fetchCombinedWorkNotes(sessionId: string, workIndexes: num
 export async function downloadCombinedWorksPdf(
   sessionId: string,
   workIndexes: number[],
-  viewType: "client" | "optimal",
+  viewType: CombinedWorksPdfViewType,
   quoteNumber?: string,
 ): Promise<void> {
   const response = await fetch(`${getApiUrl()}/api/v1/dashboard/quotes/${sessionId}/combined-pdf`, {
@@ -95,6 +98,56 @@ export async function downloadCombinedWorksPdf(
   const fileName =
     headerFileName ??
     (quoteNumber ? buildCombinedWorksPdfFileName(quoteNumber, viewType) : `quote-${viewType}.pdf`);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildManagerQuotePdfFileName(quoteNumber: string | undefined, view: ManagerQuotePdfView): string {
+  const safeQuoteId = (quoteNumber ?? "quote").replace(/[/\\]/g, "-").trim() || "quote";
+  if (view === "client") return `${safeQuoteId}_Client_view.pdf`;
+  if (view === "internal") return `${safeQuoteId}_optimal_view.pdf`;
+  if (view === "all-trades") return `${safeQuoteId}_all_trades.pdf`;
+  return `${safeQuoteId}_combined.pdf`;
+}
+
+export async function downloadManagerQuotePdf(
+  sessionId: string,
+  view: ManagerQuotePdfView,
+  quoteNumber?: string,
+  version?: number,
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (version != null) {
+    params.set("version", String(version));
+  }
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/api/v1/manager/quotes/${sessionId}/pdf/${view}${query ? `?${query}` : ""}`,
+    {
+      method: "GET",
+      headers: await getAuthHeaders(),
+    },
+  );
+  if (!response.ok) {
+    let message = "PDF download failed";
+    try {
+      const payload = await response.json();
+      message = payload?.detail?.error?.message || payload?.detail || message;
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition");
+  const headerFileName = disposition?.match(/filename="([^"]+)"/)?.[1];
+  const fileName = headerFileName ?? buildManagerQuotePdfFileName(quoteNumber, view);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

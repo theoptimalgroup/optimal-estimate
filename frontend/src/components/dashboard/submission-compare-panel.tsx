@@ -1,11 +1,17 @@
 "use client";
 
+import { useState } from "react";
+import { Download } from "lucide-react";
+
 import { StatusBadge } from "@/components/ui";
 import type {
   DashboardQuoteGroupAssignmentSubmissionRow,
   DashboardQuoteGroupComparisonChargeLine,
   DashboardQuoteGroupComparisonWorkBreakdown,
+  DashboardQuoteJobAssignmentDecision,
+  ManagerQuotePdfView,
 } from "@/lib/dashboard";
+import { downloadManagerQuotePdf } from "@/lib/dashboard-auth";
 import { formatSubmittedAt, money } from "@/components/dashboard/quote-groups-table";
 
 const MAX_COMPARE = 3;
@@ -62,6 +68,33 @@ function nonZeroCharges(charges: DashboardQuoteGroupComparisonChargeLine[]): Das
   });
 }
 
+function isRowEstimateSelected(
+  row: DashboardQuoteGroupAssignmentSubmissionRow,
+  selectedEstimateDecision?: DashboardQuoteJobAssignmentDecision | null,
+): boolean {
+  if (row.is_job_assigned) return true;
+  if (!row.linked_session_id || !selectedEstimateDecision?.selected_session_id) return false;
+  return selectedEstimateDecision.selected_session_id === row.linked_session_id;
+}
+
+function isEstimateSelectedElsewhere(
+  row: DashboardQuoteGroupAssignmentSubmissionRow,
+  selectedEstimateDecision?: DashboardQuoteJobAssignmentDecision | null,
+): boolean {
+  if (!selectedEstimateDecision?.selected_session_id || !row.linked_session_id) return false;
+  return selectedEstimateDecision.selected_session_id !== row.linked_session_id;
+}
+
+const PDF_DOWNLOAD_SECONDARY: {
+  view: ManagerQuotePdfView;
+  label: string;
+  title?: string;
+}[] = [
+  { view: "internal", label: "Internal PDF" },
+  { view: "combined", label: "Full Estimate", title: "Download full estimate PDF" },
+  { view: "all-trades", label: "All Trades", title: "Download all trades combined PDF" },
+];
+
 function BreakdownRow({
   label,
   amount,
@@ -83,16 +116,36 @@ function BreakdownRow({
 
 export function SubmissionComparePanel({
   rows,
-  onAssign,
-  assigningSessionId,
+  onSelectEstimate,
+  selectingSessionId,
+  selectedEstimateDecision,
+  quoteRef,
 }: {
   rows: DashboardQuoteGroupAssignmentSubmissionRow[];
-  onAssign: (row: DashboardQuoteGroupAssignmentSubmissionRow) => Promise<void>;
-  assigningSessionId?: string | null;
+  onSelectEstimate: (row: DashboardQuoteGroupAssignmentSubmissionRow) => Promise<void>;
+  selectingSessionId?: string | null;
+  selectedEstimateDecision?: DashboardQuoteJobAssignmentDecision | null;
+  quoteRef?: string | null;
 }) {
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
   if (rows.length === 0) return null;
 
   const cheapestIds = lowestPriceSessionIds(rows);
+
+  const handleDownloadPdf = async (sessionId: string, view: ManagerQuotePdfView) => {
+    const downloadKey = `${sessionId}-${view}`;
+    setDownloadingKey(downloadKey);
+    setPdfError(null);
+    try {
+      await downloadManagerQuotePdf(sessionId, view, quoteRef ?? undefined);
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : "PDF download failed");
+    } finally {
+      setDownloadingKey(null);
+    }
+  };
 
   return (
     <div className="space-y-4" data-testid="submission-compare-panel">
@@ -102,6 +155,10 @@ export function SubmissionComparePanel({
           const sessionId = row.linked_session_id ?? "unknown";
           const summary = row.comparison_summary;
           const isCheapest = row.linked_session_id != null && cheapestIds.has(row.linked_session_id);
+          const isSelected = isRowEstimateSelected(row, selectedEstimateDecision);
+          const selectedElsewhere = isEstimateSelectedElsewhere(row, selectedEstimateDecision);
+          const showSelectButton =
+            row.can_assign_job && row.linked_session_id != null && !isSelected && !selectedElsewhere;
           const roleLabel = row.submitted_by_role
             ? formatRole(row.submitted_by_role)
             : formatRole(row.assignment_type);
@@ -113,7 +170,11 @@ export function SubmissionComparePanel({
           return (
             <div
               key={sessionId}
-              className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+              className={
+                isSelected
+                  ? "flex h-full flex-col rounded-xl border-2 border-emerald-400 bg-emerald-50/40 p-4 shadow-sm"
+                  : "flex h-full flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+              }
               data-testid={`compare-card-${sessionId}`}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -132,9 +193,9 @@ export function SubmissionComparePanel({
                       Latest
                     </StatusBadge>
                   ) : null}
-                  {row.is_job_assigned ? (
-                    <StatusBadge tone="info" data-testid={`compare-assigned-${sessionId}`}>
-                      Assigned Job
+                  {isSelected ? (
+                    <StatusBadge tone="success" data-testid={`compare-assigned-${sessionId}`}>
+                      Selected Estimate
                     </StatusBadge>
                   ) : null}
                 </div>
@@ -260,18 +321,74 @@ export function SubmissionComparePanel({
                 </div>
               )}
 
-              {row.can_assign_job && row.linked_session_id ? (
+              {isSelected && row.linked_session_id ? (
+                <div
+                  className="mt-auto border-t border-slate-200 pt-4"
+                  data-testid={`compare-download-pdfs-${sessionId}`}
+                >
+                  <h4 className="text-sm font-medium text-slate-900">Download PDFs</h4>
+                  {(() => {
+                    const clientDownloadKey = `${row.linked_session_id}-client`;
+                    const isClientDownloading = downloadingKey === clientDownloadKey;
+                    return (
+                      <button
+                        type="button"
+                        className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+                        disabled={isClientDownloading}
+                        onClick={() => void handleDownloadPdf(row.linked_session_id!, "client")}
+                        data-testid={`download-pdf-client-${sessionId}`}
+                      >
+                        <Download className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        {isClientDownloading ? "Generating…" : "Download Client PDF"}
+                      </button>
+                    );
+                  })()}
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm">
+                    {PDF_DOWNLOAD_SECONDARY.map(({ view, label, title }, index) => {
+                      const downloadKey = `${row.linked_session_id}-${view}`;
+                      const isDownloading = downloadingKey === downloadKey;
+                      return (
+                        <span key={view} className="inline-flex items-center gap-x-3">
+                          {index > 0 ? (
+                            <span className="text-slate-300" aria-hidden="true">
+                              •
+                            </span>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="text-blue-600 transition hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+                            title={title}
+                            disabled={isDownloading}
+                            onClick={() => void handleDownloadPdf(row.linked_session_id!, view)}
+                            data-testid={`download-pdf-${view}-${sessionId}`}
+                          >
+                            {isDownloading ? "Generating…" : label}
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {pdfError ? <p className="mt-2 text-sm text-red-600">{pdfError}</p> : null}
+                </div>
+              ) : null}
+
+              {showSelectButton ? (
                 <button
                   type="button"
                   className="mt-auto w-full rounded-lg bg-blue-600 px-4 py-2 pt-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                  disabled={assigningSessionId === row.linked_session_id}
-                  onClick={() => void onAssign(row)}
+                  disabled={selectingSessionId === row.linked_session_id}
+                  onClick={() => void onSelectEstimate(row)}
                   data-testid={`assign-job-${row.linked_session_id}`}
                 >
-                  {assigningSessionId === row.linked_session_id
-                    ? "Assigning…"
-                    : `Assign Job to ${row.assignee_name}`}
+                  {selectingSessionId === row.linked_session_id ? "Selecting…" : "Select this estimate"}
                 </button>
+              ) : selectedElsewhere && selectedEstimateDecision ? (
+                <p
+                  className="mt-auto pt-4 text-sm text-slate-500"
+                  data-testid={`compare-job-assigned-elsewhere-${sessionId}`}
+                >
+                  Selected estimate: {selectedEstimateDecision.assignee_name}
+                </p>
               ) : null}
             </div>
           );

@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
+import { SessionVersionHistoryPanel } from "@/components/dashboard/session-version-history-panel";
 import { MAX_COMPARE, SubmissionComparePanel } from "@/components/dashboard/submission-compare-panel";
 import {
   QuoteGroupAssignmentSubmissionsTable,
@@ -14,7 +14,7 @@ import { ErrorState, LoadingState, PageHeader, SectionCard, StatusBadge } from "
 import { money } from "@/components/eworks-dashboard";
 import { createRoleDashboardClient } from "@/lib/dashboard-client";
 import type { DashboardQuoteGroupAssignmentSubmissionRow, DashboardQuoteGroupDetailItem } from "@/lib/dashboard";
-import { assignQuoteJob, fetchSubmittedQuoteGroupDetail } from "@/lib/dashboard-auth";
+import { selectQuoteEstimate, fetchSubmittedQuoteGroupDetail, downloadManagerQuotePdf } from "@/lib/dashboard-auth";
 import { revokeQuoteAssignment } from "@/lib/quote-assignments";
 
 function formatAssigneeSummary(
@@ -33,6 +33,29 @@ function formatAssigneeSummary(
     .join("; ");
 }
 
+function findSelectedSubmissionRow(
+  submissions: DashboardQuoteGroupAssignmentSubmissionRow[],
+  selectedSessionId?: string | null,
+): DashboardQuoteGroupAssignmentSubmissionRow | undefined {
+  if (!selectedSessionId) return undefined;
+  return submissions.find((row) => row.linked_session_id === selectedSessionId);
+}
+
+function formatSelectedEstimateDetail(
+  assigneeName: string,
+  total?: number | string | null,
+): string {
+  const amountPart = total != null && total !== "" ? ` — ${money(total)}` : "";
+  return `${assigneeName}${amountPart}`;
+}
+
+function formatSelectedEstimateSummary(
+  assigneeName: string,
+  total?: number | string | null,
+): string {
+  return `Selected estimate: ${formatSelectedEstimateDetail(assigneeName, total)}`;
+}
+
 function QuoteGroupReviewContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -49,8 +72,8 @@ function QuoteGroupReviewContent() {
   const [revokingAssignmentId, setRevokingAssignmentId] = useState<number | null>(null);
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
   const [selectionLimitMessage, setSelectionLimitMessage] = useState<string | null>(null);
-  const [assigningSessionId, setAssigningSessionId] = useState<string | null>(null);
-  const [assignmentSuccessMessage, setAssignmentSuccessMessage] = useState<string | null>(null);
+  const [selectingSessionId, setSelectingSessionId] = useState<string | null>(null);
+  const [selectionSuccessMessage, setSelectionSuccessMessage] = useState<string | null>(null);
 
   const loadGroup = useCallback(async () => {
     if (!quoteRef && eworksQuoteId == null && !groupKey) {
@@ -125,28 +148,31 @@ function QuoteGroupReviewContent() {
     });
   };
 
-  const handleAssignJob = async (row: DashboardQuoteGroupAssignmentSubmissionRow) => {
+  const handleSelectEstimate = async (row: DashboardQuoteGroupAssignmentSubmissionRow) => {
     const activeQuoteRef = group?.quote_ref ?? quoteRef;
     if (!activeQuoteRef || !row.linked_session_id) {
-      setError("Quote reference is required to assign the job.");
+      setError("Quote reference is required to select an estimate.");
       return;
     }
-    setAssigningSessionId(row.linked_session_id);
+    setSelectingSessionId(row.linked_session_id);
     setError(null);
     try {
-      const result = await assignQuoteJob(activeQuoteRef, {
+      const result = await selectQuoteEstimate(activeQuoteRef, {
         selected_session_id: row.linked_session_id,
         assignee_name: row.assignee_name,
         assignee_email: row.assignee_email,
         assignment_id: row.assignment_id,
       });
-      setAssignmentSuccessMessage(`Job assigned to ${result?.decision?.assignee_name ?? row.assignee_name}.`);
-      setSelectedSessionIds(new Set());
+      const assigneeName = result?.decision?.assignee_name ?? row.assignee_name;
+      const selectedTotal =
+        row.comparison_summary?.final_total ?? row.final_total ?? null;
+      setSelectionSuccessMessage(`${formatSelectedEstimateSummary(assigneeName, selectedTotal)}.`);
+      setSelectedSessionIds(new Set(row.linked_session_id ? [row.linked_session_id] : []));
       await loadGroup();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to assign job");
+      setError(err instanceof Error ? err.message : "Failed to select estimate");
     } finally {
-      setAssigningSessionId(null);
+      setSelectingSessionId(null);
     }
   };
 
@@ -156,21 +182,21 @@ function QuoteGroupReviewContent() {
   const selectedRows = assignmentSubmissions.filter(
     (row) => row.linked_session_id != null && selectedSessionIds.has(row.linked_session_id),
   );
-  const jobDecision = group?.job_assignment_decision;
+  const selectedEstimateDecision = group?.job_assignment_decision;
+  const selectedSubmissionRow = findSelectedSubmissionRow(
+    assignmentSubmissions,
+    selectedEstimateDecision?.selected_session_id,
+  );
+  const selectedEstimateTotal =
+    selectedSubmissionRow?.comparison_summary?.final_total ?? selectedSubmissionRow?.final_total ?? null;
 
   return (
     <div className="space-y-6" data-testid="manager-review-group-page">
       <PageHeader
+        backHref="/manager/review"
+        backLabel="Back to Quote Review"
         title={group?.quote_ref ? `Quote ${group.quote_ref}` : "Quote Submissions"}
         description="Review assignments, submitters, and all submitted estimate sessions for this quote."
-        actions={
-          <Link
-            href="/manager/review"
-            className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Back to Quote Review
-          </Link>
-        }
       />
 
       {loading ? (
@@ -179,13 +205,13 @@ function QuoteGroupReviewContent() {
         <ErrorState message={error} onRetry={() => void loadGroup()} />
       ) : group ? (
         <>
-          {assignmentSuccessMessage ? (
+          {selectionSuccessMessage ? (
             <div
               className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
               data-testid="job-assignment-success-banner"
               role="status"
             >
-              {assignmentSuccessMessage}
+              {selectionSuccessMessage}
             </div>
           ) : null}
 
@@ -253,27 +279,35 @@ function QuoteGroupReviewContent() {
                 </dd>
               </div>
               <div className="sm:col-span-2">
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Job assignment</dt>
-                <dd className="mt-1 flex flex-wrap items-center gap-3 text-sm text-slate-900" data-testid="quote-group-job-assignment">
-                  {jobDecision ? (
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Selected estimate</dt>
+                <dd
+                  className="mt-1 flex flex-wrap items-center gap-3 text-sm"
+                  data-testid="quote-group-job-assignment"
+                >
+                  {selectedEstimateDecision ? (
                     <>
-                      <span>Assigned to {jobDecision.assignee_name}</span>
+                      <span className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
+                        {formatSelectedEstimateDetail(
+                          selectedEstimateDecision.assignee_name,
+                          selectedEstimateTotal,
+                        )}
+                      </span>
                       <button
                         type="button"
                         className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
                         onClick={() => {
-                          setAssignmentSuccessMessage(null);
-                          if (jobDecision.selected_session_id) {
-                            setSelectedSessionIds(new Set([jobDecision.selected_session_id]));
+                          setSelectionSuccessMessage(null);
+                          if (selectedEstimateDecision.selected_session_id) {
+                            setSelectedSessionIds(new Set([selectedEstimateDecision.selected_session_id]));
                           }
                         }}
                         data-testid="change-job-assignment"
                       >
-                        Change assignment
+                        Change selection
                       </button>
                     </>
                   ) : (
-                    <span>Not assigned</span>
+                    <span className="text-slate-600">No estimate selected</span>
                   )}
                 </dd>
               </div>
@@ -309,9 +343,30 @@ function QuoteGroupReviewContent() {
             <SectionCard title="Compare Submissions" testId="quote-group-compare-submissions">
               <SubmissionComparePanel
                 rows={selectedRows}
-                onAssign={handleAssignJob}
-                assigningSessionId={assigningSessionId}
+                onSelectEstimate={handleSelectEstimate}
+                selectingSessionId={selectingSessionId}
+                selectedEstimateDecision={selectedEstimateDecision}
+                quoteRef={group.quote_ref}
               />
+            </SectionCard>
+          ) : null}
+
+          {group.sessions.some((session) => (session.version_history?.length ?? 0) > 1) ? (
+            <SectionCard title="Version History" testId="quote-group-version-history">
+              <div className="space-y-4">
+                {group.sessions
+                  .filter((session) => (session.version_history?.length ?? 0) > 1)
+                  .map((session) => (
+                    <SessionVersionHistoryPanel
+                      key={session.session_id}
+                      sessionId={session.session_id}
+                      versions={session.version_history ?? []}
+                      onDownloadPdf={(sessionId, versionNumber) =>
+                        void downloadManagerQuotePdf(sessionId, "client", group.quote_ref ?? undefined, versionNumber)
+                      }
+                    />
+                  ))}
+              </div>
             </SectionCard>
           ) : null}
         </>

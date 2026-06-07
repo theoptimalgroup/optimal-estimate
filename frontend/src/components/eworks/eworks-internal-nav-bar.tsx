@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-
+import { BackLink } from "@/components/ui/back-link";
 import { RoleBadge } from "@/components/ui/role-badge";
 import { useCurrentUser } from "@/lib/auth/auth-context";
 import { getDashboardForRole } from "@/lib/auth/dashboard-routes";
@@ -24,13 +23,12 @@ export function EworksInternalNavBar() {
       data-testid="eworks-internal-nav-bar"
     >
       <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
-        <Link
+        <BackLink
           href={dashboardHref}
-          className="text-sm font-medium text-blue-600 hover:text-blue-700"
+          label="Back to Dashboard"
+          className="mb-0"
           data-testid="eworks-back-to-dashboard"
-        >
-          ← Back to Dashboard
-        </Link>
+        />
         <RoleBadge role={user.role} />
       </div>
     </div>

@@ -438,7 +438,7 @@ test.describe("Quote assignments", () => {
     await expect(page.getByTestId("start-assignment-1")).toHaveText("Continue Estimate");
   });
 
-  test("engineer jobs shows assigned quote", async ({ page }) => {
+  test("engineer assigned estimates shows assigned quote", async ({ page }) => {
     await mockAuthMe(page, "engineer");
     await page.route("**/api/v1/quote-assignments/my", async (route) => {
       await route.fulfill({
@@ -448,14 +448,14 @@ test.describe("Quote assignments", () => {
       });
     });
 
-    await page.goto("/engineer/jobs");
+    await page.goto("/engineer/assigned-estimates");
     await expect(page.getByTestId("engineer-assigned-quotes")).toBeVisible();
     await expect(page.getByTestId("engineer-assignment-3")).toBeVisible();
-    await expect(page.getByTestId("engineer-start-assignment-3")).toHaveText("Open Assignment");
+    await expect(page.getByTestId("engineer-assignment-action-3")).toHaveText("Start Estimate");
     await expect(page.getByText("secret_token")).toHaveCount(0);
   });
 
-  test("engineer Open Assignment navigates to questionnaire", async ({ page }) => {
+  test("engineer Continue Estimate navigates to questionnaire", async ({ page }) => {
     await mockAuthMe(page, "engineer");
     await page.route("**/api/v1/quote-assignments/my", async (route) => {
       await route.fulfill({
@@ -482,8 +482,8 @@ test.describe("Quote assignments", () => {
       });
     });
 
-    await page.goto("/engineer/jobs");
-    await page.getByTestId("engineer-start-assignment-3").click();
+    await page.goto("/engineer/assigned-estimates");
+    await page.getByTestId("engineer-assignment-action-3").click();
     await page.waitForURL("**/eworks/calculate?session_id=**");
     expect(page.url()).toContain("token=engineer-session-token");
   });
@@ -542,6 +542,8 @@ test.describe("Quote assignments", () => {
     expect(page.url()).toContain("token=public-session-token");
     await expect(page.getByTestId("assignment-summary-section")).toHaveCount(0);
     await expect(page.locator('[data-testid="app-shell"]')).toHaveCount(0);
+    await expect(page.getByTestId("eworks-internal-nav-bar")).toHaveCount(0);
+    await expect(page.getByTestId("back-link")).toHaveCount(0);
     await expect(page.getByText("raw_payload")).toHaveCount(0);
   });
 

@@ -124,14 +124,22 @@ function questionnaireValidationMessage(
 
 function restoreUiState(
   uiState: SessionUiState | null | undefined,
+  sessionMeta: Pick<FromLinkResponse, "revision_in_progress" | "locked" | "status"> | null | undefined,
   setters: {
     setStep: (value: number) => void;
     setMaxReachableStep: (value: number) => void;
     setSubmitted: (value: boolean) => void;
   },
 ) {
+  if (sessionMeta?.revision_in_progress) {
+    setters.setStep(Math.min(uiState?.current_step ?? 1, EWORKS_STEPS.length - 2));
+    setters.setMaxReachableStep(Math.max(uiState?.max_reachable_step ?? 1, 1));
+    setters.setSubmitted(false);
+    return;
+  }
   if (!uiState) return;
-  const hasSubmitted = !!uiState.last_result;
+  const hasSubmitted =
+    !!uiState.last_result || sessionMeta?.status === "submitted" || sessionMeta?.locked === true;
   const restoredStep = hasSubmitted ? EWORKS_STEPS.length - 1 : Math.min(uiState.current_step ?? 0, EWORKS_STEPS.length - 1);
   setters.setStep(restoredStep);
   setters.setMaxReachableStep(
@@ -221,7 +229,7 @@ function EworksCalculateContent() {
       );
       const questionnaire = step2ToQuestionnaire(data.step2, data.step1.trade_name, undefined, data.step1);
       reset(questionnaire);
-      restoreUiState(data.ui_state, { setStep, setMaxReachableStep, setSubmitted });
+      restoreUiState(data.ui_state, data, { setStep, setMaxReachableStep, setSubmitted });
       autoSaveReady.current = false;
       lastSavedStep2Ref.current = null;
       lastSavedUiRef.current = null;
@@ -231,6 +239,9 @@ function EworksCalculateContent() {
     },
     [reset],
   );
+
+  const revisionInProgress = session?.revision_in_progress === true;
+  const isLockedSubmitted = submitted && !revisionInProgress;
 
   const values = watch();
 
@@ -351,7 +362,7 @@ function EworksCalculateContent() {
   );
 
   const saveProgress = useCallback(async () => {
-    if (!session || !autoSaveReady.current || submitted || step === 2) return;
+    if (!session || !autoSaveReady.current || isLockedSubmitted || step === 2) return;
     const uiState = { current_step: step, max_reachable_step: maxReachableStep };
     const uiKey = JSON.stringify(uiState);
     if (uiKey === lastSavedUiRef.current) return;
@@ -361,7 +372,7 @@ function EworksCalculateContent() {
     } catch {
       // ignore background progress save failures
     }
-  }, [session, step, maxReachableStep, submitted]);
+  }, [session, step, maxReachableStep, isLockedSubmitted]);
 
   useEffect(() => {
     if (!session || step === 2 || submitting) return;
@@ -608,7 +619,14 @@ function EworksCalculateContent() {
         </>
       }
       badge={
-        session.resumed ? (
+        revisionInProgress ? (
+          <p
+            className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+            data-testid="revision-in-progress-banner"
+          >
+            Revision in progress — Reason: {session.active_revision_reason ?? "Not specified"}
+          </p>
+        ) : session.resumed ? (
           <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
             <span className="size-1.5 rounded-full bg-blue-600" />
             Previous progress restored
@@ -659,7 +677,7 @@ function EworksCalculateContent() {
             )}
             {step === 1 && (
               <EworksButton className="flex-[2] sm:flex-1" disabled={submitting} onClick={() => void runSubmit()}>
-                {submitting ? "Submitting…" : "Submit"}
+                {submitting ? "Submitting…" : revisionInProgress ? "Submit Revised Estimate" : "Submit"}
               </EworksButton>
             )}
           </div>
@@ -678,7 +696,7 @@ function EworksCalculateContent() {
             errors={errors}
             onFindingsReportChange={handleFindingsReportChange}
             findingsReportSaving={findingsReportSaving}
-            submitted={submitted}
+            submitted={isLockedSubmitted}
           />
         )}
 
@@ -704,7 +722,7 @@ function EworksCalculateContent() {
           />
         )}
 
-        {step === 2 && submitted && (
+        {step === 2 && isLockedSubmitted && (
           <div className="space-y-4 rounded-lg border border-emerald-300 bg-emerald-50 p-6 text-center">
             <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-700">
               ✓

@@ -9,7 +9,7 @@ export function getDashboardForRole(role: UserRole): string | null {
     case "estimator":
       return "/estimator/dashboard";
     case "engineer":
-      return "/engineer/jobs";
+      return "/engineer/assigned-estimates";
     case "client":
       return null;
     default:

@@ -8,9 +8,23 @@ from app.core.exceptions import AppError, success_response
 from app.core.security import UserRole
 from app.db.session import DbSession
 from app.schemas.engineer_session import EngineerSiteVisitUpdate
+from app.schemas.quote_job_assignment import EngineerAssignedJobRead
 from app.services.engineer_session_service import get_engineer_session, update_engineer_site_visit
+from app.services.quote_job_assignment_service import list_assigned_jobs_for_engineer
 
 router = APIRouter(prefix="/engineer", tags=["engineer"])
+
+
+@router.get("/jobs/assigned")
+def list_engineer_assigned_jobs(
+    db: DbSession,
+    _user: AuthenticatedUser = Depends(require_roles(UserRole.ENGINEER)),
+):
+    items = list_assigned_jobs_for_engineer(db, _user)
+    return success_response(
+        [EngineerAssignedJobRead.model_validate(item).model_dump(mode="json") for item in items],
+        meta={"total": len(items)},
+    )
 
 
 def _require_session_token(

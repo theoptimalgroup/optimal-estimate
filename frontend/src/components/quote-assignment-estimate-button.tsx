@@ -15,7 +15,16 @@ type AssignmentEstimateButtonProps = {
 };
 
 export function assignmentEstimateLabel(assignment: QuoteAssignment): string {
-  return assignment.has_calculation_session ? "Continue Estimate" : "Start Estimate";
+  switch (assignment.status) {
+    case "submitted":
+      return "View Submission";
+    case "in_progress":
+      return "Continue Estimate";
+    case "assigned":
+      return assignment.has_calculation_session ? "Continue Estimate" : "Start Estimate";
+    default:
+      return assignment.has_calculation_session ? "Continue Estimate" : "Start Estimate";
+  }
 }
 
 export function AssignmentEstimateButton({

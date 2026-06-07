@@ -26,6 +26,16 @@ async def lifespan(_app: FastAPI):
 
     startup_logger = logging.getLogger(__name__)
 
+    if settings.is_dev_auth:
+        if settings.dev_auth_enabled:
+            startup_logger.info("Dev auth enabled for %s", settings.dev_user_email)
+        else:
+            startup_logger.warning(
+                "AUTH_PROVIDER=dev but DEV_AUTH_ENABLED=false; GET /auth/me will return 401 without a token"
+            )
+    elif settings.is_azure_auth:
+        startup_logger.info("Azure auth enabled (tenant=%s)", settings.azure_tenant_id)
+
     db = SessionLocal()
     try:
         cleared = clear_stale_running_sync_locks(db)

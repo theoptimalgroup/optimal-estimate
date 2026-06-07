@@ -17,7 +17,12 @@ from app.schemas.eworks_link import (
     WorkBreakdownResult,
     migrate_legacy_material_rows,
 )
+from sqlalchemy.orm import Session
+
+from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot
+from app.services.eworks_link_service import work_skill_name
 from app.services.eworks_questionnaire_service import format_time_frame
+from app.utils.html_text import html_to_plain_text, prepare_pdf_rich_text
 from app.utils.work_label import format_product_label, format_work_label
 
 
@@ -194,16 +199,19 @@ def _work_parking_section(block: WorkBlockSnapshot) -> dict[str, object]:
 def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) -> dict:
     suppliers = [MaterialSupplier.model_validate(item) for item in migrate_legacy_material_rows(block.materials_to_order)]
     product_label = format_product_label(block.product_name, block.product_code)
+    scope_plain, scope_html = _rich_text_fields(block.scope)
+    other_notes_plain, other_notes_html = _rich_text_fields(block.other_notes)
     return {
         "index": index,
         "title": format_work_label(
             product_name=block.product_name,
             product_code=block.product_code,
-            scope=block.scope,
+            scope=html_to_plain_text(block.scope),
             index=index - 1,
         ),
         "product_label": product_label,
-        "scope": _display(block.scope),
+        "scope": scope_plain,
+        "scope_html": scope_html,
         "material_suppliers": _supplier_material_sections(suppliers),
         "shelf_materials_rows": _material_table_rows(block.shelf_materials_rows),
         "skill_required": _display(block.skill_required or trade_name),
@@ -213,7 +221,8 @@ def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) ->
         "engineer": _engineer_summary(block),
         "labour": _labour_summary(block),
         "parking": {"required": False, "fields": [], "notes": None, "maps_url": None},
-        "other_notes": _display(block.other_notes),
+        "other_notes": other_notes_plain,
+        "other_notes_html": other_notes_html,
     }
 
 
@@ -262,12 +271,19 @@ def _sum_lines(lines: list[LineBreakdown]) -> Decimal:
 
 
 def _truncate_scope(scope: str | None, *, limit: int = 80) -> str:
-    text = (scope or "").strip()
+    text = html_to_plain_text(scope).strip()
     if not text:
         return "—"
     if len(text) <= limit:
         return text
     return f"{text[:limit]}…"
+
+
+def _rich_text_fields(value: object | None) -> tuple[str, str]:
+    if value is None or not str(value).strip():
+        return "—", ""
+    text = str(value).strip()
+    return _display(html_to_plain_text(text)), prepare_pdf_rich_text(text)
 
 
 def _format_line_items(breakdown: CalculationBreakdown) -> list[dict[str, str]]:
@@ -294,9 +310,11 @@ def _format_work_results(
         title = format_work_label(
             product_name=block.product_name if block else None,
             product_code=block.product_code if block else None,
-            scope=work.scope or (block.scope if block else None),
+            scope=html_to_plain_text(work.scope or (block.scope if block else None)),
             index=work.work_index,
         )
+        notes_raw = (work.internal_notes or work.breakdown.internal_notes or "").strip() or None
+        notes_plain, notes_html = _rich_text_fields(notes_raw)
         works.append(
             {
                 "index": work.work_index + 1,
@@ -304,7 +322,8 @@ def _format_work_results(
                 "scope": _truncate_scope(work.scope),
                 "labour_subtotal": _money(labour_total),
                 "materials_subtotal": _money(materials_total),
-                "internal_notes": (work.internal_notes or work.breakdown.internal_notes or "").strip() or None,
+                "internal_notes": None if notes_plain == "—" else notes_plain,
+                "internal_notes_html": notes_html,
             }
         )
     return works
@@ -368,7 +387,12 @@ def build_eworks_estimate_pdf_context(
     header_parts = [part for part in (step1.engineer_name, step1.quote_number, step1.job_number) if part]
 
     work_results = work_breakdowns or []
-    combined_notes = (internal_notes or breakdown.internal_notes or "").strip() or None
+    combined_notes_raw = (internal_notes or breakdown.internal_notes or "").strip() or None
+    combined_notes_plain, combined_notes_html = _rich_text_fields(combined_notes_raw)
+    combined_notes = None if combined_notes_plain == "—" else combined_notes_plain
+    quote_description_plain = _quote_description(step1)
+    quote_description_html = prepare_pdf_rich_text(quote_description_plain)
+    findings_plain, findings_html = _rich_text_fields(step1.findings_report)
     per_work_page, combined_page, notes_page, total_pages = _build_results_pages(
         work_breakdowns=work_results,
         internal_notes=combined_notes,
@@ -382,8 +406,10 @@ def build_eworks_estimate_pdf_context(
         "summary_title": "Quote Summary",
         "estimation_fields": estimation_fields,
         "estimation_field_rows": _chunk_fields(estimation_fields, 3),
-        "quote_description": _quote_description(step1),
-        "findings_report": _display(step1.findings_report),
+        "quote_description": quote_description_plain,
+        "quote_description_html": quote_description_html,
+        "findings_report": findings_plain,
+        "findings_report_html": findings_html,
         "trade_name": _display(step1.trade_name),
         "work_forms": work_forms,
         "charges_fields": charges_fields,
@@ -406,9 +432,116 @@ def build_eworks_estimate_pdf_context(
             "works": _format_work_results(work_results, works),
             "combined": _format_combined_quote(breakdown, aggregated_summary),
             "internal_notes": combined_notes,
+            "internal_notes_html": combined_notes_html,
         },
         "per_work_page": per_work_page,
         "combined_page": combined_page,
         "notes_page": notes_page,
         "total_pages": total_pages,
+    }
+
+
+def build_all_trades_pdf_context(
+    *,
+    db: Session,
+    step1: Step1Snapshot,
+    step2: Step2Snapshot,
+    breakdown: dict,
+    work_breakdowns: list[dict],
+    work_indexes: list[int] | None = None,
+) -> dict:
+    from app.services.calculation_session_service import (
+        _dashboard_quote_summary_breakdown,
+        _resolve_work_product_fields,
+        _work_subtotals_from_breakdown,
+    )
+    from app.services.quote_job_assignment_service import (
+        _comparison_additional_charges_total,
+        _comparison_charge_lines,
+    )
+
+    summary_breakdown = _dashboard_quote_summary_breakdown(breakdown)
+    if summary_breakdown is None:
+        raise ValueError("Quote breakdown is required for all-trades PDF")
+
+    breakdown_map = {item["work_index"]: item for item in work_breakdowns}
+    all_trades_works: list[dict[str, object]] = []
+    selected_indexes = set(work_indexes) if work_indexes is not None else None
+    works_subtotal = Decimal("0")
+
+    for index, block in enumerate(step2.works):
+        if selected_indexes is not None and index not in selected_indexes:
+            continue
+        work_result = breakdown_map.get(index, {})
+        work_breakdown = work_result.get("breakdown") or {}
+        labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_breakdown)
+        labour_amount = labour_subtotal or Decimal("0")
+        materials_amount = materials_subtotal or Decimal("0")
+        work_subtotal = labour_amount + materials_amount
+        works_subtotal += work_subtotal
+        product_name, product_code = _resolve_work_product_fields(db, block)
+        trade_name = work_skill_name(block, step1.trade_name or "")
+        product_label = format_work_label(
+            product_name=product_name,
+            product_code=product_code,
+            scope=html_to_plain_text(block.scope),
+            index=index,
+        )
+        all_trades_works.append(
+            {
+                "index": index + 1,
+                "trade_name": _display(trade_name),
+                "product_name": _display(product_name),
+                "product_code": _display(product_code) if product_code else None,
+                "product_label": product_label,
+                "scope_preview": _truncate_scope(block.scope),
+                "labour_subtotal": _money(labour_subtotal),
+                "materials_subtotal": _money(materials_subtotal),
+                "work_subtotal": _money(work_subtotal),
+            }
+        )
+
+    charge_lines = _comparison_charge_lines(breakdown)
+    additional_charges = [
+        {"label": line.label, "amount": _money(line.amount)}
+        for line in charge_lines
+        if line.amount > 0
+    ]
+    vat_rate = breakdown.get("vat_rate")
+    additional_charges_total = _comparison_additional_charges_total(charge_lines)
+
+    if work_indexes is not None:
+        vat_total = summary_breakdown.vat_total
+        if vat_rate is not None:
+            rate = Decimal(str(vat_rate))
+            vat_total = ((works_subtotal + additional_charges_total) * rate / Decimal("100")).quantize(
+                Decimal("0.01")
+            )
+        final_total = works_subtotal + additional_charges_total + vat_total
+        summary = {
+            "works_subtotal": _money(works_subtotal),
+            "additional_charges_total": _money(additional_charges_total),
+            "vat_rate": float(vat_rate) if vat_rate is not None else None,
+            "vat_total": _money(vat_total),
+            "final_total": _money(final_total),
+        }
+    else:
+        summary = {
+            "works_subtotal": _money(summary_breakdown.works_subtotal),
+            "additional_charges_total": _money(additional_charges_total),
+            "vat_rate": float(vat_rate) if vat_rate is not None else None,
+            "vat_total": _money(summary_breakdown.vat_total),
+            "final_total": _money(summary_breakdown.final_total),
+        }
+
+    return {
+        "document_title": "All Trades / Skills",
+        "quote_number": step1.quote_number,
+        "job_number": step1.job_number,
+        "client_name": _display(step1.client_name),
+        "property_address": _display(step1.property_address),
+        "engineer_name": _display(step1.engineer_name),
+        "all_trades_works": all_trades_works,
+        "summary": summary,
+        "additional_charges": additional_charges,
     }
