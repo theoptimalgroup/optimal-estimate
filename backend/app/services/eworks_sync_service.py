@@ -708,6 +708,18 @@ def _upsert_quotes(
                     eworks_id,
                 )
 
+            try:
+                from app.services.eworks_quote_appointment_service import (
+                    maybe_fetch_quote_sales_appointments_after_list_upsert,
+                )
+
+                maybe_fetch_quote_sales_appointments_after_list_upsert(db, row, raw)
+            except Exception:
+                logger.exception(
+                    "Failed to fetch quote sales appointments for eWorks Quote id=%s; continuing quote upsert",
+                    eworks_id,
+                )
+
         except Exception as exc:
             logger.exception("Failed to upsert eWorks Quote id=%s: %s", raw.get("id"), exc)
             summary.failed += 1

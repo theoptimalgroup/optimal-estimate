@@ -178,7 +178,7 @@ def test_maybe_fetch_job_detail_triggers_detail_fetch(mock_fetch, db_session, mo
         "app.services.eworks_job_detail_sync_service.settings.eworks_sync_job_details_only_with_appointments",
         True,
     )
-    mock_fetch.return_value = _detail_payload()
+    mock_fetch.return_value = (_detail_payload(), 0)
     job = _seed_job(db_session, total_appointments=1)
     stats = JobDetailFetchStats()
 
@@ -223,8 +223,11 @@ def test_maybe_fetch_job_detail_skips_when_total_appointments_zero(mock_fetch, d
 
 def test_apply_job_detail_payload_creates_appointment_rows(db_session):
     job = _seed_job(db_session, total_appointments=1)
-    created, updated = apply_job_detail_payload(db_session, job, _detail_payload())
+    found, created, updated = apply_job_detail_payload(db_session, job, _detail_payload())
     db_session.commit()
+    assert found == 1
+    assert created == 1
+    assert updated == 0
 
     rows = (
         db_session.query(EworksJobAppointment)
@@ -249,7 +252,7 @@ def test_upsert_jobs_triggers_detail_fetch_when_total_appointments_positive(
         "app.core.config.settings.eworks_sync_job_details_only_with_appointments",
         True,
     )
-    mock_fetch.return_value = _detail_payload()
+    mock_fetch.return_value = (_detail_payload(), 0)
 
     from app.services.eworks_sync_service import _upsert_jobs
 
@@ -380,27 +383,89 @@ def test_detail_sync_cancelled_appointment_stored_but_not_in_assigned_jobs(
     assert resp.json()["data"] == []
 
 
+def _real_detail_payload(*, email: str = "rohit@example.com", name: str = "Rohit", status: str = "Scheduled") -> dict:
+    return {
+        "id": 7001,
+        "job_ref": "JOB-7001",
+        "total_appointments": 1,
+        "appointments": [
+            {
+                "id": 9201,
+                "appointment_user": {"email_address": email, "user_name": name},
+                "appointment_time": "2026-06-10 11:00",
+                "total_time": "60",
+                "is_sales_appointment": "1",
+                "status": status,
+                "mobile": "07123456789",
+                "telephone": "02071234567",
+            }
+        ],
+    }
+
+
+def _seed_job_with_stored_detail(
+    db_session,
+    *,
+    eworks_job_id: int = 7001,
+    detail_payload: dict | None = None,
+) -> EworksJob:
+    job = _seed_job(db_session, eworks_job_id=eworks_job_id, total_appointments=1)
+    job.raw_detail_payload = detail_payload or _real_detail_payload()
+    db_session.commit()
+    db_session.refresh(job)
+    return job
+
+
+@patch("app.auth.dependencies.settings")
+def test_backfill_endpoint_job_ref_single_mode(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="admin")
+    _seed_job_with_stored_detail(db_session, eworks_job_id=7399, detail_payload=_real_detail_payload())
+    _seed_job_with_stored_detail(db_session, eworks_job_id=7400, detail_payload=_real_detail_payload())
+
+    resp = api_client.post("/api/v1/eworks-sync/jobs/backfill-appointments?job_ref=JOB-7399")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["jobs_scanned"] == 1
+    assert data["appointments_found"] == 1
+    assert data["stopped_reason"] == "completed"
+
+
+@patch("app.auth.dependencies.settings")
+def test_backfill_endpoint_creates_rows_from_stored_detail(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="admin")
+    _seed_job_with_stored_detail(db_session, eworks_job_id=7201)
+    _seed_job(db_session, eworks_job_id=7202, total_appointments=0)
+
+    resp = api_client.post("/api/v1/eworks-sync/jobs/backfill-appointments")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["jobs_scanned"] == 2
+    assert data["jobs_with_total_appointments"] == 1
+    assert data["appointments_found"] == 1
+    assert data["appointments_created"] == 1
+    assert data["sales_appointments_found"] == 1
+    assert data["detail_fetches_attempted"] == 0
+    assert "raw_payload" not in resp.text
+
+
 @patch("app.services.eworks_job_detail_sync_service.fetch_job_detail")
 @patch("app.auth.dependencies.settings")
-def test_backfill_endpoint_returns_summary_fields(mock_settings, mock_fetch, api_client, db_session):
+def test_backfill_endpoint_fetches_missing_when_requested(mock_settings, mock_fetch, api_client, db_session):
     _patch_dev_user(mock_settings, role="admin")
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr("app.core.config.settings.eworks_api_enabled", True)
     try:
-        _seed_job(db_session, eworks_job_id=7201, total_appointments=1)
-        _seed_job(db_session, eworks_job_id=7202, total_appointments=0)
-        mock_fetch.return_value = _detail_payload()
+        _seed_job(db_session, eworks_job_id=7203, total_appointments=1)
+        mock_fetch.return_value = (_detail_payload(), 0)
 
-        resp = api_client.post("/api/v1/eworks-sync/jobs/backfill-appointments?limit=5")
+        resp = api_client.post("/api/v1/eworks-sync/jobs/backfill-appointments?limit=5&fetch_missing=true")
         assert resp.status_code == 200
         data = resp.json()["data"]
-        assert data["jobs_scanned"] == 2
+        assert data["jobs_scanned"] == 1
         assert data["jobs_with_total_appointments"] == 1
         assert data["detail_fetches_attempted"] == 1
         assert data["detail_fetches_success"] == 1
-        assert data["detail_fetches_failed"] == 0
         assert data["appointments_created"] == 1
-        assert data["appointments_updated"] == 0
     finally:
         monkeypatch.undo()
 
@@ -410,10 +475,11 @@ def test_backfill_service_counts_failures(mock_fetch, db_session):
     _seed_job(db_session, eworks_job_id=7301, total_appointments=1)
     mock_fetch.side_effect = RuntimeError("detail API unavailable")
 
-    summary = backfill_job_appointments_from_details(db_session, limit=1)
+    summary = backfill_job_appointments_from_details(db_session, limit=1, fetch_missing=True)
 
     assert summary.jobs_scanned == 1
     assert summary.jobs_with_total_appointments == 1
     assert summary.detail_fetches_attempted == 1
     assert summary.detail_fetches_success == 0
     assert summary.detail_fetches_failed == 1
+    assert summary.failed == 1

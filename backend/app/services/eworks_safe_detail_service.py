@@ -12,6 +12,7 @@ from app.models.calculation_session import CalculationSession
 from app.models.eworks_sync import EworksJob, EworksQuote
 from app.services.eworks_acceptance_sync_service import resolve_eworks_quote_id
 from app.services.eworks_job_appointment_service import serialize_job_appointments
+from app.services.eworks_quote_appointment_service import serialize_quote_appointments
 from app.services.eworks_sync_service import (
     _extract_tags_from_raw,
     extract_customer_contact_id_from_raw,
@@ -416,6 +417,7 @@ def build_quote_safe_detail(db: Session, quote: EworksQuote) -> dict[str, Any]:
             "accepted_date": _as_str(_pick(raw, "accepted_date", "Accepted_Date")),
         },
         "linked_estimate": _find_linked_estimate(db, quote=quote),
+        "sales_appointments": serialize_quote_appointments(db, quote),
     }
     return redact_sensitive_data(detail)
 

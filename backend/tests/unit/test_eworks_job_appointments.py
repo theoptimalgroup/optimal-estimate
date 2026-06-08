@@ -16,15 +16,19 @@ from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
-from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote
+from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote, EworksQuoteAppointment
 from app.models.user import User
 from app.services.engineer_assigned_jobs_service import list_assigned_jobs_for_engineer
 from app.services.eworks_job_appointment_service import (
     extract_job_appointments_from_raw,
     is_cancelled_appointment_status,
+    parse_is_sales_appointment,
+    resolve_is_sales_appointment,
     select_active_appointment,
     sync_job_appointments,
 )
+from app.services.eworks_job_detail_sync_service import backfill_job_appointments_from_details
+from app.services.eworks_quote_appointment_service import backfill_quote_sales_appointments_from_eworks
 
 
 @pytest.fixture()
@@ -34,9 +38,15 @@ def db_session():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    for table in [User.__table__, CalculationSession.__table__, EworksQuote.__table__, EworksJob.__table__]:
+    for table in [
+        User.__table__,
+        CalculationSession.__table__,
+        EworksQuote.__table__,
+        EworksJob.__table__,
+        EworksJobAppointment.__table__,
+        EworksQuoteAppointment.__table__,
+    ]:
         table.create(engine, checkfirst=True)
-    EworksJobAppointment.__table__.create(engine, checkfirst=True)
 
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -137,6 +147,95 @@ def _seed_job(db_session, *, eworks_job_id: int, raw_payload: dict, **kwargs) ->
     db_session.commit()
     db_session.refresh(job)
     return job
+
+
+def _real_eworks_payload(*, is_sales: str = "1") -> dict:
+    return {
+        "appointments": [
+            {
+                "id": 9901,
+                "appointment_user": {"email_address": "rohit@example.com", "user_name": "Rohit"},
+                "appointment_time": "2026-06-10 11:00",
+                "total_time": "60",
+                "is_sales_appointment": is_sales,
+                "status": "Scheduled",
+                "mobile": "07123456789",
+                "telephone": "02071234567",
+            }
+        ]
+    }
+
+
+def test_extract_real_shaped_eworks_start_date_when_appointment_time_zero():
+    rows = extract_job_appointments_from_raw(
+        {
+            "appointments": [
+                {
+                    "id": 65951,
+                    "appointment_user": {
+                        "email_address": "alex@theoptimalgroup.co.uk",
+                        "user_name": "a.alves@btconnect.com",
+                        "full_name": "0. Alex Alves",
+                    },
+                    "appointment_time": "0",
+                    "start_date": "2026-06-12T08:00:00.000Z",
+                    "end_date": "2026-06-12T13:00:00.000Z",
+                    "status": "1",
+                    "status_text": "Awaiting",
+                    "total_time": "300",
+                }
+            ]
+        }
+    )
+    assert len(rows) == 1
+    assert rows[0]["user_name"] == "Alex Alves"
+    assert rows[0]["user_email"] == "alex@theoptimalgroup.co.uk"
+    assert rows[0]["start_at"] == "2026-06-12T08:00:00.000Z"
+    assert rows[0]["end_at"] == "2026-06-12T13:00:00.000Z"
+    assert rows[0]["status"] == "Awaiting"
+    assert rows[0]["duration_minutes"] == 300
+
+
+def test_extract_real_shaped_eworks_appointment_user():
+    rows = extract_job_appointments_from_raw(_real_eworks_payload())
+    assert len(rows) == 1
+    assert rows[0]["user_name"] == "Rohit"
+    assert rows[0]["user_email"] == "rohit@example.com"
+    assert rows[0]["start_at"] == "2026-06-10 11:00"
+    assert rows[0]["duration_minutes"] == 60
+    assert rows[0]["user_mobile"] == "07123456789"
+    assert rows[0]["user_telephone"] == "02071234567"
+
+
+def test_is_sales_appointment_parsing():
+    assert parse_is_sales_appointment("1") is True
+    assert parse_is_sales_appointment(1) is True
+    assert parse_is_sales_appointment("true") is True
+    assert parse_is_sales_appointment("") is False
+    assert parse_is_sales_appointment(None) is False
+    assert parse_is_sales_appointment("0") is False
+
+
+def test_real_shaped_payload_sync_creates_row(db_session):
+    job = EworksJob(
+        eworks_job_id=5100,
+        job_ref="JOB-5100",
+        customer_name="ACME Ltd",
+        raw_detail_payload=_real_eworks_payload(is_sales=""),
+    )
+    db_session.add(job)
+    db_session.flush()
+    sync_job_appointments(db_session, job, raw_payload=job.raw_detail_payload)
+    db_session.commit()
+
+    rows = (
+        db_session.query(EworksJobAppointment)
+        .filter(EworksJobAppointment.eworks_job_id == 5100)
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].is_sales_appointment is False
+    assert rows[0].user_email == "rohit@example.com"
 
 
 def test_extract_job_appointments_from_raw_user_name():
@@ -291,6 +390,121 @@ def test_assigned_jobs_response_excludes_raw_payload(mock_settings, api_client, 
     assert resp.status_code == 200
     assert "raw_payload" not in body
     assert "secret_token" not in body
+
+
+def _job_33957_payload() -> dict:
+    return {
+        "appointments": [
+            {
+                "id": 65931,
+                "notes": "",
+                "job_id": "35971",
+                "status": "1",
+                "user_id": "289",
+                "end_date": "2026-06-09T15:45:00.000Z",
+                "start_date": "2026-06-09T14:30:00.000Z",
+                "total_time": "75",
+                "status_text": "Awaiting",
+                "appointment_time": "0",
+                "appointment_type": "1 Hour Job",
+                "appointment_user": {
+                    "id": 14,
+                    "mobile": "+44-7775 655 243",
+                    "full_name": "0. Alex Alves",
+                    "telephone": "",
+                    "user_name": "a.alves@btconnect.com",
+                    "email_address": "alex@theoptimalgroup.co.uk",
+                },
+                "is_sales_appointment": None,
+            }
+        ]
+    }
+
+
+def test_job_33957_shaped_payload_extracts_appointment_fields():
+    rows = extract_job_appointments_from_raw(_job_33957_payload())
+    assert len(rows) == 1
+    assert rows[0]["user_name"] == "Alex Alves"
+    assert rows[0]["user_email"] == "alex@theoptimalgroup.co.uk"
+    assert rows[0]["status"] == "Awaiting"
+    assert rows[0]["appointment_type"] == "1 Hour Job"
+    assert rows[0]["start_at"] == "2026-06-09T14:30:00.000Z"
+    assert rows[0]["end_at"] == "2026-06-09T15:45:00.000Z"
+    assert rows[0]["is_sales_appointment"] is False
+
+
+def test_resolve_is_sales_appointment_requires_flag_or_source():
+    assert resolve_is_sales_appointment({"is_sales_appointment": "1"}) is True
+    assert resolve_is_sales_appointment({"tab": "Sales Appointments"}) is True
+    assert resolve_is_sales_appointment({"appointment_type": "Sales Visit"}) is True
+    assert resolve_is_sales_appointment({"is_sales_appointment": None}) is False
+    assert resolve_is_sales_appointment({}, from_sales_list=True) is True
+
+
+def test_job_ref_single_mode_backfill_processes_one_job(db_session):
+    job_a = EworksJob(
+        eworks_job_id=33957,
+        job_ref="JOB-33957",
+        customer_name="Customer A",
+        raw_detail_payload=_job_33957_payload(),
+        total_appointments=1,
+    )
+    job_b = EworksJob(
+        eworks_job_id=33958,
+        job_ref="JOB-33958",
+        customer_name="Customer B",
+        raw_detail_payload=_job_33957_payload(),
+        total_appointments=1,
+    )
+    db_session.add_all([job_a, job_b])
+    db_session.commit()
+
+    summary = backfill_job_appointments_from_details(db_session, job_ref="JOB-33957")
+
+    assert summary.jobs_scanned == 1
+    assert summary.appointments_found == 1
+    rows = (
+        db_session.query(EworksJobAppointment)
+        .filter(EworksJobAppointment.eworks_job_id == 33957)
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].user_name == "Alex Alves"
+    assert (
+        db_session.query(EworksJobAppointment)
+        .filter(EworksJobAppointment.eworks_job_id == 33958)
+        .count()
+        == 0
+    )
+
+
+def test_quote_backfill_returns_zero_for_job_only_appointment_data(db_session, monkeypatch):
+    quote = EworksQuote(
+        eworks_quote_id=29209,
+        quote_ref="Q22105",
+        customer_name="Customer",
+    )
+    db_session.add(quote)
+    db_session.commit()
+
+    monkeypatch.setattr("app.core.config.settings.eworks_sync_sales_appointments_enabled", True)
+
+    def _fake_fetch(_eworks_quote_id: int):
+        return _job_33957_payload(), 0
+
+    monkeypatch.setattr(
+        "app.services.eworks_quote_appointment_service.fetch_quote_detail",
+        _fake_fetch,
+    )
+
+    summary = backfill_quote_sales_appointments_from_eworks(
+        db_session,
+        quote_ref="Q22105",
+    )
+
+    assert summary.quotes_scanned == 1
+    assert summary.appointments_found == 0
+    assert summary.sales_appointments_found == 0
 
 
 @patch("app.auth.dependencies.settings")

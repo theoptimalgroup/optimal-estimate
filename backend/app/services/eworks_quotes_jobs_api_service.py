@@ -6,7 +6,8 @@ Read-only from eWorks — this module never writes to eWorks.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -38,6 +39,57 @@ def _require_eworks_credentials() -> tuple[str, str]:
     return base_url, api_key
 
 
+def _api_request_delay() -> None:
+    delay = float(settings.eworks_api_request_delay_seconds or 0)
+    if delay > 0:
+        time.sleep(delay)
+
+
+def _get_with_retry(
+    client: httpx.Client,
+    *,
+    url: str,
+    headers: dict[str, str],
+    params: dict[str, Any] | None = None,
+) -> tuple[httpx.Response, int]:
+    """GET with exponential backoff on HTTP 429. Returns (response, rate_limit_hits)."""
+    max_retries = max(0, int(settings.eworks_api_max_retries))
+    backoff = float(settings.eworks_api_retry_backoff_seconds or 0)
+    rate_limited_hits = 0
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.get(url, headers=headers, params=params)
+        except httpx.TimeoutException as exc:
+            raise AppError("EWORKS_API_UNAVAILABLE", f"eWorks API timed out: {url}", 502) from exc
+        except httpx.HTTPError as exc:
+            raise AppError("EWORKS_API_UNAVAILABLE", f"Cannot reach eWorks API: {url}", 502) from exc
+
+        if response.status_code != 429:
+            _api_request_delay()
+            return response, rate_limited_hits
+
+        rate_limited_hits += 1
+        if attempt >= max_retries:
+            raise AppError(
+                "EWORKS_RATE_LIMITED",
+                f"eWorks API rate limited after {max_retries} retries: {url}",
+                429,
+            )
+
+        wait = backoff * (2**attempt)
+        logger.warning(
+            "eWorks API 429 for %s; retry %s/%s in %.1fs",
+            url,
+            attempt + 1,
+            max_retries,
+            wait,
+        )
+        time.sleep(wait)
+
+    raise AppError("EWORKS_RATE_LIMITED", f"eWorks API rate limited: {url}", 429)
+
+
 def _fetch_page(
     client: httpx.Client,
     *,
@@ -52,12 +104,7 @@ def _fetch_page(
     if extra_params:
         params.update({k: v for k, v in extra_params.items() if v is not None})
 
-    try:
-        response = client.get(url, headers=headers, params=params)
-    except httpx.TimeoutException as exc:
-        raise AppError("EWORKS_API_UNAVAILABLE", f"eWorks API timed out: {url}", 502) from exc
-    except httpx.HTTPError as exc:
-        raise AppError("EWORKS_API_UNAVAILABLE", f"Cannot reach eWorks API: {url}", 502) from exc
+    response, _rate_limited = _get_with_retry(client, url=url, headers=headers, params=params)
 
     if response.status_code >= 500:
         raise AppError(
@@ -271,8 +318,8 @@ def _unwrap_single_record(payload: Any) -> dict[str, Any]:
     raise AppError("EWORKS_API_UNAVAILABLE", "eWorks detail response has unexpected structure", 502)
 
 
-def fetch_quote_detail(eworks_quote_id: int) -> dict[str, Any]:
-    """Fetch a single Quote detail record from eWorks (read-only)."""
+def fetch_quote_detail(eworks_quote_id: int) -> tuple[dict[str, Any], int]:
+    """Fetch a single Quote detail record from eWorks (read-only). Returns (payload, rate_limit_hits)."""
     if not settings.eworks_api_enabled:
         raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
 
@@ -280,13 +327,8 @@ def fetch_quote_detail(eworks_quote_id: int) -> dict[str, Any]:
     url = f"{base_url}/Quote/{eworks_quote_id}"
     headers = {"api_key": api_key, "Accept": "application/json"}
 
-    try:
-        with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
-            response = client.get(url, headers=headers)
-    except httpx.TimeoutException as exc:
-        raise AppError("EWORKS_API_UNAVAILABLE", f"eWorks Quote detail API timed out: {url}", 502) from exc
-    except httpx.HTTPError as exc:
-        raise AppError("EWORKS_API_UNAVAILABLE", f"Cannot reach eWorks Quote detail API: {url}", 502) from exc
+    with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
+        response, rate_limited = _get_with_retry(client, url=url, headers=headers)
 
     if response.status_code >= 500:
         raise AppError(
@@ -306,11 +348,11 @@ def fetch_quote_detail(eworks_quote_id: int) -> dict[str, Any]:
     except ValueError as exc:
         raise AppError("EWORKS_API_UNAVAILABLE", "eWorks Quote detail API returned invalid JSON", 502) from exc
 
-    return _unwrap_single_record(payload)
+    return _unwrap_single_record(payload), rate_limited
 
 
-def fetch_job_detail(eworks_job_id: int) -> dict[str, Any]:
-    """Fetch a single Job detail record from eWorks (read-only)."""
+def fetch_job_detail(eworks_job_id: int) -> tuple[dict[str, Any], int]:
+    """Fetch a single Job detail record from eWorks (read-only). Returns (payload, rate_limit_hits)."""
     if not settings.eworks_api_enabled:
         raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
 
@@ -318,13 +360,8 @@ def fetch_job_detail(eworks_job_id: int) -> dict[str, Any]:
     url = f"{base_url}/Job/{eworks_job_id}"
     headers = {"api_key": api_key, "Accept": "application/json"}
 
-    try:
-        with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
-            response = client.get(url, headers=headers)
-    except httpx.TimeoutException as exc:
-        raise AppError("EWORKS_API_UNAVAILABLE", f"eWorks Job detail API timed out: {url}", 502) from exc
-    except httpx.HTTPError as exc:
-        raise AppError("EWORKS_API_UNAVAILABLE", f"Cannot reach eWorks Job detail API: {url}", 502) from exc
+    with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
+        response, rate_limited = _get_with_retry(client, url=url, headers=headers)
 
     if response.status_code >= 500:
         raise AppError(
@@ -344,4 +381,4 @@ def fetch_job_detail(eworks_job_id: int) -> dict[str, Any]:
     except ValueError as exc:
         raise AppError("EWORKS_API_UNAVAILABLE", "eWorks Job detail API returned invalid JSON", 502) from exc
 
-    return _unwrap_single_record(payload)
+    return _unwrap_single_record(payload), rate_limited

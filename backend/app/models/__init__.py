@@ -8,6 +8,7 @@ from app.models.eworks_sync import (
     EworksJob,
     EworksJobAppointment,
     EworksQuote,
+    EworksQuoteAppointment,
     EworksSyncLock,
     EworksSyncRun,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "EworksQuote",
     "EworksJob",
     "EworksJobAppointment",
+    "EworksQuoteAppointment",
     "EworksCustomer",
     "EworksSyncRun",
     "EworksSyncLock",

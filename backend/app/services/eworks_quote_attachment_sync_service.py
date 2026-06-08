@@ -128,7 +128,7 @@ def sync_quote_attachments_from_eworks(
 
     # Fall back to quote detail payload embedded attachment keys.
     try:
-        detail_payload = fetch_quote_detail(eworks_quote_id)
+        detail_payload, _rate_limited = fetch_quote_detail(eworks_quote_id)
         result.detail_fetched = True
         result.endpoint_called = QUOTE_DETAIL_ENDPOINT.format(id=eworks_quote_id)
         keys_found = find_attachment_like_keys(detail_payload)

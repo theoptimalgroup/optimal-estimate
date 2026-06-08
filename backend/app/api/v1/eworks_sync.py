@@ -279,21 +279,89 @@ def trigger_jobs_sync(
 def backfill_job_appointments(
     db: DbSession,
     actor: AdminOnly,
-    limit: int | None = Query(default=None, ge=1, le=5000),
+    job_ref: str | None = Query(default=None),
+    eworks_job_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    timeout_seconds: float = Query(default=60.0, ge=1, le=3600),
+    fetch_missing: bool = Query(default=False),
 ):
-    """Fetch eWorks Job detail for synced jobs and backfill appointment rows (admin only)."""
+    """Backfill job appointment rows from stored detail payloads (admin only).
+
+    Job-level sales appointments (e.g. \"Sales Appointments for JOB-33957\" in eWorks)
+    are synced here — not via quote sales appointment backfill.
+    """
     from app.core.config import settings as cfg
     from app.services.eworks_job_detail_sync_service import backfill_job_appointments_from_details
 
-    if not cfg.eworks_api_enabled:
+    if fetch_missing and not cfg.eworks_api_enabled:
         raise HTTPException(status_code=503, detail="eWorks API is disabled")
 
-    effective_limit = limit
-    if effective_limit is None and cfg.eworks_sync_job_details_limit_per_run is not None:
-        effective_limit = cfg.eworks_sync_job_details_limit_per_run
-
-    summary = backfill_job_appointments_from_details(db, limit=effective_limit)
+    summary = backfill_job_appointments_from_details(
+        db,
+        job_ref=job_ref,
+        eworks_job_id=eworks_job_id,
+        limit=limit,
+        offset=offset,
+        timeout_seconds=timeout_seconds,
+        fetch_missing=fetch_missing,
+    )
     return success_response(EworksJobAppointmentBackfillRead.model_validate(summary.__dict__).model_dump())
+
+
+@router.post("/quotes/backfill-sales-appointments")
+def backfill_quote_sales_appointments(
+    db: DbSession,
+    actor: AdminOnly,
+    quote_ref: str | None = Query(default=None),
+    eworks_quote_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    lookback_days: int | None = Query(default=None, ge=1),
+    timeout_seconds: float = Query(default=60.0, ge=1, le=3600),
+    dry_run: bool = Query(default=False),
+    fetch_attachments: bool = Query(default=False),
+):
+    """Batch backfill quote-level sales appointments from eWorks quote detail (admin only).
+
+    Does not sync job-level sales appointments — use POST /jobs/backfill-appointments instead.
+    """
+    from app.core.config import settings as cfg
+    from app.schemas.eworks_sync_api import EworksQuoteSalesAppointmentBackfillRead
+    from app.services.eworks_quote_appointment_service import backfill_quote_sales_appointments_from_eworks
+    from app.services.eworks_sync_lock_service import release_sync_lock, try_acquire_sync_lock
+
+    if not cfg.eworks_api_enabled:
+        raise HTTPException(status_code=503, detail="eWorks API is disabled")
+    if not cfg.eworks_sync_sales_appointments_enabled:
+        raise HTTPException(status_code=503, detail="Quote sales appointment sync is disabled")
+
+    lock = try_acquire_sync_lock(db, "quote_sales_appointments")
+    if lock is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Quote sales appointment backfill is already running.",
+        )
+
+    lock_status = "failed"
+    try:
+        summary = backfill_quote_sales_appointments_from_eworks(
+            db,
+            quote_ref=quote_ref,
+            eworks_quote_id=eworks_quote_id,
+            limit=limit,
+            offset=offset,
+            lookback_days=lookback_days,
+            timeout_seconds=timeout_seconds,
+            dry_run=dry_run,
+            fetch_attachments=fetch_attachments,
+        )
+        lock_status = "success" if summary.failed == 0 else "failed"
+        return success_response(
+            EworksQuoteSalesAppointmentBackfillRead.model_validate(summary.__dict__).model_dump()
+        )
+    finally:
+        release_sync_lock(db, "quote_sales_appointments", status=lock_status)
 
 
 @router.post("/quotes/backfill-attachments")

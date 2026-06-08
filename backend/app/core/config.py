@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     eworks_api_key: str | None = None
     eworks_api_enabled: bool = False
     eworks_api_timeout_seconds: float = 10.0
+    eworks_api_request_delay_seconds: float = 0.2
+    eworks_api_max_retries: int = 3
+    eworks_api_retry_backoff_seconds: float = 2.0
     eworks_customers_resource_path: str = "Customer"
     eworks_sync_attachments_enabled: bool = False
     eworks_sync_attachment_files_enabled: bool = False
@@ -64,6 +67,8 @@ class Settings(BaseSettings):
     eworks_sync_job_details_enabled: bool = False
     eworks_sync_job_details_only_with_appointments: bool = True
     eworks_sync_job_details_limit_per_run: int | None = None
+    eworks_sync_sales_appointments_enabled: bool = False
+    eworks_sync_quote_details_for_appointments_enabled: bool = False
 
     # Background eWorks sync scheduler (disabled by default; enable on one worker only)
     eworks_background_sync_enabled: bool = False

@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -138,8 +139,47 @@ class EworksJobAppointment(Base):
     user_email: Mapped[str | None] = mapped_column(String(320))
     appointment_type: Mapped[str | None] = mapped_column(String(200))
     status: Mapped[str | None] = mapped_column(String(200))
+    is_sales_appointment: Mapped[bool | None] = mapped_column(Boolean)
     start_at: Mapped[str | None] = mapped_column(String(50))
     end_at: Mapped[str | None] = mapped_column(String(50))
+    duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    user_mobile: Mapped[str | None] = mapped_column(String(100))
+    user_telephone: Mapped[str | None] = mapped_column(String(100))
+    raw_safe_snapshot: Mapped[dict | None] = mapped_column(_json_col())
+    dedupe_key: Mapped[str] = mapped_column(String(300), nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EworksQuoteAppointment(Base):
+    """Normalized eWorks quote sales appointment rows extracted from quote detail payloads."""
+
+    __tablename__ = "eworks_quote_appointments"
+    __table_args__ = (
+        Index("ix_eworks_quote_appointments_eworks_quote_id", "eworks_quote_id"),
+        Index("ix_eworks_quote_appointments_user_email", "user_email"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    eworks_quote_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("eworks_quotes.eworks_quote_id", ondelete="CASCADE"), nullable=False
+    )
+    appointment_id: Mapped[int | None] = mapped_column(Integer)
+    quote_ref: Mapped[str | None] = mapped_column(String(100))
+    user_id: Mapped[int | None] = mapped_column(Integer)
+    user_name: Mapped[str | None] = mapped_column(String(500))
+    user_email: Mapped[str | None] = mapped_column(String(320))
+    user_mobile: Mapped[str | None] = mapped_column(String(100))
+    user_telephone: Mapped[str | None] = mapped_column(String(100))
+    appointment_type: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str | None] = mapped_column(String(200))
+    is_sales_appointment: Mapped[bool | None] = mapped_column(Boolean)
+    start_at: Mapped[str | None] = mapped_column(String(50))
+    end_at: Mapped[str | None] = mapped_column(String(50))
+    duration_minutes: Mapped[int | None] = mapped_column(Integer)
     raw_safe_snapshot: Mapped[dict | None] = mapped_column(_json_col())
     dedupe_key: Mapped[str] = mapped_column(String(300), nullable=False)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

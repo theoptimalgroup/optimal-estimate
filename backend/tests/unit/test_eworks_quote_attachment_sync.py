@@ -148,18 +148,21 @@ def test_quote_detail_payload_with_attachments_creates_rows(
     mock_attachment_settings.eworks_sync_attachments_enabled = True
     quote = _seed_quote(db_session)
     mock_fetch.return_value = []
-    mock_detail.return_value = {
-        "id": 29228,
-        "quote_ref": "Q22124",
-        "Documents": [
-            {
-                "document_id": "doc-1",
-                "name": "terms.pdf",
-                "content_type": "application/pdf",
-                "size": 1024,
-            }
-        ],
-    }
+    mock_detail.return_value = (
+        {
+            "id": 29228,
+            "quote_ref": "Q22124",
+            "Documents": [
+                {
+                    "document_id": "doc-1",
+                    "name": "terms.pdf",
+                    "content_type": "application/pdf",
+                    "size": 1024,
+                }
+            ],
+        },
+        0,
+    )
 
     result = sync_quote_attachments_from_eworks(db_session, quote)
 

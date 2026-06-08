@@ -311,6 +311,21 @@ class EworksSafeDates(BaseModel):
     accepted_date: str | None = None
 
 
+class EworksQuoteAppointmentSafeRead(BaseModel):
+    appointment_id: int | None = None
+    user_name: str | None = None
+    user_email: str | None = None
+    user_id: int | None = None
+    user_mobile: str | None = None
+    user_telephone: str | None = None
+    appointment_type: str | None = None
+    status: str | None = None
+    is_sales_appointment: bool | None = None
+    start_at: str | None = None
+    end_at: str | None = None
+    duration_minutes: int | None = None
+
+
 class EworksQuoteSafeDetailRead(BaseModel):
     identity: EworksQuoteSafeIdentity
     customer: EworksQuoteSafeCustomer
@@ -321,6 +336,7 @@ class EworksQuoteSafeDetailRead(BaseModel):
     custom_fields: list[EworksSafeCustomField] = Field(default_factory=list)
     dates: EworksSafeDates
     linked_estimate: EworksLinkedEstimate
+    sales_appointments: list[EworksQuoteAppointmentSafeRead] = Field(default_factory=list)
 
 
 class EworksJobSafeIdentity(BaseModel):
@@ -364,10 +380,14 @@ class EworksJobAppointmentSafeRead(BaseModel):
     user_name: str | None = None
     user_email: str | None = None
     user_id: int | None = None
+    user_mobile: str | None = None
+    user_telephone: str | None = None
     appointment_type: str | None = None
     status: str | None = None
+    is_sales_appointment: bool | None = None
     start_at: str | None = None
     end_at: str | None = None
+    duration_minutes: int | None = None
     is_active_assignment: bool = False
 
 
@@ -410,11 +430,35 @@ class EworksAttachmentDetailRead(EworksAttachmentSafeRead):
 class EworksJobAppointmentBackfillRead(BaseModel):
     jobs_scanned: int
     jobs_with_total_appointments: int
+    appointments_found: int = 0
+    sales_appointments_found: int = 0
     detail_fetches_attempted: int
     detail_fetches_success: int
     detail_fetches_failed: int
     appointments_created: int
     appointments_updated: int
+    failed: int = 0
+    skipped: int = 0
+    next_offset: int = 0
+    has_more: bool = False
+    elapsed_seconds: float = 0.0
+    stopped_reason: str = "completed"
+
+
+class EworksQuoteSalesAppointmentBackfillRead(BaseModel):
+    quotes_scanned: int
+    quote_details_fetched: int = 0
+    appointments_found: int
+    appointments_created: int
+    appointments_updated: int
+    sales_appointments_found: int
+    failed: int
+    skipped: int = 0
+    next_offset: int = 0
+    has_more: bool = False
+    elapsed_seconds: float = 0.0
+    stopped_reason: str = "completed"
+    rate_limited_count: int = 0
 
 
 class EworksQuoteAttachmentBackfillRead(BaseModel):
