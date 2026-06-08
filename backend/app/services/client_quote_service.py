@@ -23,7 +23,7 @@ from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot
 from app.utils.work_label import format_work_label
 from app.services.quote_acceptance_helpers import public_acceptance_from_session
 from app.services.calculation_session_pdf_service import render_session_quote_pdf
-from app.services.calculation_session_service import _dashboard_last_result, calculate_session
+from app.services.pdf_calculation_context_service import build_pdf_calculation_context
 
 
 def _generate_public_quote_token() -> str:
@@ -41,20 +41,18 @@ def _ensure_utc(value: datetime) -> datetime:
 
 
 def _get_breakdown_and_works(db: Session, session: CalculationSession):
-    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
-    step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else Step2Snapshot()
-    last_result = _dashboard_last_result(db, session)
-    if last_result and last_result.get("breakdown"):
-        breakdown = CalculationBreakdown.model_validate(last_result["breakdown"])
-        work_breakdowns = last_result.get("work_breakdowns") or []
-        return breakdown, step1, step2, work_breakdowns
-    result = calculate_session(
+    pdf_ctx = build_pdf_calculation_context(
         db,
-        session_id=session.id,
-        session_token=session.session_token,
-        step2=None,
+        session,
+        allow_recalculate=session.status != "submitted" and not session.locked,
+        view_type="public_client",
     )
-    return result.breakdown, step1, step2, result.work_breakdowns or []
+    return (
+        pdf_ctx.breakdown,
+        pdf_ctx.step1,
+        pdf_ctx.step2,
+        pdf_ctx.work_breakdowns,
+    )
 
 
 def _line_total(lines) -> Decimal:

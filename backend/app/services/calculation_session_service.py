@@ -193,16 +193,20 @@ def _dashboard_quote_summary_breakdown(breakdown: dict) -> DashboardQuoteSummary
 
 
 def _dashboard_last_result(db: Session, session: CalculationSession) -> dict | None:
-    ui_state = _session_ui_state(session)
-    last_result = ui_state.last_result if ui_state else None
-    if isinstance(last_result, dict):
-        breakdown = last_result.get("breakdown") or {}
-        if last_result.get("work_breakdowns") and breakdown.get("final_total") is not None:
-            return last_result
-    if not session.step2_snapshot:
+    from app.services.pdf_calculation_context_service import (
+        resolve_session_calculation_result,
+        session_blocks_recalculation,
+    )
+
+    try:
+        last_result, _ = resolve_session_calculation_result(
+            db,
+            session,
+            allow_recalculate=not session_blocks_recalculation(session),
+        )
+        return last_result
+    except AppError:
         return None
-    calc = calculate_session(db, session_id=session.id, session_token=session.session_token, step2=None)
-    return calc.model_dump(mode="json")
 
 
 def update_session_step2(
@@ -1647,37 +1651,39 @@ def render_combined_all_trades_pdf(
 ) -> tuple[bytes, str, str]:
     from app.adapters.pdf_renderer import render_all_trades_document
     from app.services.eworks_pdf_context_service import build_all_trades_pdf_context
+    from app.services.pdf_calculation_context_service import (
+        build_pdf_calculation_context,
+        session_blocks_recalculation,
+    )
 
     session = db.get(CalculationSession, session_id)
     if session is None:
         raise AppError("SESSION_NOT_FOUND", "Quote session not found", 404)
-    if not session.step2_snapshot:
-        raise AppError("STEP2_REQUIRED", "No saved work data for this quote", 400)
 
-    last_result = _dashboard_last_result(db, session)
-    if not last_result:
-        raise AppError("CALCULATION_REQUIRED", "No calculation result available for this quote", 400)
-
-    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
-    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
-    if not step2.works:
+    pdf_ctx = build_pdf_calculation_context(
+        db,
+        session,
+        allow_recalculate=not session_blocks_recalculation(session),
+        view_type="all_trades",
+    )
+    if not pdf_ctx.step2.works:
         raise AppError("WORKS_REQUIRED", "No works found for this quote", 400)
 
     unique_indexes = sorted({index for index in work_indexes})
     for index in unique_indexes:
-        if index < 0 or index >= len(step2.works):
+        if index < 0 or index >= len(pdf_ctx.step2.works):
             raise AppError("WORK_INDEX_INVALID", f"Invalid work index: {index}", 400)
 
-    all_work_indexes = set(range(len(step2.works)))
+    all_work_indexes = set(range(len(pdf_ctx.step2.works)))
     filtered_indexes = unique_indexes if set(unique_indexes) != all_work_indexes else None
 
-    breakdown = last_result.get("breakdown") or {}
-    work_breakdowns = last_result.get("work_breakdowns") or []
+    breakdown = pdf_ctx.breakdown.model_dump(mode="json")
+    work_breakdowns = [item.model_dump(mode="json") for item in pdf_ctx.work_breakdowns]
     try:
         context = build_all_trades_pdf_context(
             db=db,
-            step1=step1,
-            step2=step2,
+            step1=pdf_ctx.step1,
+            step2=pdf_ctx.step2,
             breakdown=breakdown,
             work_breakdowns=work_breakdowns,
             work_indexes=filtered_indexes,
@@ -1694,14 +1700,19 @@ def render_combined_works_pdf(
     session_id: UUID,
     work_indexes: list[int],
     view_type: str,
+    version_number: int | None = None,
 ) -> tuple[bytes, str, str]:
     from app.adapters.pdf_renderer import render_combined_works_document
+    from app.services.pdf_calculation_context_service import (
+        build_pdf_calculation_context,
+        quote_level_totals_for_works,
+        session_blocks_recalculation,
+        work_breakdown_map,
+    )
 
     session = db.get(CalculationSession, session_id)
     if session is None:
         raise AppError("SESSION_NOT_FOUND", "Quote session not found", 404)
-    if not session.step2_snapshot:
-        raise AppError("STEP2_REQUIRED", "No saved work data for this quote", 400)
     if view_type == "all_trades":
         return render_combined_all_trades_pdf(
             db,
@@ -1711,16 +1722,26 @@ def render_combined_works_pdf(
     if view_type not in {"client", "optimal"}:
         raise AppError("VIEW_TYPE_INVALID", "view_type must be 'client', 'optimal', or 'all_trades'", 400)
 
-    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
-    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
+    pdf_ctx = build_pdf_calculation_context(
+        db,
+        session,
+        allow_recalculate=not session_blocks_recalculation(session),
+        version_number=version_number,
+        view_type=view_type,
+    )
+    step1 = pdf_ctx.step1
+    step2 = pdf_ctx.step2
+    breakdown = pdf_ctx.breakdown
     if not step2.works:
         raise AppError("WORKS_REQUIRED", "No works found for this quote", 400)
 
     unique_indexes = sorted({index for index in work_indexes})
+    for index in unique_indexes:
+        if index < 0 or index >= len(step2.works):
+            raise AppError("WORK_INDEX_INVALID", f"Invalid work index: {index}", 400)
+
+    breakdown_by_work = work_breakdown_map(pdf_ctx.work_breakdowns)
     items: list[dict] = []
-    subtotal = Decimal("0")
-    vat_total = Decimal("0")
-    grand_total = Decimal("0")
     total_material_cost = Decimal("0")
     total_labour_charge = Decimal("0")
     total_materials_charge = Decimal("0")
@@ -1728,25 +1749,37 @@ def render_combined_works_pdf(
     total_profit = Decimal("0")
 
     for position, index in enumerate(unique_indexes, start=1):
-        if index < 0 or index >= len(step2.works):
-            raise AppError("WORK_INDEX_INVALID", f"Invalid work index: {index}", 400)
         block = step2.works[index]
-        breakdown = _breakdown_for_work_block(db, session=session, step1=step1, block=block)
-        row = _work_item_row(display_index=position, block=block, step1=step1, breakdown=breakdown)
+        work_result = breakdown_by_work.get(index)
+        if work_result is None:
+            raise AppError("CALCULATION_REQUIRED", f"No cached breakdown for work {index + 1}", 400)
+        row = _work_item_row(
+            display_index=position,
+            block=block,
+            step1=step1,
+            breakdown=work_result.breakdown,
+        )
         item = {key: value for key, value in row.items() if not key.startswith("_")}
         if view_type == "client":
             item.pop("internal_notes", None)
             item.pop("internal_notes_html", None)
         items.append(item)
-        subtotal += row["_subtotal"]
-        vat_total += row["_vat_total"]
-        grand_total += row["_grand_total"]
         total_material_cost += row["_material_cost"]
         total_labour_charge += row["_labour_charge"]
         total_materials_charge += row["_materials_charge"]
         total_optimal_cost += row["_optimal_cost"]
         total_profit += row["_profit_gbp"]
 
+    all_work_indexes = set(range(len(step2.works)))
+    subtotal, vat_total, grand_total = quote_level_totals_for_works(
+        breakdown=breakdown,
+        work_breakdowns=pdf_ctx.work_breakdowns,
+        work_indexes=unique_indexes,
+        all_work_indexes=all_work_indexes,
+    )
+    all_works_selected = set(unique_indexes) == all_work_indexes and len(unique_indexes) == len(all_work_indexes)
+    if all_works_selected and breakdown.profit_gbp is not None:
+        total_profit = breakdown.profit_gbp
     overall_margin = (total_profit / subtotal * Decimal("100")) if subtotal > 0 else Decimal("0")
     generated_at = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
 
@@ -1772,8 +1805,14 @@ def render_combined_works_pdf(
         "items": items,
         "cost_summary": {
             "material_cost": _format_gbp(total_material_cost),
-            "labour_charge": _format_gbp(total_labour_charge),
-            "materials_charge": _format_gbp(total_materials_charge),
+            "labour_charge": _format_gbp(
+                breakdown.labour_charge_to_client if all_works_selected and breakdown.labour_charge_to_client else total_labour_charge
+            ),
+            "materials_charge": _format_gbp(
+                breakdown.materials_parking_cc_charge
+                if all_works_selected and breakdown.materials_parking_cc_charge
+                else total_materials_charge
+            ),
             "client_price": _format_gbp(subtotal),
             "optimal_cost": _format_gbp(total_optimal_cost),
             "profit_gbp": _format_gbp(total_profit),

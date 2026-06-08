@@ -201,27 +201,50 @@ def fetch_all_jobs(
 def fetch_quote_attachments(
     eworks_quote_id: int,
 ) -> list[dict[str, Any]]:
-    """Optional: fetch attachments from eWorks Quote detail endpoint if supported."""
-    if not settings.eworks_api_enabled:
-        raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
-    base_url, api_key = _require_eworks_credentials()
-    url = f"{base_url}/Quote/{eworks_quote_id}/Attachments"
-    with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
-        result = _fetch_page(client, url=url, api_key=api_key, page=1, per_page=100)
-    return result.records
+    """Fetch attachments from eWorks Quote attachments endpoint (read-only, paginated)."""
+    return fetch_attachments(parent_type="QUOTE", parent_id=eworks_quote_id)
 
 
 def fetch_job_attachments(
     eworks_job_id: int,
 ) -> list[dict[str, Any]]:
-    """Optional: fetch attachments from eWorks Job detail endpoint if supported."""
+    """Fetch attachments from eWorks Job attachments endpoint (read-only, paginated)."""
+    return fetch_attachments(parent_type="JOB", parent_id=eworks_job_id)
+
+
+def fetch_attachments(
+    *,
+    parent_type: str,
+    parent_id: int,
+) -> list[dict[str, Any]]:
+    """Fetch attachment records for a quote or job parent (read-only, paginated)."""
     if not settings.eworks_api_enabled:
         raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
+
+    normalized = parent_type.strip().upper()
+    if normalized == "QUOTE":
+        resource_path = f"Quote/{parent_id}/Attachments"
+    elif normalized == "JOB":
+        resource_path = f"Job/{parent_id}/Attachments"
+    else:
+        raise AppError("EWORKS_API_ERROR", f"Unsupported attachment parent_type: {parent_type}", 400)
+
     base_url, api_key = _require_eworks_credentials()
-    url = f"{base_url}/Job/{eworks_job_id}/Attachments"
+    url = f"{base_url}/{resource_path}"
+    all_records: list[dict[str, Any]] = []
+    page = 1
+    last_page = 1
+
     with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
-        result = _fetch_page(client, url=url, api_key=api_key, page=1, per_page=100)
-    return result.records
+        while page <= last_page:
+            result = _fetch_page(client, url=url, api_key=api_key, page=page, per_page=100)
+            last_page = result.last_page
+            all_records.extend(result.records)
+            if not result.records or result.current_page >= last_page:
+                break
+            page = result.current_page + 1
+
+    return all_records
 
 
 def _unwrap_single_record(payload: Any) -> dict[str, Any]:
@@ -242,10 +265,48 @@ def _unwrap_single_record(payload: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         return data
 
-    if payload.get("id") is not None or payload.get("job_ref") is not None:
+    if payload.get("id") is not None or payload.get("job_ref") is not None or payload.get("quote_ref") is not None:
         return payload
 
-    raise AppError("EWORKS_API_UNAVAILABLE", "eWorks Job detail response has unexpected structure", 502)
+    raise AppError("EWORKS_API_UNAVAILABLE", "eWorks detail response has unexpected structure", 502)
+
+
+def fetch_quote_detail(eworks_quote_id: int) -> dict[str, Any]:
+    """Fetch a single Quote detail record from eWorks (read-only)."""
+    if not settings.eworks_api_enabled:
+        raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
+
+    base_url, api_key = _require_eworks_credentials()
+    url = f"{base_url}/Quote/{eworks_quote_id}"
+    headers = {"api_key": api_key, "Accept": "application/json"}
+
+    try:
+        with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
+            response = client.get(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise AppError("EWORKS_API_UNAVAILABLE", f"eWorks Quote detail API timed out: {url}", 502) from exc
+    except httpx.HTTPError as exc:
+        raise AppError("EWORKS_API_UNAVAILABLE", f"Cannot reach eWorks Quote detail API: {url}", 502) from exc
+
+    if response.status_code >= 500:
+        raise AppError(
+            "EWORKS_API_UNAVAILABLE",
+            f"eWorks Quote detail API returned {response.status_code} from {url}",
+            502,
+        )
+    if response.status_code >= 400:
+        raise AppError(
+            "EWORKS_API_ERROR",
+            f"eWorks Quote detail API returned {response.status_code} from {url}",
+            502,
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise AppError("EWORKS_API_UNAVAILABLE", "eWorks Quote detail API returned invalid JSON", 502) from exc
+
+    return _unwrap_single_record(payload)
 
 
 def fetch_job_detail(eworks_job_id: int) -> dict[str, Any]:

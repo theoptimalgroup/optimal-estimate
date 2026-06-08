@@ -473,6 +473,43 @@ test.describe("Admin: /admin/eworks-sync", () => {
     await expectQuotesTabContent(page);
   });
 
+  test("admin sees backfill quote attachments button on Quotes tab", async ({ page }) => {
+    await gotoEworksSyncPage(page);
+    await page.getByTestId("eworks-sync-tab-quotes").click();
+    await expect(page.getByTestId("btn-backfill-quote-attachments")).toHaveText("Backfill Quote Attachments");
+  });
+
+  test("admin can trigger quote attachment backfill and sees summary", async ({ page }) => {
+    await page.route("**/api/v1/eworks-sync/quotes/backfill-attachments**", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            quotes_scanned: 2,
+            details_fetched: 1,
+            attachment_endpoint_calls: 2,
+            quotes_with_attachments: 1,
+            attachments_created: 3,
+            attachments_updated: 0,
+            failed: 0,
+          },
+        }),
+      });
+    });
+    await gotoEworksSyncPage(page);
+    await page.getByTestId("eworks-sync-tab-quotes").click();
+    await page.getByTestId("btn-backfill-quote-attachments").click();
+    await expect(page.getByTestId("quote-attachments-backfill-summary")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("quote-attachments-backfill-summary")).toContainText("Scanned 2 quotes");
+    await assertNoSecretsVisible(page);
+  });
+
   test("admin can view Jobs tab", async ({ page }) => {
     await gotoEworksSyncPage(page);
     await page.getByTestId("eworks-sync-tab-jobs").click();

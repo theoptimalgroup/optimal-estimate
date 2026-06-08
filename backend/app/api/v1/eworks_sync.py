@@ -296,6 +296,24 @@ def backfill_job_appointments(
     return success_response(EworksJobAppointmentBackfillRead.model_validate(summary.__dict__).model_dump())
 
 
+@router.post("/quotes/backfill-attachments")
+def backfill_quote_attachments(
+    db: DbSession,
+    actor: AdminOnly,
+    limit: int | None = Query(default=None, ge=1, le=5000),
+):
+    """Fetch eWorks quote attachments for synced quotes and upsert local rows (admin only)."""
+    from app.core.config import settings as cfg
+    from app.schemas.eworks_sync_api import EworksQuoteAttachmentBackfillRead
+    from app.services.eworks_quote_attachment_sync_service import backfill_quote_attachments_from_eworks
+
+    if not cfg.eworks_api_enabled:
+        raise HTTPException(status_code=503, detail="eWorks API is disabled")
+
+    summary = backfill_quote_attachments_from_eworks(db, limit=limit)
+    return success_response(EworksQuoteAttachmentBackfillRead.model_validate(summary.__dict__).model_dump())
+
+
 @router.post("/customers")
 def trigger_customers_sync(
     db: DbSession,
@@ -697,7 +715,12 @@ def list_quote_attachments(db: DbSession, quote_id: int, actor: StaffRead):
     row = db.query(EworksQuote).filter(EworksQuote.id == quote_id).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Quote not found")
-    attachments = list_attachments_for_parent(db, parent_type="quote", parent_local_id=row.id)
+    attachments = list_attachments_for_parent(
+        db,
+        parent_type="quote",
+        parent_local_id=row.id,
+        parent_eworks_id=row.eworks_quote_id,
+    )
     return success_response(
         {
             "items": [
@@ -715,7 +738,12 @@ def list_job_attachments(db: DbSession, job_id: int, actor: StaffRead):
     row = db.query(EworksJob).filter(EworksJob.id == job_id).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    attachments = list_attachments_for_parent(db, parent_type="job", parent_local_id=row.id)
+    attachments = list_attachments_for_parent(
+        db,
+        parent_type="job",
+        parent_local_id=row.id,
+        parent_eworks_id=row.eworks_job_id,
+    )
     return success_response(
         {
             "items": [

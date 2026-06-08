@@ -415,3 +415,13 @@ class EworksJobAppointmentBackfillRead(BaseModel):
     detail_fetches_failed: int
     appointments_created: int
     appointments_updated: int
+
+
+class EworksQuoteAttachmentBackfillRead(BaseModel):
+    quotes_scanned: int
+    details_fetched: int
+    attachment_endpoint_calls: int
+    quotes_with_attachments: int
+    attachments_created: int
+    attachments_updated: int
+    failed: int

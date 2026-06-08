@@ -15,12 +15,21 @@ logger = logging.getLogger(__name__)
 
 ATTACHMENT_FIELD_KEYS = (
     "attachments",
+    "Attachments",
     "files",
+    "Files",
     "documents",
+    "Documents",
+    "photos",
+    "Photos",
     "uploads",
     "quote_attachments",
+    "quote_documents",
+    "uploaded_files",
     "job_attachments",
 )
+
+_ATTACHMENT_KEY_LOOKUP = {key.lower() for key in ATTACHMENT_FIELD_KEYS}
 
 _SENSITIVE_URL_PARTS = (
     "api_key",
@@ -58,6 +67,23 @@ def _attachment_identity(raw: dict[str, Any]) -> str | None:
         if value not in (None, ""):
             return str(value)
     return None
+
+
+def find_attachment_like_keys(raw_payload: dict[str, Any]) -> list[str]:
+    """Return payload keys that contain attachment-like lists (for debug-safe logging)."""
+    found: list[str] = []
+    for key, value in raw_payload.items():
+        if str(key).lower() not in _ATTACHMENT_KEY_LOOKUP:
+            continue
+        if isinstance(value, list) and value:
+            found.append(str(key))
+    return found
+
+
+def payload_has_embedded_attachments(raw_payload: dict[str, Any] | None) -> bool:
+    if not raw_payload or not isinstance(raw_payload, dict):
+        return False
+    return bool(find_attachment_like_keys(raw_payload))
 
 
 def _extract_attachment_items(raw_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -132,23 +158,19 @@ def _upsert_key(row: EworksAttachment) -> tuple[str, int, str]:
     )
 
 
-def sync_parent_attachments(
+def sync_parent_attachment_items(
     db: Session,
     *,
     parent_type: str,
     parent_eworks_id: int,
     parent_local_id: int | None,
-    raw_payload: dict[str, Any] | None,
-) -> int:
-    """Extract and upsert attachment metadata for one quote/job. Returns count synced."""
+    items: list[dict[str, Any]],
+) -> tuple[int, int]:
+    """Upsert attachment metadata from a list of attachment records. Returns (created, updated)."""
     if not settings.eworks_sync_attachments_enabled:
-        return 0
-    if not raw_payload or not isinstance(raw_payload, dict):
-        return 0
-
-    items = _extract_attachment_items(raw_payload)
+        return 0, 0
     if not items:
-        return 0
+        return 0, 0
 
     now = datetime.now(timezone.utc)
     existing_rows = (
@@ -161,9 +183,12 @@ def sync_parent_attachments(
     )
     existing_by_key = {_upsert_key(row): row for row in existing_rows}
     seen_keys: set[tuple[str, int, str]] = set()
-    synced = 0
+    created = 0
+    updated = 0
 
     for item in items:
+        if not isinstance(item, dict):
+            continue
         fields = _normalize_attachment_fields(
             item,
             parent_type=parent_type,
@@ -184,21 +209,72 @@ def sync_parent_attachments(
         existing = existing_by_key.get(key)
         if existing is None:
             db.add(EworksAttachment(**fields))
-            synced += 1
+            created += 1
         else:
             for field_name, value in fields.items():
                 if field_name in {"local_storage_path", "downloaded_at"}:
                     continue
                 setattr(existing, field_name, value)
             existing.synced_at = now
-            synced += 1
+            updated += 1
 
     for key, row in existing_by_key.items():
         if key not in seen_keys:
             db.delete(row)
 
     db.flush()
-    return synced
+    return created, updated
+
+
+def sync_parent_attachments(
+    db: Session,
+    *,
+    parent_type: str,
+    parent_eworks_id: int,
+    parent_local_id: int | None,
+    raw_payload: dict[str, Any] | None,
+) -> int:
+    """Extract and upsert attachment metadata for one quote/job. Returns count synced."""
+    if not raw_payload or not isinstance(raw_payload, dict):
+        return 0
+
+    items = _extract_attachment_items(raw_payload)
+    if not items:
+        return 0
+
+    created, updated = sync_parent_attachment_items(
+        db,
+        parent_type=parent_type,
+        parent_eworks_id=parent_eworks_id,
+        parent_local_id=parent_local_id,
+        items=items,
+    )
+    return created + updated
+
+
+def sync_parent_attachments_detailed(
+    db: Session,
+    *,
+    parent_type: str,
+    parent_eworks_id: int,
+    parent_local_id: int | None,
+    raw_payload: dict[str, Any] | None,
+) -> tuple[int, int]:
+    """Extract and upsert attachment metadata. Returns (created, updated)."""
+    if not raw_payload or not isinstance(raw_payload, dict):
+        return 0, 0
+
+    items = _extract_attachment_items(raw_payload)
+    if not items:
+        return 0, 0
+
+    return sync_parent_attachment_items(
+        db,
+        parent_type=parent_type,
+        parent_eworks_id=parent_eworks_id,
+        parent_local_id=parent_local_id,
+        items=items,
+    )
 
 
 def _url_contains_secrets(url: str | None) -> bool:
@@ -244,14 +320,24 @@ def list_attachments_for_parent(
     db: Session,
     *,
     parent_type: str,
-    parent_local_id: int,
+    parent_local_id: int | None = None,
+    parent_eworks_id: int | None = None,
 ) -> list[EworksAttachment]:
-    return (
-        db.query(EworksAttachment)
-        .filter(
-            EworksAttachment.parent_type == parent_type,
-            EworksAttachment.parent_local_id == parent_local_id,
+    from sqlalchemy import or_
+
+    query = db.query(EworksAttachment).filter(EworksAttachment.parent_type == parent_type)
+    if parent_local_id is not None and parent_eworks_id is not None:
+        query = query.filter(
+            or_(
+                EworksAttachment.parent_local_id == parent_local_id,
+                EworksAttachment.parent_eworks_id == parent_eworks_id,
+            )
         )
-        .order_by(EworksAttachment.filename.asc(), EworksAttachment.id.asc())
-        .all()
-    )
+    elif parent_local_id is not None:
+        query = query.filter(EworksAttachment.parent_local_id == parent_local_id)
+    elif parent_eworks_id is not None:
+        query = query.filter(EworksAttachment.parent_eworks_id == parent_eworks_id)
+    else:
+        return []
+
+    return query.order_by(EworksAttachment.filename.asc(), EworksAttachment.id.asc()).all()

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui";
 import { SafeRichText } from "@/components/ui/safe-rich-text";
 import type { EworksAttachmentSafe, EworksJobSafeDetail, EworksQuoteSafeDetail } from "@/lib/eworks-sync";
+import { getSyncedAttachmentDownloadUrl } from "@/lib/eworks-sync";
 import { QuoteAssignmentSection } from "@/components/manager/quote-assignment-section";
 
 function fmtDate(val: string | null | undefined): string {
@@ -75,6 +76,7 @@ function AttachmentsSection({
               <DataTableCell header numeric>Size</DataTableCell>
               <DataTableCell header>Uploaded By</DataTableCell>
               <DataTableCell header>Created</DataTableCell>
+              <DataTableCell header>Download</DataTableCell>
             </DataTableRow>
           </DataTableHead>
           <DataTableBody>
@@ -85,6 +87,15 @@ function AttachmentsSection({
                 <DataTableCell numeric>{fmtFileSize(attachment.size_bytes)}</DataTableCell>
                 <DataTableCell>{displayValue(attachment.uploaded_by)}</DataTableCell>
                 <DataTableCell>{displayValue(attachment.created_on)}</DataTableCell>
+                <DataTableCell>
+                  <a
+                    href={getSyncedAttachmentDownloadUrl(attachment.id)}
+                    className="text-sm text-blue-700 hover:underline"
+                    data-testid={`attachment-download-${attachment.id}`}
+                  >
+                    Download
+                  </a>
+                </DataTableCell>
               </DataTableRow>
             ))}
           </DataTableBody>

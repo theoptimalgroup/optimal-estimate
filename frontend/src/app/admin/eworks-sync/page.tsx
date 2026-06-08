@@ -33,6 +33,7 @@ import {
   EWORKS_ACTIVE_SYNC_RUN_KEY,
   buildDefaultSyncRequest,
   backfillJobAppointments,
+  backfillQuoteAttachments,
   cancelSyncRun,
   getEworksSyncStatus,
   getSyncRun,
@@ -719,6 +720,9 @@ function QuotesTab({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillSummary, setBackfillSummary] = useState<string | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -745,8 +749,47 @@ function QuotesTab({
     void load();
   }, [load, refreshKey]);
 
+  const handleBackfillAttachments = async () => {
+    setBackfilling(true);
+    setBackfillError(null);
+    setBackfillSummary(null);
+    try {
+      const summary = await backfillQuoteAttachments();
+      setBackfillSummary(
+        `Scanned ${summary.quotes_scanned} quotes · attachment calls ${summary.attachment_endpoint_calls} · details ${summary.details_fetched} · quotes with files ${summary.quotes_with_attachments} · attachments +${summary.attachments_created} / ~${summary.attachments_updated} updated · failed ${summary.failed}`,
+      );
+      await load();
+    } catch (e: unknown) {
+      setBackfillError(e instanceof Error ? e.message : "Failed to backfill quote attachments");
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void handleBackfillAttachments()}
+          disabled={backfilling}
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          data-testid="btn-backfill-quote-attachments"
+        >
+          {backfilling ? "Backfilling quote attachments…" : "Backfill Quote Attachments"}
+        </button>
+        {backfillSummary ? (
+          <p className="text-sm text-slate-600" data-testid="quote-attachments-backfill-summary">
+            {backfillSummary}
+          </p>
+        ) : null}
+        {backfillError ? (
+          <p className="text-sm text-red-600" data-testid="quote-attachments-backfill-error">
+            {backfillError}
+          </p>
+        ) : null}
+      </div>
+
       <FilterBar>
         <FilterField label="Search">
           <input

@@ -696,6 +696,18 @@ def _upsert_quotes(
                 raw_payload=raw,
             )
 
+            try:
+                from app.services.eworks_quote_attachment_sync_service import (
+                    maybe_fetch_quote_attachments_after_list_upsert,
+                )
+
+                maybe_fetch_quote_attachments_after_list_upsert(db, row, raw)
+            except Exception:
+                logger.exception(
+                    "Failed to fetch quote attachments for eWorks Quote id=%s; continuing quote upsert",
+                    eworks_id,
+                )
+
         except Exception as exc:
             logger.exception("Failed to upsert eWorks Quote id=%s: %s", raw.get("id"), exc)
             summary.failed += 1

@@ -371,6 +371,10 @@ test.describe("Manager quotes page", () => {
     await expect(page.getByTestId("attachments-table")).toBeVisible();
     await expect(page.getByRole("cell", { name: "scope.pdf" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "Alice" })).toBeVisible();
+    await expect(page.getByTestId("attachment-download-10")).toHaveAttribute(
+      "href",
+      /\/api\/v1\/eworks-sync\/attachments\/10\/download$/,
+    );
     await expect(page.getByText("Call before visit")).toBeVisible();
     await expect(page.getByTestId("quote-description-rich-text")).toContainText("Access");
     await expect(page.getByTestId("quote-description-rich-text")).toContainText("Check fuse board");

@@ -9,10 +9,8 @@ from app.core.exceptions import AppError
 from app.models.calculation_session import CalculationSession
 from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot
 from app.services.calculation_session_pdf_service import render_session_quote_pdf
-from app.services.calculation_session_service import (
-    _dashboard_last_result,
-    render_combined_works_pdf,
-)
+from app.services.calculation_session_service import render_combined_works_pdf
+from app.services.pdf_calculation_context_service import build_pdf_calculation_context
 from app.services.eworks_pdf_context_service import build_all_trades_pdf_context
 
 ManagerQuotePdfView = Literal["client", "internal", "combined", "all-trades"]
@@ -40,25 +38,27 @@ def render_all_trades_quote_pdf(
     db: Session,
     *,
     session: CalculationSession,
+    version_number: int | None = None,
 ) -> tuple[bytes, str, str]:
     from app.adapters.pdf_renderer import render_all_trades_document
 
-    last_result = _dashboard_last_result(db, session)
-    if not last_result:
-        raise AppError("CALCULATION_REQUIRED", "No calculation result available for this quote", 400)
-
-    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
-    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
-    if not step2.works:
+    pdf_ctx = build_pdf_calculation_context(
+        db,
+        session,
+        allow_recalculate=False,
+        version_number=version_number,
+        view_type="all-trades",
+    )
+    if not pdf_ctx.step2.works:
         raise AppError("WORKS_REQUIRED", "No works found for this quote", 400)
 
-    breakdown = last_result.get("breakdown") or {}
-    work_breakdowns = last_result.get("work_breakdowns") or []
+    breakdown = pdf_ctx.breakdown.model_dump(mode="json")
+    work_breakdowns = [item.model_dump(mode="json") for item in pdf_ctx.work_breakdowns]
     try:
         context = build_all_trades_pdf_context(
             db=db,
-            step1=step1,
-            step2=step2,
+            step1=pdf_ctx.step1,
+            step2=pdf_ctx.step2,
             breakdown=breakdown,
             work_breakdowns=work_breakdowns,
         )
@@ -96,13 +96,18 @@ def render_manager_quote_pdf(
                 read_only=True,
             )
         if view == "all-trades":
-            return render_all_trades_quote_pdf(db, session=session)
+            return render_all_trades_quote_pdf(
+                db,
+                session=session,
+                version_number=version_number,
+            )
         view_type = "client" if view == "client" else "optimal"
         return render_combined_works_pdf(
             db,
             session_id=session_id,
             work_indexes=_all_work_indexes(session),
             view_type=view_type,
+            version_number=version_number,
         )
     finally:
         session.step1_snapshot = original_step1

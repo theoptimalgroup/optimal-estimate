@@ -8,15 +8,10 @@ from app.core.exceptions import AppError
 from app.models.calculation_session import CalculationSession
 from app.schemas.calculation import CalculationBreakdown
 from app.schemas.eworks_link import (
-    AggregatedQuoteSummary,
     Step1Snapshot,
     Step2Snapshot,
-    WorkBreakdownResult,
 )
-from app.services.calculation_session_service import (
-    _session_ui_state,
-    calculate_session,
-)
+from app.services.pdf_calculation_context_service import build_pdf_calculation_context
 from app.services.calculation_view_service import build_client_view_from_session
 from app.services.eworks_link_service import get_session_by_token
 from app.services.eworks_pdf_context_service import build_eworks_estimate_pdf_context
@@ -43,47 +38,6 @@ def _load_session_for_pdf(
     return get_session_by_token(db, session_id, session_token)
 
 
-def _resolve_pdf_calculation_payload(
-    db: Session,
-    *,
-    session: CalculationSession,
-    session_id: UUID,
-    session_token: str,
-    read_only: bool,
-) -> tuple[
-    CalculationBreakdown,
-    list[WorkBreakdownResult],
-    AggregatedQuoteSummary | None,
-    str | None,
-]:
-    ui_state = _session_ui_state(session)
-    last_result = ui_state.last_result if ui_state else None
-    if isinstance(last_result, dict) and last_result.get("breakdown") and last_result.get("work_breakdowns"):
-        breakdown = CalculationBreakdown.model_validate(last_result["breakdown"])
-        work_breakdowns = [
-            WorkBreakdownResult.model_validate(item) for item in last_result.get("work_breakdowns") or []
-        ]
-        aggregated_summary = None
-        if last_result.get("aggregated_summary"):
-            aggregated_summary = AggregatedQuoteSummary.model_validate(last_result["aggregated_summary"])
-        internal_notes = last_result.get("internal_notes") or breakdown.internal_notes
-        return breakdown, work_breakdowns, aggregated_summary, internal_notes
-
-    if read_only or session.status == "submitted" or session.locked:
-        raise AppError("CALCULATION_REQUIRED", "No calculation result available for this quote", 400)
-
-    result = calculate_session(
-        db,
-        session_id=session_id,
-        session_token=session_token,
-        step2=None,
-    )
-    return (
-        result.breakdown,
-        result.work_breakdowns,
-        result.aggregated_summary,
-        result.internal_notes or result.breakdown.internal_notes,
-    )
 
 
 def render_session_quote_pdf(
@@ -103,15 +57,20 @@ def render_session_quote_pdf(
     if not session.step2_snapshot:
         raise AppError("STEP2_REQUIRED", "Estimator inputs are required before generating PDF", 400)
 
-    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
-    step2_data = Step2Snapshot.model_validate(session.step2_snapshot)
-    breakdown, work_breakdowns, aggregated_summary, internal_notes = _resolve_pdf_calculation_payload(
+    pdf_ctx = build_pdf_calculation_context(
         db,
-        session=session,
+        session,
+        allow_recalculate=not read_only,
         session_id=session_id,
         session_token=session_token,
-        read_only=read_only,
+        view_type="combined" if not is_draft else "draft",
     )
+    step1 = pdf_ctx.step1
+    step2_data = pdf_ctx.step2
+    breakdown = pdf_ctx.breakdown
+    work_breakdowns = pdf_ctx.work_breakdowns
+    aggregated_summary = pdf_ctx.aggregated_summary
+    internal_notes = pdf_ctx.internal_notes
     primary_step2 = work_block_to_step2_snapshot(step2_data.works[0], trade_name=step1.trade_name)
     combined_scope = "\n\n".join(
         block.scope.strip() for block in step2_data.works if block.scope and block.scope.strip()

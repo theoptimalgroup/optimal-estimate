@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiUrl } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -181,6 +181,16 @@ export type JobAppointmentBackfillSummary = {
   appointments_updated: number;
 };
 
+export type QuoteAttachmentBackfillSummary = {
+  quotes_scanned: number;
+  details_fetched: number;
+  attachment_endpoint_calls: number;
+  quotes_with_attachments: number;
+  attachments_created: number;
+  attachments_updated: number;
+  failed: number;
+};
+
 export type EworksCustomerRecord = {
   id: number;
   eworks_customer_id: number;
@@ -276,6 +286,17 @@ export async function backfillJobAppointments(limit?: number): Promise<JobAppoin
   const qs = params.toString();
   const resp = await apiFetch<JobAppointmentBackfillSummary>(
     `/api/v1/eworks-sync/jobs/backfill-appointments${qs ? `?${qs}` : ""}`,
+    { method: "POST" },
+  );
+  return resp.data;
+}
+
+export async function backfillQuoteAttachments(limit?: number): Promise<QuoteAttachmentBackfillSummary> {
+  const params = new URLSearchParams();
+  if (limit != null) params.set("limit", String(limit));
+  const qs = params.toString();
+  const resp = await apiFetch<QuoteAttachmentBackfillSummary>(
+    `/api/v1/eworks-sync/quotes/backfill-attachments${qs ? `?${qs}` : ""}`,
     { method: "POST" },
   );
   return resp.data;
@@ -555,4 +576,8 @@ export async function listJobAttachments(jobId: number): Promise<EworksAttachmen
     `/api/v1/eworks-sync/jobs/${jobId}/attachments`
   );
   return resp.data.items;
+}
+
+export function getSyncedAttachmentDownloadUrl(attachmentId: number): string {
+  return `${getApiUrl()}/api/v1/eworks-sync/attachments/${attachmentId}/download`;
 }
