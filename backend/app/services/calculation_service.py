@@ -9,8 +9,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.engines.approval_engine import build_calculation_breakdown
 from app.engines.calculation_engine import round_money
-from app.engines.rules_engine import MatchedRule, find_active_rule, rule_to_dict
-from app.services.eworks_link_service import client_has_trade_rate_rule
+from app.engines.rules_engine import MatchedRule, has_exact_client_trade_xlsx_rule, resolve_calculation_rule, rule_to_dict
 from app.models.job import Job
 from app.models.quote import Quote, QuoteCharge, QuoteLabour, QuoteMaterial, QuoteScopeItem
 from app.models.support import CalculationSnapshot
@@ -100,10 +99,10 @@ def preview_calculation(db: Session, payload: CalculationPreviewRequest) -> Calc
             trade_id = trade_id or labour[0].trade_id
 
     client_fee_override = payload.client_fee_pct_override
-    if client_has_trade_rate_rule(db, client_id, trade_id):
-        matched = find_active_rule(db, client_id, trade_id, quote_date)
-    else:
-        matched = find_active_rule(db, None, trade_id, quote_date)
+    matched = resolve_calculation_rule(db, client_id, trade_id, quote_date)
+    if matched and matched.rule.formula_source == "xlsx" and not has_exact_client_trade_xlsx_rule(
+        db, client_id, trade_id, quote_date
+    ):
         if client_fee_override is None:
             client_fee_override = Decimal("0")
 
@@ -135,7 +134,7 @@ def finalize_calculation(db: Session, payload: CalculationFinalizeRequest, user_
     job = quote.job
     labour, materials, charges = _quote_to_inputs(quote)
     trade_id = labour[0].trade_id if labour else None
-    matched = find_active_rule(db, job.client_id if job else None, trade_id, date.today())
+    matched = resolve_calculation_rule(db, job.client_id if job else None, trade_id, date.today())
     breakdown = build_calculation_breakdown(
         labour_items=labour,
         material_items=materials,

@@ -20,6 +20,7 @@ sys.path.insert(0, str(BACKEND))
 
 from app.db.session import SessionLocal
 from app.models.rate_rule import RateRule
+from app.engines.rules_engine import DEFAULT_XLSX_CLIENT_NAME
 from app.services.client_service import find_client_by_name_or_alias, get_or_create_client_for_import
 from app.services.trade_service import get_or_create_trade_for_import
 from app.models.trade import Trade
@@ -28,9 +29,11 @@ from app.models.trade import Trade
 XLSX_PATH = ROOT / "docs" / "1.7 MASTER HELPER.xlsx"
 RULE_VERSION = "xlsx-master-helper-1.7"
 ACTIVE_FROM = date(2024, 1, 1)
-EXPECTED_FULL_IMPORT_CLIENTS = 158
+EXPECTED_FULL_IMPORT_CLIENTS = 159
 EXPECTED_FULL_IMPORT_TRADES = 16
-EXPECTED_FULL_IMPORT_RULES = 2528
+EXPECTED_FULL_IMPORT_RULES = 2560
+DEFAULT_XLSX_CLIENT_FEE = Decimal("0")
+GLOBAL_XLSX_CLIENT_FEE = Decimal("0")
 
 XLSX_DEFAULTS = {
     "hourly_overhead_pct": Decimal("0.30"),
@@ -211,6 +214,57 @@ def upsert_rate_rule(
     return "created"
 
 
+def _ensure_fallback_xlsx_rules(
+    db,
+    *,
+    trades: list[dict],
+    trade_models: dict[str, object],
+    dry_run: bool,
+    overwrite: bool,
+    stats: dict[str, int],
+) -> None:
+    """Create DEFAULT client + global trade-level XLSX rules for missing-client fallback."""
+    default_client, created, _alias = get_or_create_client_for_import(db, DEFAULT_XLSX_CLIENT_NAME)
+    if created:
+        stats["clients_created"] += 1
+    elif find_client_by_name_or_alias(db, DEFAULT_XLSX_CLIENT_NAME) is not None:
+        stats["clients_updated"] += 1
+
+    for trade in trades:
+        trade_model = trade_models.get(trade["name"])
+        if trade_model is None:
+            if dry_run:
+                stats["rules_would_create"] += 2
+            continue
+        for client_id, client_name, client_fee_pct in (
+            (default_client.id, DEFAULT_XLSX_CLIENT_NAME, DEFAULT_XLSX_CLIENT_FEE),
+            (None, "Trade default", GLOBAL_XLSX_CLIENT_FEE),
+        ):
+            action = upsert_rate_rule(
+                db,
+                client_id=client_id,
+                trade_id=trade_model.id,
+                client_name=client_name,
+                trade=trade,
+                client_fee_pct=client_fee_pct,
+                dry_run=dry_run,
+                overwrite=overwrite,
+            )
+            if dry_run:
+                if action == "would_create":
+                    stats["rules_would_create"] += 1
+                elif action == "would_update":
+                    stats["rules_updated"] += 1
+                elif action == "would_skip":
+                    stats["rules_skipped"] += 1
+            elif action == "created":
+                stats["rules_created"] += 1
+            elif action == "updated":
+                stats["rules_updated"] += 1
+            elif action == "skipped":
+                stats["rules_skipped"] += 1
+
+
 def _is_full_import(client_filter: str | None, trade_filter: str | None) -> bool:
     return client_filter is None and trade_filter is None
 
@@ -287,9 +341,10 @@ def import_rules(
     try:
         if dry_run:
             if db is None:
-                stats["clients_created"] = len(client_fees)
+                stats["clients"] = len(client_fees) + 1
+                stats["clients_created"] = len(client_fees) + 1
                 stats["trades_created"] = len(trades)
-                stats["rules_would_create"] = len(client_fees) * len(trades)
+                stats["rules_would_create"] = len(client_fees) * len(trades) + len(trades) * 2
                 return stats
 
             for trade in trades:
@@ -333,6 +388,17 @@ def import_rules(
                         stats["rules_updated"] += 1
                     elif action == "would_skip":
                         stats["rules_skipped"] += 1
+            _ensure_fallback_xlsx_rules(
+                db,
+                trades=trades,
+                trade_models={
+                    trade["name"]: db.scalar(select(Trade).where(Trade.name == trade["name"]))
+                    for trade in trades
+                },
+                dry_run=True,
+                overwrite=overwrite,
+                stats=stats,
+            )
             return stats
 
         stats["rules_would_create"] = 0
@@ -379,6 +445,15 @@ def import_rules(
                     stats["rules_updated"] += 1
                 elif action == "skipped":
                     stats["rules_skipped"] += 1
+
+        _ensure_fallback_xlsx_rules(
+            db,
+            trades=trades,
+            trade_models=trade_models,
+            dry_run=False,
+            overwrite=overwrite,
+            stats=stats,
+        )
 
         _log_import_audit(
             db,

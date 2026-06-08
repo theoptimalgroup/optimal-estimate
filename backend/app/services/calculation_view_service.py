@@ -17,6 +17,7 @@ _CLIENT_HIDDEN_CALC_KEYS = {
     "xlsx_formula_version",
     "internal_notes",
     "margin_total",
+    "warnings",
 }
 
 

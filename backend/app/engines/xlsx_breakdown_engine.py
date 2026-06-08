@@ -3,7 +3,7 @@ from decimal import Decimal
 from app.core.config import settings
 from app.engines.approval_engine import evaluate_approval_requirements
 from app.engines.calculation_engine import calculate_charges, calculate_vat, round_money
-from app.engines.rules_engine import MatchedRule
+from app.engines.rules_engine import MatchedRule, xlsx_fallback_warning
 from app.engines.xlsx_quote_calculator import (
     XlsxCalculationConfig,
     XlsxTradeRates,
@@ -106,6 +106,10 @@ def build_xlsx_calculation_breakdown(
     )
     trade = trade_from_rule(rule)
     warnings: list[str] = []
+    using_fallback_rule = matched_rule.match_type != "exact_client_trade"
+    fallback_warning = xlsx_fallback_warning(matched_rule)
+    if fallback_warning:
+        warnings.append(fallback_warning)
 
     labour_item = labour_items[0] if labour_items else LabourInput(labour_type="hourly", number_of_engineers=1)
     materials_input = _material_input_total(material_items)
@@ -140,6 +144,7 @@ def build_xlsx_calculation_breakdown(
             materials_amount=materials_input,
             notes_context=internal_notes_context,
             trade_rates=trade,
+            using_fallback_rule=using_fallback_rule,
         )
         labour_formula = f"XLSX hourly MROUND({trade.hourly_client_rate}×{labour_item.number_of_engineers}×{hours}/(1-{fee_pct}), {rule.mround_increment})"
         denominator_used = result.materials_denominator
@@ -180,6 +185,7 @@ def build_xlsx_calculation_breakdown(
             notes_context=internal_notes_context,
             config=cfg,
             trade_rates=trade,
+            using_fallback_rule=using_fallback_rule,
         )
         labour_formula = f"XLSX daily MROUND(direct+OH)/(1-{fee_pct}-{rule.material_charge_denominator}), {rule.mround_increment})"
         denominator_used = result.charge_denominator_materials

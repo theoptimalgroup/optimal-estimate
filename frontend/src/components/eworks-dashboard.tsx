@@ -398,7 +398,7 @@ export function WorkSection({
               Labour subtotal: <span className="font-semibold text-slate-900">{money(work.labour_subtotal)}</span>
             </p>
             <p className="text-slate-600">
-              Materials subtotal: <span className="font-semibold text-slate-900">{money(work.materials_subtotal)}</span>
+              Materials / Parking / CC: <span className="font-semibold text-slate-900">{money(work.materials_subtotal)}</span>
             </p>
           </div>
 

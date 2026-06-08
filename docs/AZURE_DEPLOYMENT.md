@@ -306,3 +306,99 @@ Worker exposes `GET /health` with:
 - `database_ok`
 - `background_worker_mode=true`
 - `scheduler_running=true` when scheduler is active
+
+---
+
+## Local XLSX Rate Rule Import
+
+Imports clients, trades, and rate rules from `docs/1.7 MASTER HELPER.xlsx` into a
+locally-running Docker Compose postgres instance.
+
+### Why a helper script?
+
+Running `python scripts/import_quote_calculator_rules.py` directly from the Mac terminal
+fails because `DATABASE_URL` in `.env` uses hostname `postgres`, which only resolves inside
+the Docker Compose network.  Running the script via `docker compose exec backend python ...`
+fails because `scripts/` is not mounted into the backend container.
+
+`scripts/local_import_xlsx_rules.sh` resolves this by:
+1. Reading credentials from `.env` (via `grep`/`sed`, not `source`).
+2. Detecting the Docker Compose mapped port (`docker compose port postgres 5432`).
+3. Exporting `DATABASE_URL=postgresql+psycopg2://<user>:<pass>@localhost:<port>/<db>`.
+4. Forwarding all flags to the Python script.
+
+### Pre-requisites
+
+- Docker Compose stack started: `docker compose up -d`
+- `.env` configured (default dev credentials already work out of the box)
+- `docs/1.7 MASTER HELPER.xlsx` present in the repository
+
+### Commands
+
+**Dry-run** — parse workbook and print counts, no database writes:
+
+```bash
+./scripts/local_import_xlsx_rules.sh --dry-run
+# or
+make import-xlsx-rules-dry
+```
+
+Expected output includes `rules_would_create=2560` (or similar, depending on workbook state).
+
+**Full import** — write to database (prompts for backup confirmation):
+
+```bash
+./scripts/local_import_xlsx_rules.sh --overwrite
+# or
+make import-xlsx-rules
+```
+
+The script will print a backup reminder and require `YES` before proceeding.
+
+**Partial import** — filter by client or trade substring:
+
+```bash
+./scripts/local_import_xlsx_rules.sh --dry-run --client "Acme"
+./scripts/local_import_xlsx_rules.sh --overwrite --trade "Plumber"
+```
+
+### Production import
+
+For production, override `DATABASE_URL` before running:
+
+```bash
+export DATABASE_URL="postgresql+psycopg2://<prod-user>:<prod-pass>@<prod-host>:5432/<prod-db>"
+python scripts/import_quote_calculator_rules.py --dry-run
+# Take a backup, then:
+python scripts/import_quote_calculator_rules.py --overwrite
+```
+
+Always take a pg_dump backup before a production import:
+
+```bash
+pg_dump "$DATABASE_URL" > rate_rules_backup_$(date +%Y%m%d_%H%M%S).sql
+```
+
+### Verification
+
+After a successful import, verify the counts:
+
+```sql
+SELECT COUNT(*)                            AS total_rules,
+       COUNT(*) FILTER (WHERE is_active)   AS active_rules,
+       COUNT(DISTINCT client_id)           AS clients,
+       COUNT(DISTINCT trade_id)            AS trades
+FROM   rate_rules
+WHERE  version = 'xlsx-master-helper-1.7';
+```
+
+Run it directly:
+
+```bash
+psql "${DATABASE_URL}" -c \
+  "SELECT COUNT(*) AS total_rules, \
+          COUNT(*) FILTER (WHERE is_active) AS active_rules, \
+          COUNT(DISTINCT client_id) AS clients, \
+          COUNT(DISTINCT trade_id) AS trades \
+   FROM rate_rules WHERE version = 'xlsx-master-helper-1.7';"
+```

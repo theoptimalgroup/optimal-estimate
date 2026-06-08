@@ -549,6 +549,13 @@ def _external_delivery_daily(
     return parking_line, labour_only_line, labour_materials_line
 
 
+def _comms_line(client_name: str, client_fee_pct: Decimal, *, using_fallback_rule: bool = False) -> str:
+    display_name = client_name
+    if using_fallback_rule:
+        display_name = f"Client not available or {client_name}"
+    return f"{display_name} Comms @ {format_commission_pct(client_fee_pct)}"
+
+
 def build_internal_notes_hourly(
     *,
     client_name: str,
@@ -562,6 +569,7 @@ def build_internal_notes_hourly(
     materials_amount: Decimal,
     notes_context: InternalNotesContext | None = None,
     trade_rates: XlsxTradeRates | None = None,
+    using_fallback_rule: bool = False,
 ) -> str:
     context = notes_context or InternalNotesContext()
     rates = trade_rates or XlsxTradeRates.from_row(trade, Decimal("95"))
@@ -580,13 +588,17 @@ def build_internal_notes_hourly(
         congestion=congestion,
         materials_amount=materials_amount,
     )
-    return "\n".join(
-        [
+    lines = [
             *_notes_header_lines(client_name),
             _label_line("PRODUCT:", context.product),
             important_info,
-            f"{client_name} Comms @ {format_commission_pct(client_fee_pct)}",
+            _comms_line(client_name, client_fee_pct, using_fallback_rule=using_fallback_rule),
             "HOURLY QUOTE HELPER USED",
+        ]
+    if using_fallback_rule:
+        lines.append(f"XLSX/default rule used ({trade})")
+    lines.extend(
+        [
             _label_line("LINK/S & QUANTITY:", context.links_and_quantity),
             _label_line("WHO QUOTED:", context.who_quoted),
             _label_line("BEST ENGINEER:", context.best_engineer),
@@ -607,6 +619,7 @@ def build_internal_notes_hourly(
             *_notes_footer_lines(client_name),
         ]
     )
+    return "\n".join(lines)
 
 
 def build_internal_notes_daily(
@@ -626,6 +639,7 @@ def build_internal_notes_daily(
     notes_context: InternalNotesContext | None = None,
     config: XlsxCalculationConfig | None = None,
     trade_rates: XlsxTradeRates | None = None,
+    using_fallback_rule: bool = False,
 ) -> str:
     context = notes_context or InternalNotesContext()
     cfg = config or DEFAULT_CONFIG
@@ -655,13 +669,17 @@ def build_internal_notes_daily(
         congestion=congestion,
         materials_amount=materials_amount,
     )
-    return "\n".join(
-        [
+    lines = [
             *_notes_header_lines(client_name, include_oj_sticky=False),
             _label_line("PRODUCT:", context.product),
             important_info,
-            f"{client_name} Comms @ {format_commission_pct(client_fee_pct)}",
+            _comms_line(client_name, client_fee_pct, using_fallback_rule=using_fallback_rule),
             helper_label,
+        ]
+    if using_fallback_rule:
+        lines.append(f"XLSX/default rule used ({trade})")
+    lines.extend(
+        [
             _label_line("LINK/S & QUANTITY:", context.links_and_quantity),
             _label_line("WHO QUOTED:", context.who_quoted),
             _label_line("BEST ENGINEER:", context.best_engineer),
@@ -684,3 +702,4 @@ def build_internal_notes_daily(
             *_daily_notes_footer_lines(client_name),
         ]
     )
+    return "\n".join(lines)

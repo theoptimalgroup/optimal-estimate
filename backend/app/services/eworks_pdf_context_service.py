@@ -22,6 +22,10 @@ from sqlalchemy.orm import Session
 from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot
 from app.services.eworks_link_service import work_skill_name
 from app.services.eworks_questionnaire_service import format_time_frame
+from app.services.pdf_calculation_context_service import (
+    build_combined_internal_notes_for_pdf,
+    build_work_internal_calculation_note,
+)
 from app.utils.html_text import html_to_plain_text, prepare_pdf_rich_text
 from app.utils.work_label import format_product_label, format_work_label
 
@@ -300,6 +304,10 @@ def _format_line_items(breakdown: CalculationBreakdown) -> list[dict[str, str]]:
 def _format_work_results(
     work_breakdowns: list[WorkBreakdownResult],
     work_blocks: list[WorkBlockSnapshot] | None = None,
+    *,
+    show_internal_notes: bool = True,
+    quote_internal_notes: str | None = None,
+    quote_breakdown: CalculationBreakdown | None = None,
 ) -> list[dict[str, object]]:
     blocks = work_blocks or []
     works: list[dict[str, object]] = []
@@ -313,7 +321,17 @@ def _format_work_results(
             scope=html_to_plain_text(work.scope or (block.scope if block else None)),
             index=work.work_index,
         )
-        notes_raw = (work.internal_notes or work.breakdown.internal_notes or "").strip() or None
+        if show_internal_notes:
+            notes_raw = build_work_internal_calculation_note(
+                work_index=work.work_index,
+                work_block=block,
+                work_result=work,
+                quote_internal_notes=quote_internal_notes,
+                quote_breakdown=quote_breakdown,
+                work_count=len(work_breakdowns),
+            )
+        else:
+            notes_raw = None
         notes_plain, notes_html = _rich_text_fields(notes_raw)
         works.append(
             {
@@ -347,10 +365,14 @@ def _build_results_pages(
     *,
     work_breakdowns: list[WorkBreakdownResult],
     internal_notes: str | None,
+    formatted_works: list[dict[str, object]] | None = None,
 ) -> tuple[int | None, int, int | None, int]:
     base_pages = 3
     has_multiple_works = len(work_breakdowns) > 1
-    has_internal_notes = bool((internal_notes or "").strip())
+    has_internal_notes = bool((internal_notes or "").strip()) or any(
+        isinstance(work.get("internal_notes"), str) and work["internal_notes"].strip()
+        for work in (formatted_works or [])
+    )
     page = base_pages
     per_work_page = None
     if has_multiple_works:
@@ -374,6 +396,7 @@ def build_eworks_estimate_pdf_context(
     work_breakdowns: list[WorkBreakdownResult] | None = None,
     aggregated_summary: AggregatedQuoteSummary | None = None,
     internal_notes: str | None = None,
+    show_internal_notes: bool = True,
 ) -> dict:
     calc = client_view.get("calculation", {})
     works = step2.works or []
@@ -387,7 +410,22 @@ def build_eworks_estimate_pdf_context(
     header_parts = [part for part in (step1.engineer_name, step1.quote_number, step1.job_number) if part]
 
     work_results = work_breakdowns or []
-    combined_notes_raw = (internal_notes or breakdown.internal_notes or "").strip() or None
+    formatted_works = _format_work_results(
+        work_results,
+        works,
+        show_internal_notes=show_internal_notes,
+        quote_internal_notes=internal_notes,
+        quote_breakdown=breakdown,
+    )
+    if show_internal_notes:
+        combined_notes_raw = build_combined_internal_notes_for_pdf(
+            work_blocks=works,
+            work_breakdowns=work_results,
+            quote_internal_notes=internal_notes,
+            quote_breakdown=breakdown,
+        )
+    else:
+        combined_notes_raw = None
     combined_notes_plain, combined_notes_html = _rich_text_fields(combined_notes_raw)
     combined_notes = None if combined_notes_plain == "—" else combined_notes_plain
     quote_description_plain = _quote_description(step1)
@@ -396,6 +434,7 @@ def build_eworks_estimate_pdf_context(
     per_work_page, combined_page, notes_page, total_pages = _build_results_pages(
         work_breakdowns=work_results,
         internal_notes=combined_notes,
+        formatted_works=formatted_works if show_internal_notes else None,
     )
 
     return {
@@ -429,10 +468,10 @@ def build_eworks_estimate_pdf_context(
         ),
         "results": {
             "has_multiple_works": len(work_results) > 1,
-            "works": _format_work_results(work_results, works),
+            "works": formatted_works,
             "combined": _format_combined_quote(breakdown, aggregated_summary),
-            "internal_notes": combined_notes,
-            "internal_notes_html": combined_notes_html,
+            "internal_notes": combined_notes if show_internal_notes else None,
+            "internal_notes_html": combined_notes_html if show_internal_notes else None,
         },
         "per_work_page": per_work_page,
         "combined_page": combined_page,

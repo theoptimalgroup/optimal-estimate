@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.engines.rules_engine import find_active_rule
+from app.engines.rules_engine import MatchedRule, find_active_xlsx_rule, has_exact_client_trade_xlsx_rule
 from app.models.calculation_session import CalculationSession
 from app.models.client import Client
 from app.models.trade import Trade
@@ -140,10 +140,12 @@ def resolve_client_for_link(db: Session, client_name: str) -> Client:
 
 
 def try_resolve_rate_rule(db: Session, client_id: UUID, trade_id: UUID) -> RateRule | None:
-    matched = find_active_rule(db, client_id, trade_id, date.today())
-    if matched is None or matched.rule.client_id != client_id:
-        return None
-    return matched.rule
+    matched = find_active_xlsx_rule(db, client_id, trade_id, date.today())
+    return matched.rule if matched else None
+
+
+def try_resolve_xlsx_rate_rule(db: Session, client_id: UUID, trade_id: UUID) -> MatchedRule | None:
+    return find_active_xlsx_rule(db, client_id, trade_id, date.today())
 
 
 def build_resolved_rule_info(
@@ -156,6 +158,7 @@ def build_resolved_rule_info(
 ) -> ResolvedRuleInfo:
     display_client = link_client_name.strip() or client.name
     if rule is not None:
+        fee_pct = eworks_client_fee_pct if eworks_client_fee_pct is not None else rule.client_fee_pct
         return ResolvedRuleInfo(
             client_id=client.id,
             trade_id=trade.id,
@@ -164,7 +167,7 @@ def build_resolved_rule_info(
             formula_source=rule.formula_source,
             xlsx_client_name=rule.xlsx_client_name or display_client,
             xlsx_trade_name=rule.xlsx_trade_name or trade.name,
-            client_fee_pct=rule.client_fee_pct,
+            client_fee_pct=fee_pct,
         )
     fee_pct = eworks_client_fee_pct if eworks_client_fee_pct is not None else Decimal("0")
     return ResolvedRuleInfo(
@@ -191,10 +194,7 @@ def _fetch_eworks_customer_snapshot(customer_name: str) -> dict | None:
 
 
 def client_has_trade_rate_rule(db: Session, client_id: UUID | None, trade_id: UUID | None) -> bool:
-    if client_id is None or trade_id is None:
-        return False
-    matched = find_active_rule(db, client_id, trade_id, date.today())
-    return matched is not None and matched.rule.client_id == client_id
+    return has_exact_client_trade_xlsx_rule(db, client_id, trade_id, date.today())
 
 
 def resolve_trade(db: Session, trade_name: str) -> Trade:
@@ -206,10 +206,16 @@ def resolve_trade(db: Session, trade_name: str) -> Trade:
 
 
 def resolve_rate_rule(db: Session, client_id: UUID, trade_id: UUID):
-    matched = find_active_rule(db, client_id, trade_id, date.today())
+    from app.engines.rules_engine import resolve_calculation_rule
+
+    matched = resolve_calculation_rule(db, client_id, trade_id, date.today())
     if matched is None:
         raise AppError("RULE_NOT_FOUND", "No active rate rule found for client and trade", 404)
     return matched.rule
+
+
+def _uses_fallback_xlsx_fee(matched: MatchedRule | None) -> bool:
+    return matched is None or matched.match_type != "exact_client_trade"
 
 
 def resolve_skill_trade(db: Session, skill_name: str | None, *, fallback_trade_name: str) -> Trade:
@@ -339,7 +345,8 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
 
     client = resolve_client_for_link(db, payload.client)
     trade = resolve_trade(db, payload.trade)
-    rule = try_resolve_rate_rule(db, client.id, trade.id)
+    matched = try_resolve_xlsx_rate_rule(db, client.id, trade.id)
+    rule = matched.rule if matched else None
     link_client_name = payload.client.strip()
     step1 = payload_to_step1(payload, client, trade, client_display_name=link_client_name)
     resolved = build_resolved_rule_info(
@@ -347,7 +354,7 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
         trade,
         rule,
         link_client_name=link_client_name,
-        eworks_client_fee_pct=eworks_fee_pct if rule is None else None,
+        eworks_client_fee_pct=eworks_fee_pct if _uses_fallback_xlsx_fee(matched) else None,
     )
     idempotency_key = session_idempotency_key(payload.source, payload.quote_number, payload.job_number)
 
@@ -366,7 +373,7 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
             trade,
             rule,
             link_client_name=link_client_name,
-            eworks_client_fee_pct=eworks_fee_pct if rule is None else None,
+            eworks_client_fee_pct=eworks_fee_pct if _uses_fallback_xlsx_fee(matched) else None,
         )
         response = _build_session_response(existing, step1=step1, step2=step2, resolved=resolved, resumed=True)
         store_idempotency(

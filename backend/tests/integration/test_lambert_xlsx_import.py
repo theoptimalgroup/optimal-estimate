@@ -19,7 +19,7 @@ if not (PROJECT_ROOT / "scripts").is_dir() and Path("/workspace/scripts").is_dir
     PROJECT_ROOT = Path("/workspace")
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from import_quote_calculator_rules import import_rules
+from import_quote_calculator_rules import EXPECTED_FULL_IMPORT_TRADES, import_rules
 from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
 from app.main import app
@@ -123,11 +123,14 @@ class TestClientAliasResolution:
 
 @pytest.mark.skipif(not XLSX_PATH.exists(), reason="Master helper workbook missing")
 class TestLambertPilotImport:
+    LAMBERT_PILOT_CLIENTS = 2  # Lambert + DEFAULT fallback client
+    LAMBERT_PILOT_RULES = EXPECTED_FULL_IMPORT_TRADES * 3  # client + DEFAULT + global fallbacks
+
     def test_dry_run_lambert_pilot_is_16_rules(self):
         stats = import_rules(dry_run=True, client_filter="Lambert")
-        assert stats["clients"] == 1
-        assert stats["trades"] == 16
-        assert stats["rules_would_create"] == 16
+        assert stats["clients"] == self.LAMBERT_PILOT_CLIENTS
+        assert stats["trades"] == EXPECTED_FULL_IMPORT_TRADES
+        assert stats["rules_would_create"] == self.LAMBERT_PILOT_RULES
 
     def test_live_import_creates_16_xlsx_rules_with_client_id(self, lambert_api_client):
         _, session, _ = lambert_api_client
@@ -135,7 +138,7 @@ class TestLambertPilotImport:
         session.commit()
         session.expire_all()
 
-        assert stats["rules_created"] == 16
+        assert stats["rules_created"] == self.LAMBERT_PILOT_RULES
 
         client = session.scalar(select(Client).where(Client.name == "Lamberts Chartered Surveyors"))
         assert client is not None
@@ -143,6 +146,6 @@ class TestLambertPilotImport:
         rules = session.scalars(
             select(RateRule).where(RateRule.client_id == client.id, RateRule.formula_source == "xlsx")
         ).all()
-        assert len(rules) == 16
+        assert len(rules) == EXPECTED_FULL_IMPORT_TRADES
         assert all(rule.client_id is not None for rule in rules)
         assert all(rule.xlsx_client_name == "Lambert Chartered Surveyors" for rule in rules)

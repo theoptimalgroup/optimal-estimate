@@ -62,13 +62,14 @@ from app.services.calculation_view_service import (
     build_internal_view_from_session,
 )
 from app.services.eworks_link_service import (
+    _uses_fallback_xlsx_fee,
     build_resolved_rule_info,
     client_has_trade_rate_rule,
     collect_work_skills,
     get_session_by_token,
     resolve_skill_trade,
     session_eworks_client_fee_pct,
-    try_resolve_rate_rule,
+    try_resolve_xlsx_rate_rule,
     skills_are_uniform,
     work_skill_name,
 )
@@ -85,7 +86,7 @@ from app.services.calculation_session_revision_service import (
     list_session_version_history,
 )
 from app.services.quote_acceptance_helpers import staff_acceptance_from_session
-from app.engines.rules_engine import find_active_rule
+from app.engines.rules_engine import resolve_calculation_rule
 
 
 def _eworks_preview_request(
@@ -120,9 +121,10 @@ def _resolved_from_session(db: Session, session: CalculationSession) -> Resolved
     from app.models.trade import Trade
 
     step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+    matched = try_resolve_xlsx_rate_rule(db, session.client_id, session.trade_id) if session.client_id and session.trade_id else None
     rule = db.get(RateRule, session.rate_rule_id) if session.rate_rule_id else None
-    if rule is None and session.client_id and session.trade_id:
-        rule = try_resolve_rate_rule(db, session.client_id, session.trade_id)
+    if rule is None and matched is not None:
+        rule = matched.rule
     client = db.get(Client, session.client_id)
     trade = db.get(Trade, session.trade_id)
     if client is None or trade is None:
@@ -132,7 +134,7 @@ def _resolved_from_session(db: Session, session: CalculationSession) -> Resolved
         trade,
         rule,
         link_client_name=step1.client_name,
-        eworks_client_fee_pct=session_eworks_client_fee_pct(session) if rule is None else None,
+        eworks_client_fee_pct=session_eworks_client_fee_pct(session) if _uses_fallback_xlsx_fee(matched) else None,
     )
 
 
@@ -450,7 +452,7 @@ def calculate_session(
     work_skills = collect_work_skills(step2_data.works, step1.trade_name)
     uniform_skills = skills_are_uniform(step2_data.works, step1.trade_name)
 
-    matched = find_active_rule(db, session.client_id, session.trade_id, None)
+    matched = resolve_calculation_rule(db, session.client_id, session.trade_id, None)
     rule = matched.rule if matched else None
     from decimal import Decimal
 
@@ -700,11 +702,28 @@ def _build_dashboard_quote_item_from_session(db: Session, session: CalculationSe
     works: list[DashboardWorkItem] = []
     for index, block in enumerate(step2.works):
         work_result = breakdown_map.get(index, {})
-        breakdown = work_result.get("breakdown") or {}
-        labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(breakdown)
+        work_bd = work_result.get("breakdown") or {}
+
+        # For single-work quotes with XLSX formula, parking/CC are folded into the
+        # combined materials bucket.  The per-work breakdown intentionally omits
+        # quote-level charges (computed with an empty ChargeInput), so it reflects
+        # only raw materials.  Use the combined (quote-level) breakdown to ensure
+        # the work card subtotal matches the Quote Summary.
+        if len(step2.works) == 1 and last_result:
+            combined_bd = last_result.get("breakdown") or {}
+            labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(combined_bd)
+            if labour_subtotal is None and materials_subtotal is None:
+                labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_bd)
+        else:
+            labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_bd)
+
+        # For single-work quotes, the combined internal notes already include
+        # quote-level parking/CC in the BUDGET line.  The per-work notes are built
+        # without charges, so they would show Parking: £0.  Always prefer the
+        # combined notes for single-work quotes so every display path is consistent.
         work_internal_notes = work_result.get("internal_notes")
-        if not work_internal_notes and len(step2.works) == 1:
-            work_internal_notes = internal_notes
+        if len(step2.works) == 1:
+            work_internal_notes = internal_notes or work_internal_notes
         works.append(
             _build_dashboard_work_item(
                 db,
@@ -1590,6 +1609,7 @@ def _work_item_row(
     block: WorkBlockSnapshot,
     step1: Step1Snapshot,
     breakdown: CalculationBreakdown,
+    internal_notes_text: str | None = None,
 ) -> dict:
     material_rows = [*flatten_supplier_links(block.materials_to_order), *block.shelf_materials_rows]
     materials_link = format_links_and_quantity(material_rows)
@@ -1608,7 +1628,10 @@ def _work_item_row(
     description = scope_text.split("\n", 1)[0].strip() if scope_text else html_to_plain_text(step1.original_job_description or "").strip() or "Work item"
     findings = html_to_plain_text(block.findings or step1.findings_report or "").strip()
     notes_exclusions = html_to_plain_text(block.other_notes or "").strip()
-    internal_notes_text = (breakdown.internal_notes or "").strip()
+    if internal_notes_text is None:
+        resolved_internal_notes = (breakdown.internal_notes or "").strip()
+    else:
+        resolved_internal_notes = internal_notes_text.strip()
 
     return {
         "index": display_index,
@@ -1630,8 +1653,8 @@ def _work_item_row(
         "optimal_cost": _format_gbp(optimal_cost),
         "profit_gbp": _format_gbp(profit_gbp),
         "margin_pct": _format_pct(margin_pct),
-        "internal_notes": internal_notes_text,
-        "internal_notes_html": prepare_pdf_rich_text(internal_notes_text),
+        "internal_notes": resolved_internal_notes,
+        "internal_notes_html": prepare_pdf_rich_text(resolved_internal_notes),
         "_subtotal": client_price,
         "_vat_total": breakdown.vat_total,
         "_grand_total": breakdown.final_total,
@@ -1705,6 +1728,7 @@ def render_combined_works_pdf(
     from app.adapters.pdf_renderer import render_combined_works_document
     from app.services.pdf_calculation_context_service import (
         build_pdf_calculation_context,
+        build_work_internal_calculation_note,
         quote_level_totals_for_works,
         session_blocks_recalculation,
         work_breakdown_map,
@@ -1753,11 +1777,22 @@ def render_combined_works_pdf(
         work_result = breakdown_by_work.get(index)
         if work_result is None:
             raise AppError("CALCULATION_REQUIRED", f"No cached breakdown for work {index + 1}", 400)
+        resolved_notes = None
+        if view_type != "client":
+            resolved_notes = build_work_internal_calculation_note(
+                work_index=index,
+                work_block=block,
+                work_result=work_result,
+                quote_internal_notes=pdf_ctx.internal_notes,
+                quote_breakdown=breakdown,
+                work_count=len(step2.works),
+            )
         row = _work_item_row(
             display_index=position,
             block=block,
             step1=step1,
             breakdown=work_result.breakdown,
+            internal_notes_text=resolved_notes or "",
         )
         item = {key: value for key, value in row.items() if not key.startswith("_")}
         if view_type == "client":
@@ -1830,7 +1865,9 @@ def reopen_submitted_session(db: Session, *, session_id: UUID) -> ReopenQuoteRes
         raise AppError("SESSION_NOT_SUBMITTED", "Only submitted quotes can be reopened for editing", 409)
 
     session.status = "in_progress"
-    session.submitted_at = None
+    session.locked = False
+    session.revision_in_progress = False
+    session.active_revision_reason = None
     session.ui_state = {
         "current_step": 1,
         "max_reachable_step": 1,

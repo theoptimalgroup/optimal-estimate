@@ -458,3 +458,139 @@ def test_build_pdf_context_parses_work_breakdowns(calc_db):
     assert len(ctx.work_breakdowns) == 2
     assert all(isinstance(item, WorkBreakdownResult) for item in ctx.work_breakdowns)
     assert ctx.breakdown.final_total == KNOWN_FINAL_TOTAL
+
+
+# ---------------------------------------------------------------------------
+# Single-work dashboard display consistency (parking folded into XLSX bucket)
+# ---------------------------------------------------------------------------
+
+def _single_work_xlsx_ui_state() -> dict:
+    """Single-work session: per-work breakdown lacks parking (£0); combined has £100."""
+    per_work_breakdown = {
+        "labour": [{"label": "Labour (hourly)", "formula": "xlsx", "total": "145.00"}],
+        "materials": [{"label": "Materials, parking & congestion", "formula": "xlsx", "total": "140.00"}],
+        "charges": [],
+        "subtotal": "285.00",
+        "vat_rate": "20",
+        "vat_total": "57.00",
+        "final_total": "342.00",
+        "labour_charge_to_client": "145.00",
+        "materials_parking_cc_charge": "140.00",
+        "formula_source": "xlsx",
+        "formula_version": "1.0.0",
+        "internal_notes": "BUDGET: Materials:  £110 / Parking: £0 / CC: £0  / OH:  £43\n(per-work notes without parking)",
+    }
+    combined_breakdown = {
+        "labour": [{"label": "Labour (hourly)", "formula": "xlsx", "total": "145.00"}],
+        "materials": [{"label": "Materials, parking & congestion", "formula": "xlsx", "total": "265.00"}],
+        "charges": [],
+        "subtotal": "410.00",
+        "vat_rate": "20",
+        "vat_total": "82.00",
+        "final_total": "492.00",
+        "labour_charge_to_client": "145.00",
+        "materials_parking_cc_charge": "265.00",
+        "formula_source": "xlsx",
+        "formula_version": "1.0.0",
+        "internal_notes": "BUDGET: Materials:  £110 / Parking: £100 / CC: £0  / OH:  £43\n(combined notes with parking)",
+    }
+    return {
+        "current_step": 3,
+        "max_reachable_step": 3,
+        "last_result": {
+            "breakdown": combined_breakdown,
+            "work_breakdowns": [
+                {
+                    "work_index": 0,
+                    "scope": "Fix door",
+                    "breakdown": per_work_breakdown,
+                    "internal_notes": per_work_breakdown["internal_notes"],
+                }
+            ],
+            "internal_notes": combined_breakdown["internal_notes"],
+        },
+    }
+
+
+@pytest.fixture()
+def single_work_xlsx_db():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    for model in (Client, ClientAlias, Trade, CalculationSession, CalculationSessionVersion):
+        model.__table__.create(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+
+    client = Client(name="TEST Client", default_vat_rate=Decimal("20"))
+    trade = Trade(name="Carpenter", is_active=True)
+    db.add_all([client, trade])
+    db.flush()
+
+    session_id = uuid4()
+    db.add(
+        CalculationSession(
+            id=session_id,
+            session_token="token-xlsx-single",
+            source="test",
+            payload_snapshot={},
+            step1_snapshot=_step1(quote_number="Q22123"),
+            step2_snapshot={"works": [{"scope": "Fix door"}]},
+            ui_state=_single_work_xlsx_ui_state(),
+            client_id=client.id,
+            trade_id=trade.id,
+            expires_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            status="submitted",
+            submitted_at=datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc),
+            locked=True,
+        )
+    )
+    db.commit()
+    return db, session_id
+
+
+def test_single_work_xlsx_work_card_subtotal_uses_combined_breakdown(single_work_xlsx_db):
+    """Work card subtotal for a single-work XLSX quote must use the combined breakdown.
+
+    Per-work breakdown: labour=£145, materials=£140 (no parking) → £285
+    Combined breakdown: labour=£145, materials=£265 (with parking) → £410
+    The work card must show £410, matching the Quote Summary.
+    """
+    from app.services.calculation_session_service import get_submitted_quote_detail
+
+    db, session_id = single_work_xlsx_db
+    quote = get_submitted_quote_detail(db, session_id)
+
+    assert len(quote.works) == 1
+    work = quote.works[0]
+
+    # Work card subtotals must use combined breakdown (£145 labour + £265 materials = £410)
+    assert work.labour_subtotal == Decimal("145"), f"labour_subtotal={work.labour_subtotal}"
+    assert work.materials_subtotal == Decimal("265"), f"materials_subtotal={work.materials_subtotal}"
+    work_total = (work.labour_subtotal or Decimal("0")) + (work.materials_subtotal or Decimal("0"))
+    assert work_total == Decimal("410")
+
+    # Quote summary must also show £410 works subtotal
+    assert quote.breakdown is not None
+    assert quote.breakdown.works_subtotal == Decimal("410")
+
+
+def test_single_work_xlsx_work_card_notes_use_combined_notes(single_work_xlsx_db):
+    """Work card internal notes must use combined notes (with Parking: £100).
+
+    Per-work notes show Parking: £0; combined notes show Parking: £100.
+    The work card must show the combined version so all sections are consistent.
+    """
+    from app.services.calculation_session_service import get_submitted_quote_detail
+
+    db, session_id = single_work_xlsx_db
+    quote = get_submitted_quote_detail(db, session_id)
+
+    work = quote.works[0]
+    assert work.internal_notes is not None
+    assert "Parking: £100" in work.internal_notes, (
+        f"Expected 'Parking: £100' in work notes but got:\n{work.internal_notes}"
+    )
+    assert "Parking: £0" not in work.internal_notes

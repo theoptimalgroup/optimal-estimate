@@ -1,4 +1,4 @@
-"""Full XLSX import coverage: 158 clients, 16 trades, 2,528 rules."""
+"""Full XLSX import coverage: 159 clients, 16 trades, 2,560 rules."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from import_quote_calculator_rules import (
 )
 from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
-from app.engines.rules_engine import find_active_rule
+from app.engines.rules_engine import DEFAULT_XLSX_CLIENT_NAME, find_active_rule
 from app.main import app
 from app.models.client import Client
 from app.models.rate_rule import RateRule
@@ -85,8 +85,30 @@ class TestFullXlsxImport:
 
         xlsx_rules = session.scalars(select(RateRule).where(RateRule.formula_source == "xlsx")).all()
         assert len(xlsx_rules) == EXPECTED_FULL_IMPORT_RULES
-        assert all(rule.client_id is not None for rule in xlsx_rules)
-        assert all(rule.trade_id is not None for rule in xlsx_rules)
+
+        default_client = find_client_by_name_or_alias(session, DEFAULT_XLSX_CLIENT_NAME)
+        assert default_client is not None
+
+        default_client_rules = [
+            rule for rule in xlsx_rules if rule.client_id == default_client.id
+        ]
+        assert len(default_client_rules) == EXPECTED_FULL_IMPORT_TRADES
+
+        global_rules = [rule for rule in xlsx_rules if rule.client_id is None]
+        assert len(global_rules) == EXPECTED_FULL_IMPORT_TRADES
+        assert all(rule.formula_source == "xlsx" for rule in global_rules)
+        assert all(rule.trade_id is not None for rule in global_rules)
+        assert all(rule.is_active for rule in global_rules)
+
+        normal_client_rules = [
+            rule
+            for rule in xlsx_rules
+            if rule.client_id is not None and rule.client_id != default_client.id
+        ]
+        expected_normal_rules = (EXPECTED_FULL_IMPORT_CLIENTS - 1) * EXPECTED_FULL_IMPORT_TRADES
+        assert len(normal_client_rules) == expected_normal_rules
+        assert all(rule.client_id is not None for rule in normal_client_rules)
+        assert all(rule.trade_id is not None for rule in normal_client_rules)
 
     def test_no_duplicate_clients_after_alias_normalization(self, full_import_api_client):
         _, session, _ = full_import_api_client

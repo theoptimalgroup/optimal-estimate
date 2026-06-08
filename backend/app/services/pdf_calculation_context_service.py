@@ -17,6 +17,7 @@ from app.schemas.eworks_link import (
     AggregatedQuoteSummary,
     Step1Snapshot,
     Step2Snapshot,
+    WorkBlockSnapshot,
     WorkBreakdownResult,
 )
 from app.services.calculation_session_service import _session_ui_state
@@ -151,6 +152,83 @@ def log_pdf_calculation_totals(
 
 def work_breakdown_map(work_breakdowns: list[WorkBreakdownResult]) -> dict[int, WorkBreakdownResult]:
     return {item.work_index: item for item in work_breakdowns}
+
+
+def build_work_internal_calculation_note(
+    *,
+    work_index: int,
+    work_block: WorkBlockSnapshot | None,
+    work_result: WorkBreakdownResult | None,
+    quote_internal_notes: str | None,
+    quote_breakdown: CalculationBreakdown | None,
+    work_count: int,
+) -> str | None:
+    """Resolve internal notes for PDF from manual notes and cached calculation breakdown."""
+    _ = work_index  # reserved for future per-work labelling
+    manual = (work_block.other_notes or "").strip() if work_block else ""
+
+    generated: str | None = None
+    if work_result is not None:
+        for candidate in (work_result.internal_notes, work_result.breakdown.internal_notes):
+            if candidate and str(candidate).strip():
+                generated = str(candidate).strip()
+                break
+
+    if not generated and work_count == 1:
+        for candidate in (
+            quote_internal_notes,
+            quote_breakdown.internal_notes if quote_breakdown else None,
+        ):
+            if candidate and str(candidate).strip():
+                generated = str(candidate).strip()
+                break
+
+    parts: list[str] = []
+    if manual:
+        parts.append(manual)
+    if generated and generated != manual:
+        parts.append(generated)
+    return "\n\n".join(parts) if parts else None
+
+
+def build_combined_internal_notes_for_pdf(
+    *,
+    work_blocks: list[WorkBlockSnapshot],
+    work_breakdowns: list[WorkBreakdownResult],
+    quote_internal_notes: str | None,
+    quote_breakdown: CalculationBreakdown,
+) -> str | None:
+    """Build combined internal notes page content from cached calculation results."""
+    work_count = len(work_blocks)
+    breakdown_map = work_breakdown_map(work_breakdowns)
+
+    if work_count == 1:
+        return build_work_internal_calculation_note(
+            work_index=0,
+            work_block=work_blocks[0] if work_blocks else None,
+            work_result=breakdown_map.get(0),
+            quote_internal_notes=quote_internal_notes,
+            quote_breakdown=quote_breakdown,
+            work_count=1,
+        )
+
+    quote_combined = (quote_internal_notes or quote_breakdown.internal_notes or "").strip()
+    if quote_combined:
+        return quote_combined
+
+    sections: list[str] = []
+    for index, block in enumerate(work_blocks):
+        note = build_work_internal_calculation_note(
+            work_index=index,
+            work_block=block,
+            work_result=breakdown_map.get(index),
+            quote_internal_notes=quote_internal_notes,
+            quote_breakdown=quote_breakdown,
+            work_count=work_count,
+        )
+        if note:
+            sections.append(f"--- Work {index + 1} ---\n{note}")
+    return "\n\n".join(sections) if sections else None
 
 
 def quote_level_totals_for_works(

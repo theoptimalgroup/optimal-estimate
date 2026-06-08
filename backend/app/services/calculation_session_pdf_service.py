@@ -47,6 +47,7 @@ def render_session_quote_pdf(
     session_token: str,
     is_draft: bool = False,
     read_only: bool = False,
+    show_internal_notes: bool = True,
 ) -> tuple[bytes, str, str]:
     session = _load_session_for_pdf(
         db,
@@ -85,6 +86,7 @@ def render_session_quote_pdf(
         work_breakdowns=work_breakdowns,
         aggregated_summary=aggregated_summary,
         internal_notes=internal_notes,
+        show_internal_notes=show_internal_notes,
     )
     context["quote_number"] = step1.quote_number
     return render_eworks_estimate_document(context, is_draft=is_draft)

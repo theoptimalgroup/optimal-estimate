@@ -101,7 +101,7 @@ def reopen_quote(session_id: UUID, db: DbSession, auth: DashboardAccess = Depend
             action="quote_reopened",
             entity_type="calculation_session",
             entity_id=session_id,
-            after={"status": "in_progress"},
+            after={"status": "in_progress", "locked": False},
         )
         db.commit()
     except AppError as exc:

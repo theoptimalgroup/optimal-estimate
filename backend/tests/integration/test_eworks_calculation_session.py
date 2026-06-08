@@ -179,6 +179,39 @@ def _error_code(response) -> str | None:
     return None
 
 
+def _make_default_carpenter_rule(default_client_id, trade_id) -> RateRule:
+    return RateRule(
+        client_id=default_client_id,
+        trade_id=trade_id,
+        formula_source="xlsx",
+        version="default-carpenter-xlsx",
+        hourly_rate=Decimal("95"),
+        day_rate=Decimal("239.40"),
+        direct_hourly_cost=Decimal("30"),
+        direct_daily_cost=Decimal("239.40"),
+        client_fee_pct=Decimal("0"),
+        hourly_overhead_pct=Decimal("0.30"),
+        daily_overhead_pct=Decimal("0.20"),
+        daily_overhead_long_job_pct=Decimal("0.15"),
+        labourer_hourly_cost=Decimal("18.75"),
+        labourer_daily_cost=Decimal("150"),
+        material_charge_denominator=Decimal("0.20"),
+        parking_charge_denominator=Decimal("0.20"),
+        congestion_charge_denominator=Decimal("0.20"),
+        mround_increment=Decimal("5"),
+        oj_uplift_pct=Decimal("10"),
+        nhs_overhead_uplift_pct=Decimal("15"),
+        eaf_flat_fee=Decimal("1"),
+        xlsx_client_name="DEFAULT",
+        xlsx_trade_name="Carpenter",
+        material_markup_type="percentage",
+        material_markup_value=Decimal("20"),
+        vat_rate=Decimal("20"),
+        active_from=date(2024, 1, 1),
+        is_active=True,
+    )
+
+
 @pytest.fixture()
 def eworks_api_client(monkeypatch):
     monkeypatch.setattr(settings, "eworks_link_secret", TEST_SECRET)
@@ -188,12 +221,14 @@ def eworks_api_client(monkeypatch):
     session, _ = make_test_session()
     client = Client(id=uuid.uuid4(), name="Lamberts Chartered Surveyors", default_vat_rate=Decimal("20"))
     alias = ClientAlias(id=uuid.uuid4(), client_id=client.id, alias_name="Lambert Chartered Surveyors")
+    default_client = Client(id=uuid.uuid4(), name="DEFAULT", default_vat_rate=Decimal("20"))
     trade = Trade(id=uuid.uuid4(), name="Carpenter")
     plumber_trade = Trade(id=uuid.uuid4(), name="Plumber")
     rule = _make_lambert_carpenter_rule(client.id, trade.id)
+    default_rule = _make_default_carpenter_rule(default_client.id, trade.id)
     plumber_rule = _make_lambert_plumber_rule(client.id, plumber_trade.id)
     trade_default_rule = _make_trade_default_carpenter_rule(trade.id)
-    session.add_all([client, alias, trade, plumber_trade, rule, plumber_rule, trade_default_rule])
+    session.add_all([client, alias, default_client, trade, plumber_trade, rule, default_rule, plumber_rule, trade_default_rule])
     session.commit()
 
     def override_get_db():
@@ -231,8 +266,8 @@ def test_from_link_unknown_client_opens_with_zero_commission(eworks_api_client):
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["step1"]["client_name"] == unknown_client
-    assert data["resolved"]["rule_id"] is None
-    assert data["resolved"]["formula_source"] == "none"
+    assert data["resolved"]["rule_id"] is not None
+    assert data["resolved"]["formula_source"] == "xlsx"
     assert Decimal(str(data["resolved"]["client_fee_pct"])) == Decimal("0")
 
     created = data
@@ -242,9 +277,14 @@ def test_from_link_unknown_client_opens_with_zero_commission(eworks_api_client):
         json={"step2": _alex_row_11_step2()},
     )
     assert calc.status_code == 200
-    notes = calc.json()["data"]["internal_notes"] or ""
+    calc_data = calc.json()["data"]
+    notes = calc_data["internal_notes"] or ""
     assert "Comms @ 0%" in notes
+    assert "Client not available or" in notes
     assert unknown_client in notes
+    assert calc_data["breakdown"]["formula_source"] == "xlsx"
+    assert any("Exact client rate rule not found" in warning for warning in calc_data["breakdown"].get("warnings", []))
+    assert "internal_notes" not in calc_data["client_view"]["calculation"]
 
 
 def test_from_link_eworks_api_commission_when_enabled(eworks_api_client, monkeypatch):
@@ -273,8 +313,8 @@ def test_from_link_eworks_api_commission_when_enabled(eworks_api_client, monkeyp
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["step1"]["client_name"] == aspire_client
-    assert data["resolved"]["rule_id"] is None
-    assert data["resolved"]["formula_source"] == "none"
+    assert data["resolved"]["rule_id"] is not None
+    assert data["resolved"]["formula_source"] == "xlsx"
     assert Decimal(str(data["resolved"]["client_fee_pct"])) == Decimal("0.18")
 
     created = data
@@ -1097,9 +1137,11 @@ def test_submit_marks_session_and_lists_on_dashboard(eworks_api_client, tmp_path
 
 def test_dashboard_reopen_quote_for_refill(eworks_api_client, monkeypatch):
     from app.core.config import settings
+    from app.models.calculation_session import CalculationSession
+    from app.models.calculation_session_version import CalculationSessionVersion
 
     monkeypatch.setattr(settings, "dashboard_password", "test-dashboard-pass")
-    test_client, _ = eworks_api_client
+    test_client, db_session = eworks_api_client
     created = _from_link(test_client, _base_payload(quote_number="Q-REOPEN", job_number="JOB-REOPEN")).json()["data"]
     session_id = created["session_id"]
     token = created["session_token"]
@@ -1117,6 +1159,13 @@ def test_dashboard_reopen_quote_for_refill(eworks_api_client, monkeypatch):
     )
     assert submit.status_code == 200
 
+    blocked = test_client.patch(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+        json={"step2": {"works": [_alex_work_block(scope="Blocked before reopen")]}},
+    )
+    assert blocked.status_code == 409
+
     reopen = test_client.post(
         f"/api/v1/dashboard/quotes/{session_id}/reopen",
         headers={"X-Dashboard-Password": "test-dashboard-pass"},
@@ -1125,6 +1174,24 @@ def test_dashboard_reopen_quote_for_refill(eworks_api_client, monkeypatch):
     reopened = reopen.json()["data"]
     assert reopened["session_id"] == session_id
     assert reopened["session_token"] == token
+
+    db_session.expire_all()
+    session = db_session.get(CalculationSession, uuid.UUID(session_id))
+    assert session is not None
+    assert session.status == "in_progress"
+    assert session.locked is False
+    assert session.revision_in_progress is False
+    assert session.submitted_at is not None
+
+    versions = (
+        db_session.query(CalculationSessionVersion)
+        .filter_by(session_id=uuid.UUID(session_id))
+        .order_by(CalculationSessionVersion.version_number)
+        .all()
+    )
+    assert len(versions) == 1
+    assert versions[0].is_current is True
+    assert versions[0].calculation_result is not None
 
     get_session = test_client.get(
         f"/api/v1/calculation-session/{session_id}",
@@ -1302,7 +1369,8 @@ def test_dashboard_combined_pdf_download(eworks_api_client, monkeypatch):
             assert token not in visible_body
 
 
-def test_patch_ui_state_preserves_last_result_after_submit(eworks_api_client):
+def test_patch_ui_state_rejected_on_locked_session_preserves_last_result(eworks_api_client):
+    """Submitted sessions are locked; PATCH is rejected but last_result stays intact."""
     test_client, _ = eworks_api_client
     created = _from_link(test_client, _base_payload(quote_number="Q-PATCH", job_number="JOB-PATCH")).json()["data"]
     session_id = created["session_id"]
@@ -1316,15 +1384,30 @@ def test_patch_ui_state_preserves_last_result_after_submit(eworks_api_client):
     )
     assert submit.status_code == 200
 
+    before_patch = test_client.get(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+    ).json()["data"]
+    expected_last_result = before_patch["ui_state"]["last_result"]
+    assert expected_last_result is not None
+    expected_total = expected_last_result["breakdown"]["final_total"]
+
     patch = test_client.patch(
         f"/api/v1/calculation-session/{session_id}",
         headers={"X-Session-Token": token},
-        json={"ui_state": {"current_step": 2, "max_reachable_step": 2}},
+        json={"ui_state": {"current_step": 2, "max_reachable_step": 2, "last_result": None}},
     )
-    assert patch.status_code == 200
-    ui_state = patch.json()["data"]["ui_state"]
+    assert patch.status_code == 409
+
+    after_patch = test_client.get(
+        f"/api/v1/calculation-session/{session_id}",
+        headers={"X-Session-Token": token},
+    ).json()["data"]
+    ui_state = after_patch["ui_state"]
     assert ui_state["last_result"] is not None
-    assert ui_state["last_result"]["breakdown"]["final_total"] is not None
+    assert ui_state["last_result"]["breakdown"]["final_total"] == expected_total
+    assert after_patch["status"] == "submitted"
+    assert after_patch["locked"] is True
 
 
 def test_patch_step2_rejected_after_submit(eworks_api_client):
