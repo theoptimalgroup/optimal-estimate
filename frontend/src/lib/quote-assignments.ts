@@ -56,6 +56,13 @@ export type QuoteAssignment = {
   can_revise?: boolean;
   can_continue_revision?: boolean;
   can_view_submission?: boolean;
+  source?: "manual" | "eworks_appointment" | string | null;
+  is_derived?: boolean;
+  appointment_start_at?: string | null;
+  appointment_end_at?: string | null;
+  appointment_status?: string | null;
+  appointment_type?: string | null;
+  job_ref?: string | null;
 };
 
 export type AssignmentStartEstimateResult = {

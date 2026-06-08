@@ -25,12 +25,23 @@ import {
   type AssignmentCreatePayload,
   type QuoteAssignment,
 } from "@/lib/quote-assignments";
+import type { EworksAppointmentAssignee } from "@/lib/eworks-sync";
 
 function assignmentTypeLabel(type: QuoteAssignment["assignment_type"]): string {
   return type === "estimator" ? "Estimator" : "Engineer";
 }
 
-export function QuoteAssignmentSection({ quoteId }: { quoteId: number | null }) {
+function isActiveAssignment(status: QuoteAssignment["status"]): boolean {
+  return status !== "cancelled" && status !== "revoked";
+}
+
+export function QuoteAssignmentSection({
+  quoteId,
+  appointmentAssignee,
+}: {
+  quoteId: number | null;
+  appointmentAssignee?: EworksAppointmentAssignee | null;
+}) {
   const [assignments, setAssignments] = useState<QuoteAssignment[]>([]);
   const [assignees, setAssignees] = useState<AssigneeUser[]>([]);
   const [loading, setLoading] = useState(false);
@@ -128,75 +139,126 @@ export function QuoteAssignmentSection({ quoteId }: { quoteId: number | null }) 
 
   if (!quoteId) return null;
 
+  const activeManualAssignments = assignments.filter((item) => isActiveAssignment(item.status));
+  const cancelledManualAssignments = assignments.filter((item) => !isActiveAssignment(item.status));
+  const sortedManualAssignments = [...activeManualAssignments, ...cancelledManualAssignments];
+  const showAppointmentCard = Boolean(appointmentAssignee);
+  const assignButtonLabel = showAppointmentCard ? "Override manually" : "Assign";
+  const openFormLabel = showAppointmentCard ? "Assign manually" : "Assign";
+
   return (
     <SectionCard title="Assign Estimator / Engineer" testId="quote-assignment-section">
+      {showAppointmentCard && appointmentAssignee ? (
+        <div
+          className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4"
+          data-testid="eworks-appointment-assignee-section"
+        >
+          <p className="text-sm font-medium text-slate-900">Assigned from eWorks appointment</p>
+          <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Assignee</dt>
+              <dd className="mt-1 text-sm text-slate-900">
+                {appointmentAssignee.name || appointmentAssignee.email || "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Email</dt>
+              <dd className="mt-1 text-sm text-slate-900">{appointmentAssignee.email || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Appointment</dt>
+              <dd className="mt-1 text-sm text-slate-900">
+                {appointmentAssignee.start_at && appointmentAssignee.end_at
+                  ? `${appointmentAssignee.start_at} to ${appointmentAssignee.end_at}`
+                  : appointmentAssignee.start_at || appointmentAssignee.end_at || "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</dt>
+              <dd className="mt-1 text-sm text-slate-900">{appointmentAssignee.status || "—"}</dd>
+            </div>
+          </dl>
+          <div className="mt-3">
+            <StatusBadge tone={appointmentAssignee.assignee_kind === "registered" ? "success" : "info"}>
+              {appointmentAssignee.assignee_kind === "registered" ? "Registered user" : "External"}
+            </StatusBadge>
+          </div>
+        </div>
+      ) : null}
       {loading ? (
         <LoadingState message="Loading assignments…" />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void load()} />
       ) : (
         <div className="space-y-4">
-          {assignments.length === 0 ? (
+          {sortedManualAssignments.length > 0 ? (
+            <>
+              <h3 className="text-sm font-medium text-slate-900" data-testid="manual-assignments-heading">
+                Manual assignments
+              </h3>
+              <DataTable testId="assignments-table">
+                <DataTableHead>
+                  <DataTableRow>
+                    <DataTableCell header>Type</DataTableCell>
+                    <DataTableCell header>Assignee</DataTableCell>
+                    <DataTableCell header>Status</DataTableCell>
+                    <DataTableCell header>Assigned At</DataTableCell>
+                    <DataTableCell header>Actions</DataTableCell>
+                  </DataTableRow>
+                </DataTableHead>
+                <DataTableBody>
+                  {sortedManualAssignments.map((assignment) => (
+                    <DataTableRow key={assignment.id} data-testid={`assignment-row-${assignment.id}`}>
+                      <DataTableCell>{assignmentTypeLabel(assignment.assignment_type)}</DataTableCell>
+                      <DataTableCell>
+                        {assignment.assigned_user_name || assignment.assigned_user_email || "—"}
+                        {assignment.assignee_kind === "external" ? (
+                          <StatusBadge tone="info">External</StatusBadge>
+                        ) : assignment.assignee_kind === "registered" ? (
+                          <StatusBadge tone="success">Registered user</StatusBadge>
+                        ) : null}
+                      </DataTableCell>
+                      <DataTableCell>
+                        <StatusBadge tone="neutral">{assignment.status}</StatusBadge>
+                      </DataTableCell>
+                      <DataTableCell>{assignment.assigned_at ?? "—"}</DataTableCell>
+                      <DataTableCell>
+                        <div className="flex flex-wrap gap-2">
+                          {assignment.assignee_kind === "external" && assignment.assignment_link ? (
+                            <div className="flex flex-col gap-1">
+                              <button
+                                type="button"
+                                className="text-sm font-medium text-blue-600 hover:text-blue-800"
+                                onClick={() => void handleCopyLink(assignment)}
+                                data-testid={`copy-assignment-link-${assignment.id}`}
+                              >
+                                {copiedId === assignment.id ? "Copied" : "Copy link"}
+                              </button>
+                            </div>
+                          ) : null}
+                          {assignment.status !== "cancelled" ? (
+                            <button
+                              type="button"
+                              className="text-sm font-medium text-red-600 hover:text-red-800"
+                              onClick={() => void handleRevoke(assignment.id)}
+                              disabled={submitting}
+                              data-testid={`revoke-assignment-${assignment.id}`}
+                            >
+                              Revoke
+                            </button>
+                          ) : null}
+                        </div>
+                      </DataTableCell>
+                    </DataTableRow>
+                  ))}
+                </DataTableBody>
+              </DataTable>
+            </>
+          ) : !showAppointmentCard ? (
             <p className="text-sm text-slate-600" data-testid="assignments-empty">
               No assignments yet.
             </p>
-          ) : (
-            <DataTable testId="assignments-table">
-              <DataTableHead>
-                <DataTableRow>
-                  <DataTableCell header>Type</DataTableCell>
-                  <DataTableCell header>Assignee</DataTableCell>
-                  <DataTableCell header>Status</DataTableCell>
-                  <DataTableCell header>Assigned At</DataTableCell>
-                  <DataTableCell header>Actions</DataTableCell>
-                </DataTableRow>
-              </DataTableHead>
-              <DataTableBody>
-                {assignments.map((assignment) => (
-                  <DataTableRow key={assignment.id} data-testid={`assignment-row-${assignment.id}`}>
-                    <DataTableCell>{assignmentTypeLabel(assignment.assignment_type)}</DataTableCell>
-                    <DataTableCell>
-                      {assignment.assigned_user_name || assignment.assigned_user_email || "—"}
-                      {assignment.assignee_kind === "external" ? (
-                        <StatusBadge tone="info">External</StatusBadge>
-                      ) : null}
-                    </DataTableCell>
-                    <DataTableCell>
-                      <StatusBadge tone="neutral">{assignment.status}</StatusBadge>
-                    </DataTableCell>
-                    <DataTableCell>{assignment.assigned_at ?? "—"}</DataTableCell>
-                    <DataTableCell>
-                      <div className="flex flex-wrap gap-2">
-                        {assignment.assignee_kind === "external" && assignment.assignment_link ? (
-                          <div className="flex flex-col gap-1">
-                            <button
-                              type="button"
-                              className="text-sm font-medium text-blue-600 hover:text-blue-800"
-                              onClick={() => void handleCopyLink(assignment)}
-                              data-testid={`copy-assignment-link-${assignment.id}`}
-                            >
-                              {copiedId === assignment.id ? "Copied" : "Copy link"}
-                            </button>
-                          </div>
-                        ) : null}
-                        {assignment.status !== "cancelled" ? (
-                          <button
-                            type="button"
-                            className="text-sm font-medium text-red-600 hover:text-red-800"
-                            onClick={() => void handleRevoke(assignment.id)}
-                            disabled={submitting}
-                            data-testid={`revoke-assignment-${assignment.id}`}
-                          >
-                            Revoke
-                          </button>
-                        ) : null}
-                      </div>
-                    </DataTableCell>
-                  </DataTableRow>
-                ))}
-              </DataTableBody>
-            </DataTable>
-          )}
+          ) : null}
 
           {showForm ? (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="assignment-form">
@@ -290,7 +352,7 @@ export function QuoteAssignmentSection({ quoteId }: { quoteId: number | null }) 
                   disabled={submitting}
                   data-testid="submit-assignment-button"
                 >
-                  Assign
+                  {assignButtonLabel}
                 </PrimaryButton>
                 <SecondaryButton onClick={() => setShowForm(false)} disabled={submitting}>
                   Cancel
@@ -299,7 +361,7 @@ export function QuoteAssignmentSection({ quoteId }: { quoteId: number | null }) 
             </div>
           ) : (
             <PrimaryButton onClick={() => setShowForm(true)} data-testid="open-assignment-form">
-              Assign
+              {openFormLabel}
             </PrimaryButton>
           )}
         </div>

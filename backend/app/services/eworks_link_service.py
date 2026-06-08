@@ -30,6 +30,7 @@ from app.schemas.eworks_link import (
     Step2Snapshot,
     WorkBlockSnapshot,
 )
+from app.services.eworks_job_appointment_service import apply_appointment_engineer_name_to_step1
 from app.services.idempotency_service import (
     hash_payload,
     session_idempotency_key,
@@ -349,6 +350,12 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
     rule = matched.rule if matched else None
     link_client_name = payload.client.strip()
     step1 = payload_to_step1(payload, client, trade, client_display_name=link_client_name)
+    step1 = apply_appointment_engineer_name_to_step1(
+        db,
+        step1,
+        quote_ref=payload.quote_number,
+        job_ref=payload.job_number,
+    )
     resolved = build_resolved_rule_info(
         client,
         trade,
@@ -360,6 +367,18 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
 
     existing = find_session_by_idempotency_key(db, idempotency_key)
     if existing is not None:
+        existing_step1 = (
+            Step1Snapshot.model_validate(existing.step1_snapshot)
+            if existing.step1_snapshot
+            else None
+        )
+        if existing_step1 is not None and existing_step1.engineer_name and not (payload.engineer_name or "").strip():
+            step1 = step1.model_copy(
+                update={
+                    "engineer_name": existing_step1.engineer_name,
+                    "engineer_name_source": existing_step1.engineer_name_source,
+                }
+            )
         existing.step1_snapshot = step1.model_dump(mode="json")
         existing.payload_snapshot = payload.model_dump(mode="json")
         existing.client_id = client.id

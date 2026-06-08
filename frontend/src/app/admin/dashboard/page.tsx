@@ -237,6 +237,7 @@ export default function AdminDashboardPage() {
           attachmentsLoading={quoteAttachmentsLoading}
           loading={quoteDetailLoading}
           error={quoteDetailError}
+          allowSalesAppointmentBackfill
           onClose={() => {
             setSelectedQuoteId(null);
             setQuoteDetail(null);

@@ -23,6 +23,7 @@ from app.models.user import User
 from app.schemas.eworks_link import EworksLinkPayload, SessionUiState, Step2Snapshot
 from app.services.audit_helpers import record_audit
 from app.services.client_service import get_or_create_client_for_import
+from app.services.eworks_job_appointment_service import apply_appointment_engineer_name_to_step1
 from app.services.eworks_link_service import payload_to_step1, try_resolve_rate_rule
 from app.services.eworks_questionnaire_service import apply_questionnaire_defaults
 from app.services.manager_dashboard_service import extract_all_tags
@@ -165,6 +166,8 @@ def _serialize_assignment(
         "assigned_by_email": row.assigned_by_email,
         "assigned_at": str(row.assigned_at) if row.assigned_at else None,
         "notes": row.notes,
+        "source": "manual",
+        "is_derived": False,
     }
     if include_token:
         data["assignment_token"] = row.assignment_token
@@ -248,6 +251,7 @@ def list_assignable_users(db: Session) -> list[dict[str, Any]]:
 
 
 def list_assignments_for_quote(db: Session, quote_id: int) -> list[dict[str, Any]]:
+    """Return manual quote assignments only; appointment assignee comes from safe detail."""
     quote = _get_quote_or_404(db, quote_id)
     rows = (
         db.query(EworksQuoteAssignment)
@@ -637,6 +641,12 @@ def _create_calculation_session_for_assignment(
         expires_at=_quote_expires_at(quote),
     )
     step1 = payload_to_step1(payload, client, trade, client_display_name=customer_name)
+    step1 = apply_appointment_engineer_name_to_step1(
+        db,
+        step1,
+        quote_ref=quote_ref,
+        eworks_quote_id=quote.eworks_quote_id,
+    )
     payload_dict = payload.model_dump(mode="json")
     payload_dict["eworks_quote_id"] = quote.eworks_quote_id
     payload_dict["assignment_id"] = assignment.id

@@ -84,12 +84,14 @@ def _build_public_quote(
         works.append(
             PublicQuoteWorkRead(
                 title=format_work_label(
-                    product_name=block.product_name,
-                    product_code=block.product_code,
+                    product_name=block.custom_title if block.is_custom_scope else block.product_name,
+                    product_code=None if block.is_custom_scope else block.product_code,
                     scope=block.scope,
                     index=index,
+                    is_custom_scope=block.is_custom_scope,
+                    custom_title=block.custom_title,
                 ),
-                product_name=block.product_name,
+                product_name=block.custom_title if block.is_custom_scope else block.product_name,
                 scope=block.scope,
                 description=step1.quote_description or block.other_notes,
                 materials_summary=_materials_summary_for_work(block),

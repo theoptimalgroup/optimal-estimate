@@ -6,6 +6,7 @@ export type Step1Snapshot = {
   job_number: string;
   external_job_id?: string | null;
   engineer_name?: string | null;
+  engineer_name_source?: string | null;
   client_name: string;
   trade_name: string;
   property_address: string;
@@ -52,6 +53,8 @@ export type MaterialSupplier = {
 export type WorkBlockSnapshot = {
   scope?: string | null;
   selected_product_id?: number | null;
+  is_custom_scope?: boolean;
+  custom_title?: string | null;
   eworks_item_id?: number | null;
   product_name?: string | null;
   product_code?: string | null;

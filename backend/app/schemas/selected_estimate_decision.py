@@ -53,3 +53,4 @@ class EngineerAssignedJobRead(BaseModel):
     appointment_status: str | None = None
     appointment_start_at: str | None = None
     appointment_end_at: str | None = None
+    source: str | None = None

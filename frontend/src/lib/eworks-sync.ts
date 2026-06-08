@@ -171,14 +171,57 @@ export type EworksJobRecord = {
   synced_at: string | null;
 };
 
+export type JobAppointmentBackfillOptions = {
+  jobRef?: string;
+  eworksJobId?: number;
+  limit?: number;
+  offset?: number;
+  timeoutSeconds?: number;
+  fetchMissing?: boolean;
+};
+
 export type JobAppointmentBackfillSummary = {
   jobs_scanned: number;
   jobs_with_total_appointments: number;
+  appointments_found: number;
+  sales_appointments_found: number;
   detail_fetches_attempted: number;
   detail_fetches_success: number;
   detail_fetches_failed: number;
   appointments_created: number;
   appointments_updated: number;
+  failed: number;
+  skipped: number;
+  next_offset: number;
+  has_more: boolean;
+  elapsed_seconds: number;
+  stopped_reason: string;
+};
+
+export type QuoteSalesAppointmentBackfillSummary = {
+  quotes_scanned: number;
+  quote_details_fetched: number;
+  appointments_found: number;
+  appointments_created: number;
+  appointments_updated: number;
+  sales_appointments_found: number;
+  failed: number;
+  skipped: number;
+  next_offset: number;
+  has_more: boolean;
+  elapsed_seconds: number;
+  stopped_reason: string;
+  rate_limited_count: number;
+};
+
+export type QuoteSalesAppointmentBackfillOptions = {
+  limit?: number;
+  offset?: number;
+  quoteRef?: string;
+  eworksQuoteId?: number;
+  lookbackDays?: number;
+  timeoutSeconds?: number;
+  dryRun?: boolean;
 };
 
 export type QuoteAttachmentBackfillSummary = {
@@ -280,12 +323,38 @@ export async function triggerJobsSync(req: EworksSyncRequest = {}): Promise<Ewor
   return resp.data;
 }
 
-export async function backfillJobAppointments(limit?: number): Promise<JobAppointmentBackfillSummary> {
+export async function backfillJobAppointments(
+  options: JobAppointmentBackfillOptions = {},
+): Promise<JobAppointmentBackfillSummary> {
   const params = new URLSearchParams();
-  if (limit != null) params.set("limit", String(limit));
+  if (options.limit != null) params.set("limit", String(options.limit));
+  if (options.offset != null) params.set("offset", String(options.offset));
+  if (options.jobRef) params.set("job_ref", options.jobRef);
+  if (options.eworksJobId != null) params.set("eworks_job_id", String(options.eworksJobId));
+  if (options.timeoutSeconds != null) params.set("timeout_seconds", String(options.timeoutSeconds));
+  if (options.fetchMissing) params.set("fetch_missing", "true");
   const qs = params.toString();
   const resp = await apiFetch<JobAppointmentBackfillSummary>(
     `/api/v1/eworks-sync/jobs/backfill-appointments${qs ? `?${qs}` : ""}`,
+    { method: "POST" },
+  );
+  return resp.data;
+}
+
+export async function backfillQuoteSalesAppointments(
+  options: QuoteSalesAppointmentBackfillOptions = {},
+): Promise<QuoteSalesAppointmentBackfillSummary> {
+  const params = new URLSearchParams();
+  if (options.limit != null) params.set("limit", String(options.limit));
+  if (options.offset != null) params.set("offset", String(options.offset));
+  if (options.quoteRef) params.set("quote_ref", options.quoteRef);
+  if (options.eworksQuoteId != null) params.set("eworks_quote_id", String(options.eworksQuoteId));
+  if (options.lookbackDays != null) params.set("lookback_days", String(options.lookbackDays));
+  if (options.timeoutSeconds != null) params.set("timeout_seconds", String(options.timeoutSeconds));
+  if (options.dryRun) params.set("dry_run", "true");
+  const qs = params.toString();
+  const resp = await apiFetch<QuoteSalesAppointmentBackfillSummary>(
+    `/api/v1/eworks-sync/quotes/backfill-sales-appointments${qs ? `?${qs}` : ""}`,
     { method: "POST" },
   );
   return resp.data;
@@ -489,6 +558,21 @@ export type EworksQuoteSafeDetail = {
     accepted_date?: string | null;
   };
   linked_estimate: EworksLinkedEstimate;
+  sales_appointments?: EworksQuoteAppointmentSafe[];
+  appointment_assignee?: EworksAppointmentAssignee | null;
+};
+
+export type EworksAppointmentAssignee = {
+  name?: string | null;
+  email?: string | null;
+  registered_user_id?: string | null;
+  assignee_kind?: "registered" | "external" | null;
+  appointment_type?: string | null;
+  status?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  source?: string | null;
+  job_ref?: string | null;
 };
 
 export type EworksJobAppointmentSafe = {
@@ -496,11 +580,30 @@ export type EworksJobAppointmentSafe = {
   user_name?: string | null;
   user_email?: string | null;
   user_id?: number | null;
+  user_mobile?: string | null;
+  user_telephone?: string | null;
   appointment_type?: string | null;
   status?: string | null;
+  is_sales_appointment?: boolean | null;
   start_at?: string | null;
   end_at?: string | null;
+  duration_minutes?: number | null;
   is_active_assignment?: boolean;
+};
+
+export type EworksQuoteAppointmentSafe = {
+  appointment_id?: number | null;
+  user_name?: string | null;
+  user_email?: string | null;
+  user_id?: number | null;
+  user_mobile?: string | null;
+  user_telephone?: string | null;
+  appointment_type?: string | null;
+  status?: string | null;
+  is_sales_appointment?: boolean | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  duration_minutes?: number | null;
 };
 
 export type EworksJobSafeDetail = {

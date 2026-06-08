@@ -92,6 +92,7 @@ type Props = {
   uploading: boolean;
   deletingAttachmentId: string | null;
   onProductSelect: (product: ProductOption | null) => void;
+  onAddCustomScope?: () => void;
   changingProduct: boolean;
   onChangeProductClick: () => void;
 };
@@ -579,6 +580,7 @@ export function EworksWorkBlockForm({
   uploading,
   deletingAttachmentId,
   onProductSelect,
+  onAddCustomScope,
   changingProduct,
   onChangeProductClick,
 }: Props) {
@@ -594,7 +596,7 @@ export function EworksWorkBlockForm({
   const [resettingScope, setResettingScope] = useState(false);
   const [resetScopeError, setResetScopeError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkTabId>(() =>
-    values.selected_product_id != null ? "Scope" : "Product",
+    values.selected_product_id != null || values.is_custom_scope ? "Scope" : "Product",
   );
   const [expandedMaterialsSections, setExpandedMaterialsSections] = useState<Set<MaterialsSubsectionId>>(
     () => new Set(),
@@ -609,7 +611,14 @@ export function EworksWorkBlockForm({
     prevProductIdRef.current = current;
   }, [values.selected_product_id]);
 
+  useEffect(() => {
+    if (values.is_custom_scope) {
+      setActiveTab("Scope");
+    }
+  }, [values.is_custom_scope]);
+
   const hasSelectedProduct = values.selected_product_id != null;
+  const isCustomScope = Boolean(values.is_custom_scope);
   const scopeText = values.scope?.trim() ?? "";
   const engineerNotes = values.other_notes?.trim() ?? "";
   const engineerFindings = values.findings?.trim() ?? "";
@@ -776,7 +785,79 @@ export function EworksWorkBlockForm({
 
       {activeTab === "Product" && (
         <div className="space-y-4 pt-2" role="tabpanel" data-testid={workPanelTestId("Product", workIndex)}>
-          {hasSelectedProduct && !changingProduct ? (
+          {isCustomScope && !changingProduct ? (
+            <div className="space-y-4" data-testid={`custom-scope-form-${workIndex}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <p className="text-sm font-medium text-slate-900">Custom scope</p>
+                <button
+                  type="button"
+                  className="text-sm font-medium text-blue-600 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                  onClick={onChangeProductClick}
+                  data-testid={`change-product-${workIndex}`}
+                >
+                  Select from catalog
+                </button>
+              </div>
+              <EworksLabel>
+                Custom product / scope title
+                <EworksInput
+                  {...register(fieldPath(workIndex, "custom_title"))}
+                  data-testid={`custom-scope-title-${workIndex}`}
+                />
+                <EworksFieldError message={workErrors?.custom_title?.message} />
+              </EworksLabel>
+              <EworksLabel>
+                Scope of works
+                <Controller
+                  name={fieldPath(workIndex, "scope")}
+                  control={control}
+                  render={({ field, fieldState }) => (
+                    <>
+                      <EworksTextarea
+                        rows={5}
+                        hasError={!!fieldState.error}
+                        name={field.name}
+                        ref={field.ref}
+                        value={typeof field.value === "string" ? field.value : ""}
+                        onBlur={field.onBlur}
+                        onChange={(event) => {
+                          field.onChange(event);
+                          setValue(fieldPath(workIndex, "scope_from_product"), false, { shouldValidate: false });
+                        }}
+                        className="min-h-[120px] resize-y"
+                        data-testid={`custom-scope-works-${workIndex}`}
+                      />
+                      <EworksFieldError message={fieldState.error?.message} />
+                    </>
+                  )}
+                />
+              </EworksLabel>
+              <EworksLabel>
+                Findings
+                <EworksTextarea rows={3} {...register(fieldPath(workIndex, "findings"))} data-testid={`custom-scope-findings-${workIndex}`} />
+              </EworksLabel>
+              <EworksLabel>
+                Notes / exclusions
+                <EworksTextarea rows={3} {...register(fieldPath(workIndex, "other_notes"))} data-testid={`custom-scope-notes-${workIndex}`} />
+              </EworksLabel>
+              <EworksLabel>
+                Trade / skill required
+                <select
+                  className={eworksInputClass(!!workErrors?.skill_required)}
+                  {...register(fieldPath(workIndex, "skill_required"))}
+                  data-testid={`custom-scope-skill-${workIndex}`}
+                >
+                  <option value="">{skillChoices.length === 0 ? "Loading skills…" : "Select skill"}</option>
+                  {skillChoices.map((skill) => (
+                    <option key={skill} value={skill}>
+                      {skill}
+                    </option>
+                  ))}
+                </select>
+                <EworksFieldError message={workErrors?.skill_required?.message} />
+              </EworksLabel>
+            </div>
+          ) : hasSelectedProduct && !changingProduct ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -811,6 +892,7 @@ export function EworksWorkBlockForm({
               productName={values.product_name}
               productCode={values.product_code}
               onSelect={onProductSelect}
+              onAddCustomScope={onAddCustomScope}
             />
           )}
         </div>

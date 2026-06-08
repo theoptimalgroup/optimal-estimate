@@ -19,7 +19,14 @@ def format_work_label(
     product_code: str | None = None,
     scope: str | None = None,
     index: int = 0,
+    is_custom_scope: bool = False,
+    custom_title: str | None = None,
 ) -> str:
+    if is_custom_scope:
+        custom = (custom_title or product_name or "").strip()
+        if custom:
+            return custom
+
     product_label = format_product_label(product_name, product_code)
     if product_label:
         return product_label

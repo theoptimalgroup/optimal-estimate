@@ -4,6 +4,8 @@ export type WorkLabelSource = {
   product_name?: string | null;
   product_code?: string | null;
   scope?: string | null;
+  is_custom_scope?: boolean;
+  custom_title?: string | null;
 };
 
 const SCOPE_TRUNCATE = 60;
@@ -21,8 +23,16 @@ export function scopePreview(scope?: string | null): string {
   return cleaned.length > SCOPE_TRUNCATE ? `${cleaned.slice(0, SCOPE_TRUNCATE)}…` : cleaned;
 }
 
-/** Card title in Step 2: product, short scope preview, or prompt to select. */
+function resolvedCustomTitle(work: WorkLabelSource | null | undefined): string {
+  if (!work?.is_custom_scope) return "";
+  return stripHtmlFromLabel(work.custom_title ?? work.product_name);
+}
+
+/** Card title in Step 2: product, custom title, short scope preview, or prompt to select. */
 export function formatWorkCardTitle(work: WorkLabelSource | null | undefined): string {
+  const customTitle = resolvedCustomTitle(work);
+  if (customTitle) return customTitle;
+
   const productLabel = formatProductLabel(work?.product_name, work?.product_code);
   if (productLabel) return productLabel;
 
@@ -32,8 +42,11 @@ export function formatWorkCardTitle(work: WorkLabelSource | null | undefined): s
   return "Select product";
 }
 
-/** Validation and internal labels: product, short scope preview, or neutral fallback. */
+/** Validation and internal labels: product, custom title, short scope preview, or neutral fallback. */
 export function formatWorkLabel(work: WorkLabelSource | null | undefined): string {
+  const customTitle = resolvedCustomTitle(work);
+  if (customTitle) return customTitle;
+
   const productLabel = formatProductLabel(work?.product_name, work?.product_code);
   if (productLabel) return productLabel;
 

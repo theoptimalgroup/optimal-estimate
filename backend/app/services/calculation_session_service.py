@@ -145,7 +145,23 @@ def _validate_work_block(step2: Step2Snapshot, work_index: int) -> None:
         raise AppError("WORK_INDEX_INVALID", "Invalid work index", 400)
     block = step2.works[work_index]
     work_step2 = work_block_to_step2_snapshot(block, trade_name="")
-    if not block.scope or not block.scope.strip():
+    has_product = block.selected_product_id is not None and not block.is_custom_scope
+    if block.is_custom_scope:
+        if not (block.custom_title and block.custom_title.strip()):
+            raise AppError(
+                "CUSTOM_TITLE_REQUIRED",
+                f"Custom product/scope title is required for work {work_index + 1}",
+                400,
+            )
+        if not block.scope or not block.scope.strip():
+            raise AppError("SCOPE_REQUIRED", f"Scope of works is required for work {work_index + 1}", 400)
+    elif not has_product:
+        raise AppError(
+            "PRODUCT_OR_CUSTOM_REQUIRED",
+            f"Select a product or add custom scope for work {work_index + 1}",
+            400,
+        )
+    elif not block.scope or not block.scope.strip():
         raise AppError("SCOPE_REQUIRED", f"Scope of works is required for work {work_index + 1}", 400)
     if not work_step2.time_frame and work_step2.hours <= 0 and work_step2.days <= 0:
         raise AppError("TIMEFRAME_REQUIRED", f"Time frame is required for work {work_index + 1}", 400)
@@ -649,6 +665,10 @@ def submit_session(
 
 
 def _resolve_work_product_fields(db: Session, block: WorkBlockSnapshot) -> tuple[str | None, str | None]:
+    if block.is_custom_scope:
+        title = (block.custom_title or block.product_name or "").strip() or None
+        return title, None
+
     product_name = (block.product_name or "").strip() or None
     product_code = (block.product_code or "").strip() or None
     if product_name or block.selected_product_id is None:
@@ -682,6 +702,8 @@ def _build_dashboard_work_item(
             product_code=product_code,
             scope=block.scope,
             index=index,
+            is_custom_scope=block.is_custom_scope,
+            custom_title=block.custom_title,
         ),
         labour_subtotal=labour_subtotal,
         materials_subtotal=materials_subtotal,

@@ -326,6 +326,19 @@ class EworksQuoteAppointmentSafeRead(BaseModel):
     duration_minutes: int | None = None
 
 
+class EworksAppointmentAssigneeSafeRead(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    registered_user_id: str | None = None
+    assignee_kind: str | None = None
+    appointment_type: str | None = None
+    status: str | None = None
+    start_at: str | None = None
+    end_at: str | None = None
+    source: str | None = None
+    job_ref: str | None = None
+
+
 class EworksQuoteSafeDetailRead(BaseModel):
     identity: EworksQuoteSafeIdentity
     customer: EworksQuoteSafeCustomer
@@ -337,6 +350,7 @@ class EworksQuoteSafeDetailRead(BaseModel):
     dates: EworksSafeDates
     linked_estimate: EworksLinkedEstimate
     sales_appointments: list[EworksQuoteAppointmentSafeRead] = Field(default_factory=list)
+    appointment_assignee: EworksAppointmentAssigneeSafeRead | None = None
 
 
 class EworksJobSafeIdentity(BaseModel):

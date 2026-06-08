@@ -5,6 +5,8 @@ import { useFieldArray } from "react-hook-form";
 import type { Control, FieldErrors, UseFormRegister, UseFormSetValue, UseFormWatch } from "react-hook-form";
 import { EworksWorkBlockForm } from "@/components/eworks-work-block-form";
 import { ScopeReplaceDialog } from "@/components/scope-replace-dialog";
+import { WorkModeSwitchDialog } from "@/components/work-mode-switch-dialog";
+import { shouldConfirmSwitchToCustom, shouldConfirmSwitchToProduct } from "@/lib/custom-scope";
 import { EworksButton, cn } from "@/components/eworks-ui";
 import {
   computeProductTotalPrice,
@@ -43,6 +45,12 @@ type PendingScopeReplace = {
   product: ProductOption;
 };
 
+type PendingModeSwitch = {
+  workIndex: number;
+  mode: "to-custom" | "to-product";
+  product?: ProductOption;
+};
+
 export function EworksQuestionnaireStep({
   control,
   register,
@@ -67,6 +75,7 @@ export function EworksQuestionnaireStep({
   const workRefs = useRef<(HTMLDivElement | null)[]>([]);
   const scrollToNewRef = useRef<number | null>(null);
   const [scopeReplacePrompt, setScopeReplacePrompt] = useState<PendingScopeReplace | null>(null);
+  const [modeSwitchPrompt, setModeSwitchPrompt] = useState<PendingModeSwitch | null>(null);
 
   useEffect(() => {
     if (focusWorkIndex !== null && focusWorkIndex !== undefined && focusWorkIndex >= 0) {
@@ -92,6 +101,8 @@ export function EworksQuestionnaireStep({
       const quantity = work.product_quantity ?? 1;
       const newScope = productScopeText(product);
 
+      setValue(`${base}.is_custom_scope`, false, { shouldValidate: true });
+      setValue(`${base}.custom_title`, "", { shouldValidate: true });
       setValue(`${base}.selected_product_id`, product.id, { shouldValidate: true });
       setValue(`${base}.eworks_item_id`, product.eworks_item_id, { shouldValidate: true });
       setValue(`${base}.product_name`, stripHtmlFromLabel(product.product_name), { shouldValidate: true });
@@ -107,9 +118,28 @@ export function EworksQuestionnaireStep({
     [setValue, values.works],
   );
 
+  const applyCustomScopeMode = useCallback(
+    (workIndex: number) => {
+      const base = `works.${workIndex}` as const;
+      setValue(`${base}.is_custom_scope`, true, { shouldValidate: true });
+      setValue(`${base}.selected_product_id`, null, { shouldValidate: true });
+      setValue(`${base}.eworks_item_id`, null, { shouldValidate: true });
+      setValue(`${base}.product_name`, "", { shouldValidate: true });
+      setValue(`${base}.product_code`, "", { shouldValidate: true });
+      setValue(`${base}.product_unit_price`, 0, { shouldValidate: true });
+      setValue(`${base}.product_total_price`, 0, { shouldValidate: true });
+      setValue(`${base}.product_quantity`, 1, { shouldValidate: true });
+      setValue(`${base}.scope_from_product`, false, { shouldValidate: true });
+      setChangingProductIndex(null);
+    },
+    [setValue],
+  );
+
   const clearProductSelection = useCallback(
     (workIndex: number) => {
       const base = `works.${workIndex}` as const;
+      setValue(`${base}.is_custom_scope`, false, { shouldValidate: true });
+      setValue(`${base}.custom_title`, "", { shouldValidate: true });
       setValue(`${base}.selected_product_id`, null, { shouldValidate: true });
       setValue(`${base}.eworks_item_id`, null, { shouldValidate: true });
       setValue(`${base}.product_name`, "", { shouldValidate: true });
@@ -129,6 +159,11 @@ export function EworksQuestionnaireStep({
       }
 
       const work = values.works[workIndex];
+      if (work.is_custom_scope && shouldConfirmSwitchToProduct(work)) {
+        setModeSwitchPrompt({ workIndex, mode: "to-product", product });
+        return;
+      }
+
       const newScope = productScopeText(product);
 
       if (canAutoFillScope(work)) {
@@ -146,6 +181,30 @@ export function EworksQuestionnaireStep({
       setChangingProductIndex(null);
     },
     [applyProductSelection, clearProductSelection, values.works],
+  );
+
+  const handleAddCustomScope = useCallback(
+    (workIndex: number) => {
+      const work = values.works[workIndex];
+      if (shouldConfirmSwitchToCustom(work)) {
+        setModeSwitchPrompt({ workIndex, mode: "to-custom" });
+        return;
+      }
+      applyCustomScopeMode(workIndex);
+    },
+    [applyCustomScopeMode, values.works],
+  );
+
+  const handleChangeProductClick = useCallback(
+    (workIndex: number) => {
+      const work = values.works[workIndex];
+      if (work.is_custom_scope && shouldConfirmSwitchToProduct(work)) {
+        setModeSwitchPrompt({ workIndex, mode: "to-product" });
+        return;
+      }
+      setChangingProductIndex(workIndex);
+    },
+    [values.works],
   );
 
   const handleAddWork = useCallback(() => {
@@ -176,6 +235,45 @@ export function EworksQuestionnaireStep({
 
   return (
     <div className="space-y-3">
+      <WorkModeSwitchDialog
+        open={modeSwitchPrompt !== null}
+        title={
+          modeSwitchPrompt?.mode === "to-custom" ? "Switch to custom scope?" : "Replace custom scope with product?"
+        }
+        message={
+          modeSwitchPrompt?.mode === "to-custom"
+            ? "Switching to a custom scope will clear the selected product. Existing scope, materials, and labour may need to be updated."
+            : "Selecting a product will replace your custom scope text. Continue?"
+        }
+        confirmLabel={modeSwitchPrompt?.mode === "to-custom" ? "Use custom scope" : "Select product"}
+        onCancel={() => setModeSwitchPrompt(null)}
+        onConfirm={() => {
+          if (!modeSwitchPrompt) return;
+          if (modeSwitchPrompt.mode === "to-custom") {
+            applyCustomScopeMode(modeSwitchPrompt.workIndex);
+          } else {
+            setChangingProductIndex(modeSwitchPrompt.workIndex);
+            if (modeSwitchPrompt.product) {
+              const work = values.works[modeSwitchPrompt.workIndex];
+              const newScope = productScopeText(modeSwitchPrompt.product);
+              if (canAutoFillScope(work)) {
+                applyProductSelection(modeSwitchPrompt.workIndex, modeSwitchPrompt.product, true);
+                setChangingProductIndex(null);
+              } else if (shouldPromptScopeReplace(work, newScope)) {
+                setScopeReplacePrompt({
+                  workIndex: modeSwitchPrompt.workIndex,
+                  product: modeSwitchPrompt.product,
+                });
+              } else {
+                applyProductSelection(modeSwitchPrompt.workIndex, modeSwitchPrompt.product, false);
+                setChangingProductIndex(null);
+              }
+            }
+          }
+          setModeSwitchPrompt(null);
+        }}
+      />
+
       <ScopeReplaceDialog
         open={scopeReplacePrompt !== null}
         onKeep={() => {
@@ -287,8 +385,9 @@ export function EworksQuestionnaireStep({
                     uploading={uploading}
                     deletingAttachmentId={deletingAttachmentId}
                     onProductSelect={(product) => handleProductSelect(index, product)}
+                    onAddCustomScope={() => handleAddCustomScope(index)}
                     changingProduct={changingProductIndex === index}
-                    onChangeProductClick={() => setChangingProductIndex(index)}
+                    onChangeProductClick={() => handleChangeProductClick(index)}
                   />
                 </div>
               </div>

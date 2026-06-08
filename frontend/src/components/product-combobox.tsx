@@ -11,6 +11,7 @@ type Props = {
   productName?: string;
   productCode?: string;
   onSelect: (product: ProductOption | null) => void;
+  onAddCustomScope?: () => void;
   disabled?: boolean;
   className?: string;
 };
@@ -20,6 +21,7 @@ export function ProductCombobox({
   productName,
   productCode,
   onSelect,
+  onAddCustomScope,
   disabled = false,
   className,
 }: Props) {
@@ -122,6 +124,22 @@ export function ProductCombobox({
           {!loading && !error && products.length === 0 && (
             <p className="px-3 py-2 text-xs text-optimal-muted">No products found</p>
           )}
+          {onAddCustomScope ? (
+            <button
+              type="button"
+              role="option"
+              aria-selected={false}
+              className="block w-full border-t border-slate-100 px-3 py-2.5 text-left text-sm font-medium text-blue-700 hover:bg-blue-50"
+              onClick={() => {
+                onAddCustomScope();
+                setQuery("");
+                setOpen(false);
+              }}
+              data-testid="product-add-custom-scope"
+            >
+              Product not listed? Add custom scope
+            </button>
+          ) : null}
           {!loading &&
             !error &&
             products.map((product) => (

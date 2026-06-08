@@ -34,6 +34,7 @@ import {
   buildDefaultSyncRequest,
   backfillJobAppointments,
   backfillQuoteAttachments,
+  backfillQuoteSalesAppointments,
   cancelSyncRun,
   getEworksSyncStatus,
   getSyncRun,
@@ -723,6 +724,35 @@ function QuotesTab({
   const [backfilling, setBackfilling] = useState(false);
   const [backfillSummary, setBackfillSummary] = useState<string | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
+  const [salesBackfilling, setSalesBackfilling] = useState(false);
+  const [salesBackfillSummary, setSalesBackfillSummary] = useState<string | null>(null);
+  const [salesBackfillError, setSalesBackfillError] = useState<string | null>(null);
+  const [salesBackfillNextOffset, setSalesBackfillNextOffset] = useState(0);
+  const [salesBackfillHasMore, setSalesBackfillHasMore] = useState(false);
+
+  const formatSalesBackfillSummary = (summary: Awaited<ReturnType<typeof backfillQuoteSalesAppointments>>) =>
+    `Scanned ${summary.quotes_scanned} · fetched ${summary.quote_details_fetched} details · sales ${summary.sales_appointments_found} · +${summary.appointments_created} / ~${summary.appointments_updated} updated · failed ${summary.failed} · skipped ${summary.skipped} · rate limited ${summary.rate_limited_count} · ${summary.elapsed_seconds}s · ${summary.stopped_reason}`;
+
+  const runSalesBackfillBatch = async (batchOffset = 0) => {
+    setSalesBackfilling(true);
+    setSalesBackfillError(null);
+    if (batchOffset === 0) {
+      setSalesBackfillSummary(null);
+      setSalesBackfillNextOffset(0);
+      setSalesBackfillHasMore(false);
+    }
+    try {
+      const summary = await backfillQuoteSalesAppointments({ limit: 50, offset: batchOffset });
+      setSalesBackfillSummary(formatSalesBackfillSummary(summary));
+      setSalesBackfillNextOffset(summary.next_offset);
+      setSalesBackfillHasMore(summary.has_more);
+      await load();
+    } catch (e: unknown) {
+      setSalesBackfillError(e instanceof Error ? e.message : "Failed to backfill sales appointments");
+    } finally {
+      setSalesBackfilling(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -766,6 +796,10 @@ function QuotesTab({
     }
   };
 
+  const handleBackfillSalesAppointments = async () => {
+    await runSalesBackfillBatch(0);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -786,6 +820,40 @@ function QuotesTab({
         {backfillError ? (
           <p className="text-sm text-red-600" data-testid="quote-attachments-backfill-error">
             {backfillError}
+          </p>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => void handleBackfillSalesAppointments()}
+          disabled={salesBackfilling}
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          data-testid="btn-backfill-quote-sales-appointments"
+        >
+          {salesBackfilling ? "Backfilling sales appointments…" : "Backfill Quote Sales Appointments (50)"}
+        </button>
+        <p className="text-xs text-slate-500" data-testid="quote-sales-appointments-note">
+          Quote-level only. Job sales appointments (e.g. &quot;Sales Appointments for JOB-…&quot; in eWorks) sync via
+          Jobs → Backfill Appointments.
+        </p>
+        {salesBackfillHasMore ? (
+          <button
+            type="button"
+            onClick={() => void runSalesBackfillBatch(salesBackfillNextOffset)}
+            disabled={salesBackfilling}
+            className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+            data-testid="btn-backfill-quote-sales-appointments-next"
+          >
+            {salesBackfilling ? "Running next batch…" : `Run next batch (offset ${salesBackfillNextOffset})`}
+          </button>
+        ) : null}
+        {salesBackfillSummary ? (
+          <p className="text-sm text-slate-600" data-testid="quote-sales-appointments-backfill-summary">
+            {salesBackfillSummary}
+          </p>
+        ) : null}
+        {salesBackfillError ? (
+          <p className="text-sm text-red-600" data-testid="quote-sales-appointments-backfill-error">
+            {salesBackfillError}
           </p>
         ) : null}
       </div>
@@ -925,9 +993,9 @@ function JobsTab({ refreshKey }: { refreshKey: number }) {
     setBackfillError(null);
     setBackfillSummary(null);
     try {
-      const summary = await backfillJobAppointments();
+      const summary = await backfillJobAppointments({ limit: 50, offset: 0 });
       setBackfillSummary(
-        `Scanned ${summary.jobs_scanned} jobs · fetched ${summary.detail_fetches_success}/${summary.detail_fetches_attempted} details · appointments +${summary.appointments_created} / ~${summary.appointments_updated} updated`,
+        `Scanned ${summary.jobs_scanned} jobs · found ${summary.appointments_found} appointments (${summary.sales_appointments_found} sales) · +${summary.appointments_created} / ~${summary.appointments_updated} updated · failed ${summary.failed} · skipped ${summary.skipped} · ${summary.elapsed_seconds}s · ${summary.stopped_reason}`,
       );
       await load();
     } catch (e: unknown) {
@@ -947,8 +1015,12 @@ function JobsTab({ refreshKey }: { refreshKey: number }) {
           className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           data-testid="btn-backfill-job-appointments"
         >
-          {backfilling ? "Backfilling appointments…" : "Backfill Appointments"}
+          {backfilling ? "Backfilling appointments…" : "Backfill Job Appointments (50)"}
         </button>
+        <p className="text-xs text-slate-500" data-testid="job-appointments-note">
+          Syncs job-level appointments including sales appointments shown under &quot;Sales Appointments for JOB-…&quot;
+          in eWorks.
+        </p>
         {backfillSummary ? (
           <p className="text-sm text-slate-600" data-testid="job-appointments-backfill-summary">
             {backfillSummary}

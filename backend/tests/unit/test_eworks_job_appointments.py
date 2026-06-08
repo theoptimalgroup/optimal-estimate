@@ -338,7 +338,7 @@ def test_matching_by_email_works(mock_settings, api_client, db_session):
 
 
 @patch("app.auth.dependencies.settings")
-def test_fallback_matching_by_name_works(mock_settings, api_client, db_session):
+def test_name_only_match_does_not_assign_job(mock_settings, api_client, db_session):
     _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com", name="Rohit")
     _seed_job(
         db_session,
@@ -361,7 +361,24 @@ def test_fallback_matching_by_name_works(mock_settings, api_client, db_session):
 
     resp = api_client.get("/api/v1/engineer/jobs/assigned")
     assert resp.status_code == 200
-    assert len(resp.json()["data"]) == 1
+    assert len(resp.json()["data"]) == 0
+
+
+@patch("app.auth.dependencies.settings")
+def test_email_match_assigns_job_case_insensitive(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="engineer", email="rohit@example.com", name="Rohit")
+    _seed_job(
+        db_session,
+        eworks_job_id=5008,
+        raw_payload=_scheduled_payload(email="ROHIT@EXAMPLE.COM", name="Rohit"),
+    )
+
+    resp = api_client.get("/api/v1/engineer/jobs/assigned")
+    assert resp.status_code == 200
+    items = resp.json()["data"]
+    assert len(items) == 1
+    assert items[0]["job_ref"] == "JOB-5008"
+    assert items[0]["appointment_user_email"] == "ROHIT@EXAMPLE.COM"
 
 
 @patch("app.auth.dependencies.settings")

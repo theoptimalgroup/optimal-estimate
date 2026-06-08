@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 
 import {
@@ -15,7 +16,7 @@ import {
 } from "@/components/ui";
 import { SafeRichText } from "@/components/ui/safe-rich-text";
 import type { EworksAttachmentSafe, EworksJobSafeDetail, EworksQuoteSafeDetail } from "@/lib/eworks-sync";
-import { getSyncedAttachmentDownloadUrl } from "@/lib/eworks-sync";
+import { backfillQuoteSalesAppointments, getSyncedAttachmentDownloadUrl } from "@/lib/eworks-sync";
 import { QuoteAssignmentSection } from "@/components/manager/quote-assignment-section";
 
 function fmtDate(val: string | null | undefined): string {
@@ -107,6 +108,96 @@ function AttachmentsSection({
 
 function TagBadgesSection({ tags }: { tags?: string[] }) {
   return <TagBadges tags={tags} emptyLabel="Not available" />;
+}
+
+function fmtSalesAppointment(value: boolean | null | undefined): string {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "Not available";
+}
+
+function AppointmentsTable({
+  appointments,
+  testId,
+}: {
+  appointments: EworksJobSafeDetail["appointments"];
+  testId: string;
+}) {
+  if (!appointments?.length) return null;
+  return (
+    <SectionCard title="Appointments" testId={testId}>
+      <DataTable testId={`${testId}-table`}>
+        <DataTableHead>
+          <DataTableRow>
+            <DataTableCell header>User</DataTableCell>
+            <DataTableCell header>Email</DataTableCell>
+            <DataTableCell header>Appointment Time</DataTableCell>
+            <DataTableCell header>Type</DataTableCell>
+            <DataTableCell header>Status</DataTableCell>
+            <DataTableCell header>Sales</DataTableCell>
+          </DataTableRow>
+        </DataTableHead>
+        <DataTableBody>
+          {appointments.map((appointment, index) => (
+            <DataTableRow key={`${appointment.appointment_id ?? appointment.user_name ?? "appointment"}-${index}`}>
+              <DataTableCell>{displayValue(appointment.user_name)}</DataTableCell>
+              <DataTableCell>{displayValue(appointment.user_email)}</DataTableCell>
+              <DataTableCell>
+                {displayValue(
+                  appointment.start_at && appointment.end_at
+                    ? `${appointment.start_at} to ${appointment.end_at}`
+                    : appointment.start_at ?? appointment.end_at,
+                )}
+              </DataTableCell>
+              <DataTableCell>{displayValue(appointment.appointment_type)}</DataTableCell>
+              <DataTableCell>{displayValue(appointment.status)}</DataTableCell>
+              <DataTableCell>{fmtSalesAppointment(appointment.is_sales_appointment)}</DataTableCell>
+            </DataTableRow>
+          ))}
+        </DataTableBody>
+      </DataTable>
+    </SectionCard>
+  );
+}
+
+function SalesAppointmentsTable({
+  appointments,
+}: {
+  appointments: EworksQuoteSafeDetail["sales_appointments"];
+}) {
+  if (!appointments?.length) return null;
+  return (
+    <SectionCard title="Sales Appointments" testId="quote-sales-appointments-section">
+      <DataTable testId="quote-sales-appointments-table">
+        <DataTableHead>
+          <DataTableRow>
+            <DataTableCell header>User</DataTableCell>
+            <DataTableCell header>Email</DataTableCell>
+            <DataTableCell header>Appointment Time</DataTableCell>
+            <DataTableCell header>Status</DataTableCell>
+            <DataTableCell header>Sales</DataTableCell>
+          </DataTableRow>
+        </DataTableHead>
+        <DataTableBody>
+          {appointments.map((appointment, index) => (
+            <DataTableRow key={`${appointment.appointment_id ?? appointment.user_name ?? "appointment"}-${index}`}>
+              <DataTableCell>{displayValue(appointment.user_name)}</DataTableCell>
+              <DataTableCell>{displayValue(appointment.user_email)}</DataTableCell>
+              <DataTableCell>
+                {displayValue(
+                  appointment.start_at && appointment.end_at
+                    ? `${appointment.start_at} to ${appointment.end_at}`
+                    : appointment.start_at ?? appointment.end_at,
+                )}
+              </DataTableCell>
+              <DataTableCell>{displayValue(appointment.status)}</DataTableCell>
+              <DataTableCell>{fmtSalesAppointment(appointment.is_sales_appointment)}</DataTableCell>
+            </DataTableRow>
+          ))}
+        </DataTableBody>
+      </DataTable>
+    </SectionCard>
+  );
 }
 
 function DetailField({
@@ -246,6 +337,7 @@ export function QuoteDetailModal({
   loading,
   error,
   onClose,
+  allowSalesAppointmentBackfill = false,
 }: {
   detail: EworksQuoteSafeDetail | null;
   quoteId: number | null;
@@ -254,7 +346,33 @@ export function QuoteDetailModal({
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  allowSalesAppointmentBackfill?: boolean;
 }) {
+  const [salesBackfillLoading, setSalesBackfillLoading] = useState(false);
+  const [salesBackfillMessage, setSalesBackfillMessage] = useState<string | null>(null);
+  const [salesBackfillError, setSalesBackfillError] = useState<string | null>(null);
+
+  const handleBackfillSalesAppointments = async () => {
+    if (!detail) return;
+    setSalesBackfillLoading(true);
+    setSalesBackfillMessage(null);
+    setSalesBackfillError(null);
+    try {
+      const summary = await backfillQuoteSalesAppointments({
+        quoteRef: detail.identity.quote_ref ?? undefined,
+        eworksQuoteId: detail.identity.eworks_quote_id,
+        limit: 1,
+      });
+      setSalesBackfillMessage(
+        `Sales appointments ${summary.sales_appointments_found} · +${summary.appointments_created} / ~${summary.appointments_updated} updated`,
+      );
+    } catch (e: unknown) {
+      setSalesBackfillError(e instanceof Error ? e.message : "Failed to backfill sales appointments");
+    } finally {
+      setSalesBackfillLoading(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
@@ -272,6 +390,29 @@ export function QuoteDetailModal({
             <p className="mt-1 truncate text-sm text-slate-600">
               {detail?.identity.quote_ref ?? detail?.identity.eworks_quote_id ?? "Synced eWorks quote"}
             </p>
+            {allowSalesAppointmentBackfill && detail ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleBackfillSalesAppointments()}
+                  disabled={salesBackfillLoading}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  data-testid="btn-backfill-quote-sales-appointments-single"
+                >
+                  {salesBackfillLoading ? "Backfilling…" : "Backfill Sales Appointments"}
+                </button>
+                {salesBackfillMessage ? (
+                  <span className="text-xs text-slate-600" data-testid="quote-sales-backfill-message">
+                    {salesBackfillMessage}
+                  </span>
+                ) : null}
+                {salesBackfillError ? (
+                  <span className="text-xs text-red-600" data-testid="quote-sales-backfill-error">
+                    {salesBackfillError}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <button
             type="button"
@@ -318,14 +459,20 @@ export function QuoteDetailModal({
                 <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <DetailField label="Quote Date" value={displayValue(detail.quote_details.quote_date)} />
                   <DetailField label="Expiry Date" value={displayValue(detail.quote_details.expiry_date)} />
-                  <DetailField label="Preferred Date" value={displayValue(detail.quote_details.preferred_date)} />
-                  <DetailField label="Preferred Time" value={displayValue(detail.quote_details.preferred_time)} />
+                  {!detail.sales_appointments?.length ? (
+                    <>
+                      <DetailField label="Preferred Date" value={displayValue(detail.quote_details.preferred_date)} />
+                      <DetailField label="Preferred Time" value={displayValue(detail.quote_details.preferred_time)} />
+                    </>
+                  ) : null}
                   <DetailField label="Converted Date" value={displayValue(detail.dates.converted_date)} />
                   <DetailField label="Accepted Date" value={displayValue(detail.dates.accepted_date)} />
                   <DetailField label="Created On" value={displayValue(detail.dates.created_on)} />
                   <DetailField label="Updated On" value={displayValue(detail.dates.updated_on)} />
                 </dl>
               </SectionCard>
+
+              <SalesAppointmentsTable appointments={detail.sales_appointments} />
 
               <SectionCard title="Description & Notes" testId="description-notes-section">
                 <div className="space-y-4">
@@ -394,7 +541,10 @@ export function QuoteDetailModal({
           ) : null}
 
           {quoteId ?? detail?.identity.id ? (
-            <QuoteAssignmentSection quoteId={quoteId ?? detail?.identity.id ?? null} />
+            <QuoteAssignmentSection
+              quoteId={quoteId ?? detail?.identity.id ?? null}
+              appointmentAssignee={detail?.appointment_assignee}
+            />
           ) : null}
         </div>
       </div>
@@ -493,31 +643,7 @@ export function JobDetailModal({
               </SectionCard>
 
               {detail.appointments?.length ? (
-                <SectionCard title="Appointments" testId="job-appointments-section">
-                  <div className="space-y-4">
-                    {detail.appointments.map((appointment, index) => (
-                      <div
-                        key={`${appointment.appointment_id ?? appointment.user_name ?? "appointment"}-${index}`}
-                        className="rounded-lg border border-slate-200 p-4"
-                        data-testid={`job-appointment-row-${index}`}
-                      >
-                        <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                          <DetailField label="User" value={displayValue(appointment.user_name)} />
-                          <DetailField label="Type" value={displayValue(appointment.appointment_type)} />
-                          <DetailField
-                            label="Date / Time"
-                            value={displayValue(
-                              appointment.start_at && appointment.end_at
-                                ? `${appointment.start_at} to ${appointment.end_at}`
-                                : appointment.start_at ?? appointment.end_at,
-                            )}
-                          />
-                          <DetailField label="Status" value={displayValue(appointment.status)} />
-                        </dl>
-                      </div>
-                    ))}
-                  </div>
-                </SectionCard>
+                <AppointmentsTable appointments={detail.appointments} testId="job-appointments-section" />
               ) : null}
 
               <SectionCard title="Description & Notes" testId="job-description-notes-section">

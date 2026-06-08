@@ -125,6 +125,7 @@ class Step1Snapshot(BaseModel):
     job_number: str
     external_job_id: str | None = None
     engineer_name: str | None = None
+    engineer_name_source: str | None = None
     client_name: str
     trade_name: str
     property_address: str
@@ -164,6 +165,8 @@ class ResolvedRuleInfo(BaseModel):
 class WorkBlockSnapshot(BaseModel):
     scope: str | None = None
     selected_product_id: int | None = None
+    is_custom_scope: bool = False
+    custom_title: str | None = None
     eworks_item_id: int | None = None
     product_name: str | None = None
     product_code: str | None = None

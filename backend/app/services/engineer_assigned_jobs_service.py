@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import UUID
-
 from sqlalchemy.orm import Session
 
 from app.auth.types import AuthenticatedUser
@@ -11,39 +9,20 @@ from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote
 from app.services.eworks_job_appointment_service import is_cancelled_appointment_status
 from app.services.quote_assignment_service import _as_uuid
 
-_DICT_EMAIL_KEYS = ("email", "user_email")
-_DICT_NAME_KEYS = ("name", "full_name", "user_name")
 
-
-def _normalize_text(value: str | None) -> str:
+def _normalize_email(value: str | None) -> str:
     return (value or "").strip().casefold()
-
-
-def _uuid_matches(value: object, user_id: UUID) -> bool:
-    try:
-        return UUID(str(value)) == user_id
-    except (TypeError, ValueError):
-        return str(value).strip().lower() == str(user_id).lower()
 
 
 def _appointment_user_matches(
     appointment: EworksJobAppointment,
     *,
     user: AuthenticatedUser,
-    user_id: UUID,
 ) -> bool:
-    if appointment.user_email and _normalize_text(appointment.user_email) == _normalize_text(user.email):
-        return True
-    if appointment.user_name and _normalize_text(appointment.user_name) == _normalize_text(user.name):
-        return True
-    if appointment.user_id is not None:
-        try:
-            if UUID(int=appointment.user_id) == user_id:
-                return True
-        except (TypeError, ValueError):
-            if _uuid_matches(appointment.user_id, user_id):
-                return True
-    return False
+    """Match appointment assignee to logged-in engineer by email only."""
+    if not appointment.user_email:
+        return False
+    return _normalize_email(appointment.user_email) == _normalize_email(user.email)
 
 
 def _quote_ref_for_job(db: Session, job: EworksJob) -> str | None:
@@ -87,6 +66,7 @@ def build_engineer_assigned_job_read(
         "appointment_status": appointment.status,
         "appointment_start_at": appointment.start_at,
         "appointment_end_at": appointment.end_at,
+        "source": "eworks_appointment",
     }
 
 
@@ -106,7 +86,7 @@ def list_assigned_jobs_for_engineer(db: Session, user: AuthenticatedUser) -> lis
     for job, appointment in rows:
         if is_cancelled_appointment_status(appointment.status):
             continue
-        if not _appointment_user_matches(appointment, user=user, user_id=user_id):
+        if not _appointment_user_matches(appointment, user=user):
             continue
         results.append(build_engineer_assigned_job_read(db, job, appointment))
     return results

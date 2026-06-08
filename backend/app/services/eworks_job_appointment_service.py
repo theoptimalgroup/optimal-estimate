@@ -7,9 +7,12 @@ import re
 from datetime import datetime, timezone
 from typing import Any, TypedDict
 
+from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models.eworks_sync import EworksJob, EworksJobAppointment
+from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +102,21 @@ class SafeJobAppointment(TypedDict):
     start_at: str | None
     end_at: str | None
     duration_minutes: int | None
+
+
+class SafeJobAppointmentAssignee(TypedDict):
+    user_name: str | None
+    user_email: str | None
+    appointment_type: str | None
+    status: str | None
+    start_at: str | None
+    end_at: str | None
+    is_sales_appointment: bool
+    source: str
+    appointment_id: int | None
+    registered_user_id: str | None
+    assignee_kind: str
+    job_ref: str | None
 
 
 def _as_str(value: object | None, *, max_len: int | None = None) -> str | None:
@@ -526,6 +544,286 @@ def sync_job_appointments(
     job.next_appointment_at = active.get("start_at") if active else None
     db.flush()
     return active_row
+
+
+def _appointment_row_to_safe(row: EworksJobAppointment) -> SafeJobAppointment:
+    return {
+        "appointment_id": row.appointment_id,
+        "user_name": row.user_name,
+        "user_email": row.user_email,
+        "user_id": row.user_id,
+        "user_mobile": row.user_mobile,
+        "user_telephone": row.user_telephone,
+        "appointment_type": row.appointment_type,
+        "status": row.status,
+        "is_sales_appointment": row.is_sales_appointment,
+        "start_at": row.start_at,
+        "end_at": row.end_at,
+        "duration_minutes": row.duration_minutes,
+    }
+
+
+def _normalize_ref(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _find_linked_job(
+    db: Session,
+    *,
+    job_ref: str | None = None,
+    eworks_job_id: int | None = None,
+    eworks_quote_id: int | None = None,
+) -> EworksJob | None:
+    if eworks_job_id is not None:
+        return (
+            db.query(EworksJob)
+            .filter(EworksJob.eworks_job_id == eworks_job_id)
+            .one_or_none()
+        )
+    normalized_job_ref = _normalize_ref(job_ref)
+    if normalized_job_ref:
+        return (
+            db.query(EworksJob)
+            .filter(func.upper(EworksJob.job_ref) == normalized_job_ref.upper())
+            .order_by(EworksJob.synced_at.desc(), EworksJob.id.desc())
+            .first()
+        )
+    if eworks_quote_id is not None:
+        return (
+            db.query(EworksJob)
+            .filter(EworksJob.eworks_quote_id == eworks_quote_id)
+            .order_by(EworksJob.synced_at.desc(), EworksJob.id.desc())
+            .first()
+        )
+    return None
+
+
+def _resolve_eworks_quote_id(
+    db: Session,
+    *,
+    quote_id: int | None = None,
+    quote_ref: str | None = None,
+    eworks_quote_id: int | None = None,
+) -> int | None:
+    if eworks_quote_id is not None:
+        return eworks_quote_id
+    if quote_id is not None:
+        quote = db.query(EworksQuote).filter(EworksQuote.id == quote_id).one_or_none()
+        if quote is not None and quote.eworks_quote_id is not None:
+            return quote.eworks_quote_id
+    normalized_quote_ref = _normalize_ref(quote_ref)
+    if not normalized_quote_ref:
+        return None
+    quote = (
+        db.query(EworksQuote)
+        .filter(func.upper(EworksQuote.quote_ref) == normalized_quote_ref.upper())
+        .order_by(EworksQuote.id.desc())
+        .first()
+    )
+    return quote.eworks_quote_id if quote is not None else None
+
+
+def _load_job_appointment_rows(db: Session, job: EworksJob) -> list[EworksJobAppointment]:
+    rows = (
+        db.query(EworksJobAppointment)
+        .filter(EworksJobAppointment.eworks_job_id == job.eworks_job_id)
+        .all()
+    )
+    if rows:
+        return rows
+
+    normalized_job_ref = _normalize_ref(job.job_ref)
+    if not normalized_job_ref:
+        return []
+
+    return (
+        db.query(EworksJobAppointment)
+        .filter(func.upper(EworksJobAppointment.job_ref) == normalized_job_ref.upper())
+        .order_by(EworksJobAppointment.synced_at.desc(), EworksJobAppointment.id.desc())
+        .all()
+    )
+
+
+def _match_registered_user_by_email(db: Session, email: str | None) -> User | None:
+    if not email or not email.strip():
+        return None
+    normalized = email.strip().lower()
+    if not normalized:
+        return None
+    return (
+        db.query(User)
+        .filter(func.lower(User.email) == normalized, User.is_active.is_(True))
+        .one_or_none()
+    )
+
+
+def _build_assignee_from_appointment(
+    db: Session,
+    *,
+    job: EworksJob,
+    appointment: SafeJobAppointment,
+) -> SafeJobAppointmentAssignee:
+    matched_user = _match_registered_user_by_email(db, appointment.get("user_email"))
+    assignee_kind = "registered" if matched_user is not None else "external"
+    return {
+        "user_name": appointment.get("user_name"),
+        "user_email": appointment.get("user_email"),
+        "appointment_type": appointment.get("appointment_type"),
+        "status": appointment.get("status"),
+        "start_at": appointment.get("start_at"),
+        "end_at": appointment.get("end_at"),
+        "is_sales_appointment": appointment.get("is_sales_appointment", False),
+        "source": "eworks_appointment",
+        "appointment_id": appointment.get("appointment_id"),
+        "registered_user_id": str(matched_user.id) if matched_user is not None else None,
+        "assignee_kind": assignee_kind,
+        "job_ref": job.job_ref,
+    }
+
+
+def get_active_job_appointment_assignee(
+    db: Session,
+    *,
+    quote_id: int | None = None,
+    job_ref: str | None = None,
+    eworks_job_id: int | None = None,
+    eworks_quote_id: int | None = None,
+    quote_ref: str | None = None,
+) -> SafeJobAppointmentAssignee | None:
+    """Resolve the active eWorks job appointment assignee for a linked quote/job."""
+    try:
+        if quote_id is not None and quote_ref is None and eworks_quote_id is None:
+            quote_row = db.query(EworksQuote).filter(EworksQuote.id == quote_id).one_or_none()
+            if quote_row is not None:
+                quote_ref = quote_row.quote_ref
+                eworks_quote_id = quote_row.eworks_quote_id
+
+        resolved_quote_id = _resolve_eworks_quote_id(
+            db,
+            quote_id=quote_id,
+            quote_ref=quote_ref,
+            eworks_quote_id=eworks_quote_id,
+        )
+        job = _find_linked_job(
+            db,
+            job_ref=job_ref,
+            eworks_job_id=eworks_job_id,
+            eworks_quote_id=resolved_quote_id,
+        )
+        if job is None:
+            logger.debug(
+                "No linked eWorks job for appointment assignee lookup quote_id=%s quote_ref=%s job_ref=%s eworks_quote_id=%s",
+                quote_id if quote_id is not None else "—",
+                quote_ref or "—",
+                job_ref or "—",
+                resolved_quote_id if resolved_quote_id is not None else "—",
+            )
+            return None
+
+        rows = _load_job_appointment_rows(db, job)
+        logger.debug(
+            "Appointment assignee lookup quote_id=%s quote_ref=%s eworks_quote_id=%s linked_job_ref=%s appointment_count=%s",
+            quote_id if quote_id is not None else "—",
+            quote_ref or "—",
+            resolved_quote_id if resolved_quote_id is not None else "—",
+            job.job_ref or "—",
+            len(rows),
+        )
+        appointments = [_appointment_row_to_safe(row) for row in rows]
+        active = select_active_appointment(appointments)
+        if active is None:
+            logger.debug(
+                "No active appointment assignee for quote_id=%s quote_ref=%s job_ref=%s eworks_job_id=%s appointment_count=%s",
+                quote_id if quote_id is not None else "—",
+                quote_ref or "—",
+                job.job_ref or "—",
+                job.eworks_job_id,
+                len(rows),
+            )
+            return None
+
+        assignee = _build_assignee_from_appointment(db, job=job, appointment=active)
+    except SQLAlchemyError:
+        logger.debug(
+            "Skipping appointment assignee lookup quote_id=%s quote_ref=%s job_ref=%s eworks_quote_id=%s",
+            quote_id if quote_id is not None else "—",
+            quote_ref or "—",
+            job_ref or "—",
+            eworks_quote_id if eworks_quote_id is not None else "—",
+        )
+        return None
+
+    logger.info(
+        "Resolved appointment assignee quote_id=%s quote_ref=%s job_ref=%s appointment_id=%s assignee_email=%s assignee_name=%s source=%s",
+        quote_id if quote_id is not None else "—",
+        quote_ref or "—",
+        job.job_ref or "—",
+        assignee.get("appointment_id") if assignee.get("appointment_id") is not None else "—",
+        assignee.get("user_email") or "—",
+        assignee.get("user_name") or "—",
+        assignee.get("source"),
+    )
+    return assignee
+
+
+def serialize_appointment_assignee_safe_detail(
+    assignee: SafeJobAppointmentAssignee,
+) -> dict[str, Any]:
+    """Shape appointment assignee for manager-safe quote detail responses."""
+    return {
+        "name": assignee.get("user_name"),
+        "email": assignee.get("user_email"),
+        "registered_user_id": assignee.get("registered_user_id"),
+        "assignee_kind": assignee.get("assignee_kind"),
+        "appointment_type": assignee.get("appointment_type"),
+        "status": assignee.get("status"),
+        "start_at": assignee.get("start_at"),
+        "end_at": assignee.get("end_at"),
+        "source": assignee.get("source"),
+        "job_ref": assignee.get("job_ref"),
+    }
+
+
+def apply_appointment_engineer_name_to_step1(
+    db: Session,
+    step1: Any,
+    *,
+    quote_ref: str | None = None,
+    job_ref: str | None = None,
+    eworks_quote_id: int | None = None,
+) -> Any:
+    """Fill step1.engineer_name from linked job appointment when not already set."""
+    existing_name = getattr(step1, "engineer_name", None)
+    if existing_name and str(existing_name).strip():
+        return step1
+
+    try:
+        assignee = get_active_job_appointment_assignee(
+            db,
+            quote_ref=quote_ref,
+            job_ref=job_ref,
+            eworks_quote_id=eworks_quote_id,
+        )
+    except SQLAlchemyError:
+        logger.debug(
+            "Skipping appointment engineer name lookup quote_ref=%s job_ref=%s",
+            quote_ref or "—",
+            job_ref or "—",
+        )
+        return step1
+
+    if assignee is None or not assignee.get("user_name"):
+        return step1
+
+    return step1.model_copy(
+        update={
+            "engineer_name": assignee["user_name"],
+            "engineer_name_source": "eworks_appointment",
+        }
+    )
 
 
 def serialize_job_appointments(db: Session, job: EworksJob) -> list[dict[str, Any]]:

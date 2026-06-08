@@ -22,3 +22,15 @@ def test_format_work_label_scope_fallback():
 
 def test_format_work_label_final_fallback():
     assert format_work_label(index=2) == "Work 3"
+
+
+def test_format_work_label_custom_scope_title():
+    assert (
+        format_work_label(
+            is_custom_scope=True,
+            custom_title="Custom glazing",
+            scope="Install bespoke panel",
+            index=0,
+        )
+        == "Custom glazing"
+    )

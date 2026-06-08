@@ -202,16 +202,20 @@ def _work_parking_section(block: WorkBlockSnapshot) -> dict[str, object]:
 
 def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) -> dict:
     suppliers = [MaterialSupplier.model_validate(item) for item in migrate_legacy_material_rows(block.materials_to_order)]
-    product_label = format_product_label(block.product_name, block.product_code)
+    display_name = block.custom_title if block.is_custom_scope else block.product_name
+    product_label = format_product_label(display_name, None if block.is_custom_scope else block.product_code)
     scope_plain, scope_html = _rich_text_fields(block.scope)
+    findings_plain, findings_html = _rich_text_fields(block.findings)
     other_notes_plain, other_notes_html = _rich_text_fields(block.other_notes)
     return {
         "index": index,
         "title": format_work_label(
-            product_name=block.product_name,
-            product_code=block.product_code,
+            product_name=display_name,
+            product_code=None if block.is_custom_scope else block.product_code,
             scope=html_to_plain_text(block.scope),
             index=index - 1,
+            is_custom_scope=block.is_custom_scope,
+            custom_title=block.custom_title,
         ),
         "product_label": product_label,
         "scope": scope_plain,
@@ -225,8 +229,11 @@ def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) ->
         "engineer": _engineer_summary(block),
         "labour": _labour_summary(block),
         "parking": {"required": False, "fields": [], "notes": None, "maps_url": None},
+        "findings": findings_plain,
+        "findings_html": findings_html,
         "other_notes": other_notes_plain,
         "other_notes_html": other_notes_html,
+        "is_custom_scope": block.is_custom_scope,
     }
 
 
@@ -316,10 +323,12 @@ def _format_work_results(
         labour_total = _sum_lines(work.breakdown.labour)
         materials_total = _sum_lines(work.breakdown.materials)
         title = format_work_label(
-            product_name=block.product_name if block else None,
-            product_code=block.product_code if block else None,
+            product_name=(block.custom_title if block and block.is_custom_scope else block.product_name) if block else None,
+            product_code=None if block and block.is_custom_scope else (block.product_code if block else None),
             scope=html_to_plain_text(work.scope or (block.scope if block else None)),
             index=work.work_index,
+            is_custom_scope=block.is_custom_scope if block else False,
+            custom_title=block.custom_title if block else None,
         )
         if show_internal_notes:
             notes_raw = build_work_internal_calculation_note(
@@ -530,6 +539,8 @@ def build_all_trades_pdf_context(
             product_code=product_code,
             scope=html_to_plain_text(block.scope),
             index=index,
+            is_custom_scope=block.is_custom_scope,
+            custom_title=block.custom_title,
         )
         all_trades_works.append(
             {

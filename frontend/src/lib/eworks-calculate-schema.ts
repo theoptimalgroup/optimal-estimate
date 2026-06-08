@@ -209,6 +209,8 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
     ...work,
     scope: toStringValue(work.scope),
     selected_product_id: toNumericValue(work.selected_product_id) ?? null,
+    is_custom_scope: Boolean(work.is_custom_scope),
+    custom_title: toStringValue(work.custom_title),
     eworks_item_id: toNumericValue(work.eworks_item_id) ?? null,
     product_name: toStringValue(work.product_name),
     product_code: toStringValue(work.product_code),
@@ -242,6 +244,40 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
 
 function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.RefinementCtx, pathPrefix = "") {
   const path = (field: string) => (pathPrefix ? `${pathPrefix}.${field}` : field);
+  const hasProduct = data.selected_product_id != null;
+  const isCustomScope = Boolean(data.is_custom_scope);
+
+  if (!hasProduct && !isCustomScope) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Select a product or add custom scope",
+      path: [path("selected_product_id")],
+    });
+  }
+
+  if (isCustomScope) {
+    if (!data.custom_title?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Custom product/scope title is required",
+        path: [path("custom_title")],
+      });
+    }
+    if (!data.scope?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Scope of works is required",
+        path: [path("scope")],
+      });
+    }
+  } else if (hasProduct && !data.scope?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Scope of works is required",
+      path: [path("scope")],
+    });
+  }
+
   if (!data.engineers_required) {
     ctx.addIssue({
       code: "custom",
@@ -352,8 +388,10 @@ function validateQuoteCharges(data: z.infer<typeof quoteChargesFieldsSchema>, ct
 }
 
 export const workBlockFieldsSchema = z.object({
-  scope: z.string().min(1, "Scope of works is required"),
+  scope: z.string().optional(),
   selected_product_id: z.number().nullable().optional(),
+  is_custom_scope: z.boolean().optional(),
+  custom_title: z.string().optional(),
   eworks_item_id: z.number().nullable().optional(),
   product_name: z.string().optional(),
   product_code: z.string().optional(),
@@ -466,6 +504,8 @@ export function defaultWorkBlockValues(tradeName: string): WorkBlockFormValues {
   return normalizeWorkBlockValues({
     scope: "",
     selected_product_id: null,
+    is_custom_scope: false,
+    custom_title: "",
     eworks_item_id: null,
     product_name: "",
     product_code: "",
@@ -662,11 +702,16 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
   const engineersNeeded = work.engineers_required ? persistenceNumeric(work.engineers_needed, 1) : 0;
   const labourNeeded = labourActive ? persistenceNumeric(work.labour_needed, 1) : 0;
   const labourTimeValue = labourActive ? persistenceNumeric(work.labour_time_value, 1) : 0;
+  const customTitle = work.is_custom_scope ? work.custom_title?.trim() || null : null;
   return {
     scope: work.scope,
-    selected_product_id: work.selected_product_id ?? null,
-    eworks_item_id: work.eworks_item_id ?? null,
-    product_name: work.product_name?.trim() || null,
+    selected_product_id: work.is_custom_scope ? null : work.selected_product_id ?? null,
+    is_custom_scope: Boolean(work.is_custom_scope),
+    custom_title: customTitle,
+    eworks_item_id: work.is_custom_scope ? null : work.eworks_item_id ?? null,
+    product_name: work.is_custom_scope
+      ? customTitle
+      : work.product_name?.trim() || null,
     product_code: work.product_code?.trim() || null,
     product_quantity: persistenceNumeric(work.product_quantity, 1),
     product_unit_price: persistenceNumeric(work.product_unit_price, 0),
@@ -767,6 +812,8 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
   return {
     scope: cleanEditableScope(step2.scope),
     selected_product_id: null,
+    is_custom_scope: false,
+    custom_title: "",
     eworks_item_id: null,
     product_name: "",
     product_code: "",
@@ -804,9 +851,15 @@ function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlo
   if (block.engineer_time_unit) {
     return {
       scope: cleanEditableScope(block.scope),
-      selected_product_id: block.selected_product_id != null ? Number(block.selected_product_id) : null,
-      eworks_item_id: block.eworks_item_id != null ? Number(block.eworks_item_id) : null,
-      product_name: cleanProductName(block.product_name),
+      selected_product_id:
+        block.is_custom_scope || block.selected_product_id == null ? null : Number(block.selected_product_id),
+      is_custom_scope: Boolean(block.is_custom_scope),
+      custom_title: block.is_custom_scope ? cleanProductName(block.custom_title ?? block.product_name) : "",
+      eworks_item_id:
+        block.is_custom_scope || block.eworks_item_id == null ? null : Number(block.eworks_item_id),
+      product_name: block.is_custom_scope
+        ? cleanProductName(block.custom_title ?? block.product_name)
+        : cleanProductName(block.product_name),
       product_code: block.product_code ?? "",
       product_quantity: Number(block.product_quantity ?? 1),
       product_unit_price: Number(block.product_unit_price ?? 0),

@@ -79,6 +79,13 @@ class AssignmentRead(BaseModel):
     can_revise: bool = False
     can_continue_revision: bool = False
     can_view_submission: bool = False
+    source: str = "manual"
+    is_derived: bool = False
+    appointment_start_at: str | None = None
+    appointment_end_at: str | None = None
+    appointment_status: str | None = None
+    appointment_type: str | None = None
+    job_ref: str | None = None
 
 
 class AssignmentStartEstimateRead(BaseModel):
