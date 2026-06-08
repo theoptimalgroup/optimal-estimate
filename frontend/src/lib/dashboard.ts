@@ -245,6 +245,8 @@ export type AssignQuoteJobResponse = SelectQuoteEstimateResponse;
 
 export type ManagerQuotePdfView = "client" | "internal" | "combined" | "all-trades";
 
+export type SelectedEstimatePdfView = ManagerQuotePdfView | "full-estimate";
+
 export function buildQuoteGroupHref(group: Pick<DashboardQuoteGroupItem, "quote_ref" | "eworks_quote_id">): string {
   const params = new URLSearchParams();
   if (group.quote_ref) {

@@ -1585,7 +1585,7 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     ).toHaveCount(0);
   });
 
-  test("PDF download buttons trigger manager PDF endpoints", async ({ page }) => {
+  test("Full Estimate and other PDF buttons call manager selected-session endpoints", async ({ page }) => {
     await mockAuthMe(page, "manager");
     const sessionId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
     const downloadedViews: string[] = [];
@@ -1622,10 +1622,15 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     await page.getByTestId(`compare-select-${sessionId}`).check();
 
     await page.getByTestId(`download-pdf-client-${sessionId}`).click();
-    await page.getByTestId(`download-pdf-internal-${sessionId}`).click();
-    await page.getByTestId(`download-pdf-combined-${sessionId}`).click();
-    await page.getByTestId(`download-pdf-all-trades-${sessionId}`).click();
+    await expect.poll(() => downloadedViews.includes("client")).toBe(true);
 
+    await page.getByTestId(`download-pdf-internal-${sessionId}`).click();
+    await expect.poll(() => downloadedViews.includes("internal")).toBe(true);
+
+    await page.getByTestId(`download-pdf-combined-${sessionId}`).click();
+    await expect.poll(() => downloadedViews.includes("combined")).toBe(true);
+
+    await page.getByTestId(`download-pdf-all-trades-${sessionId}`).click();
     await expect.poll(() => downloadedViews.sort().join(",")).toBe("all-trades,client,combined,internal");
   });
 });

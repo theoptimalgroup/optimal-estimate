@@ -12,6 +12,7 @@ import {
   type DashboardQuotesResponse,
   type ManagerQuotePdfView,
   type ReopenQuoteResponse,
+  type SelectedEstimatePdfView,
 } from "@/lib/dashboard";
 
 export async function fetchSubmittedQuotes() {
@@ -163,4 +164,35 @@ export async function downloadManagerQuotePdf(
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+const SELECTED_ESTIMATE_PDF_LABELS: Record<ManagerQuotePdfView, string> = {
+  client: "Client PDF",
+  internal: "Internal PDF",
+  combined: "Full Estimate",
+  "all-trades": "All Trades",
+};
+
+function resolveSelectedEstimatePdfView(view: SelectedEstimatePdfView): ManagerQuotePdfView {
+  return view === "full-estimate" ? "combined" : view;
+}
+
+/** Download a manager PDF for a selected submitted estimate session. */
+export async function downloadSelectedEstimatePdf(
+  sessionId: string,
+  view: SelectedEstimatePdfView,
+  quoteNumber?: string,
+  version?: number,
+): Promise<void> {
+  const managerView = resolveSelectedEstimatePdfView(view);
+  try {
+    await downloadManagerQuotePdf(sessionId, managerView, quoteNumber, version);
+  } catch (err) {
+    console.error("Selected estimate PDF download failed", {
+      sessionId,
+      view: managerView,
+      error: err instanceof Error ? err.message : "unknown error",
+    });
+    throw new Error(`Failed to download ${SELECTED_ESTIMATE_PDF_LABELS[managerView]} PDF.`);
+  }
 }

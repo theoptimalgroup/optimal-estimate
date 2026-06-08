@@ -9,9 +9,9 @@ import type {
   DashboardQuoteGroupComparisonChargeLine,
   DashboardQuoteGroupComparisonWorkBreakdown,
   DashboardSelectedEstimateDecision,
-  ManagerQuotePdfView,
+  SelectedEstimatePdfView,
 } from "@/lib/dashboard";
-import { downloadManagerQuotePdf } from "@/lib/dashboard-auth";
+import { downloadSelectedEstimatePdf } from "@/lib/dashboard-auth";
 import { formatSubmittedAt, money } from "@/components/dashboard/quote-groups-table";
 
 const MAX_COMPARE = 3;
@@ -86,12 +86,12 @@ function isEstimateSelectedElsewhere(
 }
 
 const PDF_DOWNLOAD_SECONDARY: {
-  view: ManagerQuotePdfView;
+  view: SelectedEstimatePdfView;
   label: string;
   title?: string;
 }[] = [
   { view: "internal", label: "Internal PDF" },
-  { view: "combined", label: "Full Estimate", title: "Download full estimate PDF" },
+  { view: "full-estimate", label: "Full Estimate", title: "Download full estimate PDF" },
   { view: "all-trades", label: "All Trades", title: "Download all trades combined PDF" },
 ];
 
@@ -136,12 +136,13 @@ export function SubmissionComparePanel({
 
   const cheapestIds = lowestPriceSessionIds(rows);
 
-  const handleDownloadPdf = async (sessionId: string, view: ManagerQuotePdfView) => {
-    const downloadKey = `${sessionId}-${view}`;
+  const handleDownloadPdf = async (sessionId: string, view: SelectedEstimatePdfView) => {
+    const resolvedView = view === "full-estimate" ? "combined" : view;
+    const downloadKey = `${sessionId}-${resolvedView}`;
     setDownloadingKey(downloadKey);
     setPdfError(null);
     try {
-      await downloadManagerQuotePdf(sessionId, view, quoteRef ?? undefined);
+      await downloadSelectedEstimatePdf(sessionId, view, quoteRef ?? undefined);
     } catch (err) {
       setPdfError(err instanceof Error ? err.message : "PDF download failed");
     } finally {
@@ -350,10 +351,11 @@ export function SubmissionComparePanel({
                   })()}
                   <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm">
                     {PDF_DOWNLOAD_SECONDARY.map(({ view, label, title }, index) => {
-                      const downloadKey = `${row.linked_session_id}-${view}`;
+                      const resolvedView = view === "full-estimate" ? "combined" : view;
+                      const downloadKey = `${row.linked_session_id}-${resolvedView}`;
                       const isDownloading = downloadingKey === downloadKey;
                       return (
-                        <span key={view} className="inline-flex items-center gap-x-3">
+                        <span key={resolvedView} className="inline-flex items-center gap-x-3">
                           {index > 0 ? (
                             <span className="text-slate-300" aria-hidden="true">
                               •
@@ -365,7 +367,7 @@ export function SubmissionComparePanel({
                             title={title}
                             disabled={isDownloading}
                             onClick={() => void handleDownloadPdf(row.linked_session_id!, view)}
-                            data-testid={`download-pdf-${view}-${sessionId}`}
+                            data-testid={`download-pdf-${resolvedView}-${sessionId}`}
                           >
                             {isDownloading ? "Generating…" : label}
                           </button>

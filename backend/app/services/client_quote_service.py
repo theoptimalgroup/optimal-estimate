@@ -156,6 +156,7 @@ def render_public_client_quote_pdf(db: Session, public_token: str) -> tuple[byte
         session_id=session.id,
         session_token=session.session_token,
         is_draft=False,
+        read_only=True,
     )
 
 

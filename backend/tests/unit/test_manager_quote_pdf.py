@@ -46,26 +46,26 @@ def _step1(*, quote_number: str) -> dict:
 
 
 def _ui_state(final_total: str) -> dict:
+    breakdown = {
+        "labour": [{"label": "Labour", "formula": "fixed", "total": "100.00"}],
+        "materials": [{"label": "Materials", "formula": "fixed", "total": "20.00"}],
+        "charges": [],
+        "subtotal": "120.00",
+        "vat_rate": "20",
+        "vat_total": "24.00",
+        "final_total": final_total,
+        "formula_version": "1.0.0",
+    }
     return {
         "current_step": 3,
         "max_reachable_step": 3,
         "last_result": {
-            "breakdown": {
-                "final_total": final_total,
-                "labour": [{"total": "100.00"}],
-                "materials": [{"total": "20.00"}],
-                "charges": [],
-                "vat_total": "24.00",
-                "vat_rate": "20",
-            },
+            "breakdown": breakdown,
             "work_breakdowns": [
                 {
                     "work_index": 0,
-                    "breakdown": {
-                        "final_total": final_total,
-                        "labour": [{"total": "100.00"}],
-                        "materials": [{"total": "20.00"}],
-                    },
+                    "scope": "Submitted work",
+                    "breakdown": breakdown,
                 }
             ],
         },
@@ -227,6 +227,33 @@ def test_internal_pdf_uses_optimal_view(
     mock_render_combined.assert_called_once()
     _, kwargs = mock_render_combined.call_args
     assert kwargs["view_type"] == "optimal"
+
+
+@patch("app.services.calculation_session_pdf_service.calculate_session")
+@patch("app.auth.dependencies.settings")
+def test_combined_pdf_uses_cached_result_for_submitted_session(
+    mock_settings,
+    mock_calculate,
+    pdf_api_client,
+    pdf_db_session,
+):
+    _patch_dev_user(mock_settings, role="manager")
+    _, submitted_id, _ = pdf_db_session
+
+    response = pdf_api_client.get(f"/api/v1/manager/quotes/{submitted_id}/pdf/combined")
+    assert response.status_code == 200
+    assert len(response.content) > 0
+    mock_calculate.assert_not_called()
+
+
+@patch("app.auth.dependencies.settings")
+def test_combined_pdf_content_type_is_pdf_or_html(mock_settings, pdf_api_client, pdf_db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    _, submitted_id, _ = pdf_db_session
+
+    response = pdf_api_client.get(f"/api/v1/manager/quotes/{submitted_id}/pdf/combined")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(("application/pdf", "text/html"))
 
 
 def _five_work_step2() -> dict:

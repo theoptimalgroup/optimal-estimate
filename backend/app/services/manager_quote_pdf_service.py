@@ -93,6 +93,7 @@ def render_manager_quote_pdf(
                 db,
                 session_id=session_id,
                 session_token=session.session_token,
+                read_only=True,
             )
         if view == "all-trades":
             return render_all_trades_quote_pdf(db, session=session)
