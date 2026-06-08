@@ -570,3 +570,103 @@ def test_engineer_assigned_jobs_response_excludes_tokens(mock_settings, assign_a
     assert response.json()["data"] == []
     for forbidden in ("session_token", "assignment_token", "raw_payload", "profit", "margin", "formula", "denominator"):
         assert forbidden not in body
+
+
+def _ui_state_xlsx_with_parking() -> dict:
+    """Single-work XLSX quote: parking £100 is folded into materials_parking_cc_charge.
+
+    Per-work breakdown intentionally has only raw materials (£140, no parking).
+    Combined breakdown carries the full XLSX charge (£265 = MROUND((110+100)/0.80, 5)).
+    """
+    return {
+        "current_step": 3,
+        "max_reachable_step": 3,
+        "last_result": {
+            "breakdown": {
+                "final_total": "492",
+                "labour": [],
+                "materials": [],
+                "charges": [],
+                "labour_charge_to_client": "145",
+                "materials_parking_cc_charge": "265",
+                "formula_source": "xlsx",
+                "vat_total": "82",
+                "vat_rate": "20",
+            },
+            "work_breakdowns": [
+                {
+                    "work_index": 0,
+                    "breakdown": {
+                        # Per-work breakdown has no parking — this is the pre-fix bug scenario
+                        "final_total": "285",
+                        "labour": [],
+                        "materials": [],
+                        "labour_charge_to_client": "145",
+                        "materials_parking_cc_charge": "140",
+                    },
+                }
+            ],
+        },
+    }
+
+
+@pytest.fixture()
+def assign_db_session_xlsx(assign_db_session):
+    """Same as assign_db_session but session_a uses XLSX-with-parking ui_state."""
+    db_session, session_a, session_b, assignment = assign_db_session
+    row = db_session.get(CalculationSession, session_a)
+    row.ui_state = _ui_state_xlsx_with_parking()
+    db_session.commit()
+    yield db_session, session_a, session_b, assignment
+
+
+@pytest.fixture()
+def assign_api_client_xlsx(assign_db_session_xlsx):
+    db_session, *_ = assign_db_session_xlsx
+
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()
+
+
+@patch("app.auth.dependencies.settings")
+def test_compare_summary_single_work_xlsx_with_parking(mock_settings, assign_api_client_xlsx, assign_db_session_xlsx):
+    """Single-work XLSX quote: compare summary must show combined materials (parking folded in).
+
+    Expected (Q22123 DEFAULT Carpenter scenario):
+      labour_subtotal        = £145
+      materials_subtotal     = £265  (not £140 — parking must be included)
+      works_subtotal         = £410
+      materials_label        = "Materials / Parking / CC"
+      works[0].work_subtotal = £410
+      works[0].materials_label = "Materials / Parking / CC"
+    """
+    _patch_dev_user(mock_settings, role="manager")
+    _, session_a, _, _ = assign_db_session_xlsx
+
+    response = assign_api_client_xlsx.get("/api/v1/dashboard/quote-groups/detail", params={"quote_ref": "Q22100"})
+    assert response.status_code == 200
+    rows = response.json()["data"]["group"]["assignment_submissions"]
+    summary = next(
+        row["comparison_summary"] for row in rows if row["linked_session_id"] == str(session_a)
+    )
+
+    assert summary["labour_subtotal"] == "145", "Labour should be £145"
+    assert summary["materials_subtotal"] == "265", "Materials must include parking (£265, not £140)"
+    assert summary["works_subtotal"] == "410", "Works subtotal must be £145 + £265 = £410"
+    assert summary["final_total"] == "492"
+    assert summary["vat_total"] == "82"
+    assert summary["materials_label"] == "Materials / Parking / CC"
+    assert len(summary["works"]) == 1
+    work = summary["works"][0]
+    assert work["labour_subtotal"] == "145"
+    assert work["materials_subtotal"] == "265", "Per-work materials must use combined breakdown"
+    assert work["work_subtotal"] == "410"
+    assert work["materials_label"] == "Materials / Parking / CC"

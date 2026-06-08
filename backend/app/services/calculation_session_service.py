@@ -1787,11 +1787,18 @@ def render_combined_works_pdf(
                 quote_breakdown=breakdown,
                 work_count=len(step2.works),
             )
+        # For single-work XLSX quotes, parking/CC charges are folded into the
+        # combined materials bucket. The per-work breakdown is computed with an
+        # empty ChargeInput, so it reflects only raw materials (e.g. £140) and
+        # gives the wrong subtotal/quoted-price. Use the combined (quote-level)
+        # breakdown for all item rows when there is only one work, because
+        # combined == per-work for labour but correctly includes parking/CC.
+        effective_breakdown = pdf_ctx.breakdown if len(step2.works) == 1 else work_result.breakdown
         row = _work_item_row(
             display_index=position,
             block=block,
             step1=step1,
-            breakdown=work_result.breakdown,
+            breakdown=effective_breakdown,
             internal_notes_text=resolved_notes or "",
         )
         item = {key: value for key, value in row.items() if not key.startswith("_")}

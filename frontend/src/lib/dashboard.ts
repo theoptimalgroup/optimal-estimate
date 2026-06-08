@@ -115,6 +115,7 @@ export type DashboardQuoteGroupComparisonWorkBreakdown = {
   labour_subtotal?: number | string | null;
   materials_subtotal?: number | string | null;
   work_subtotal?: number | string | null;
+  materials_label?: string | null;
 };
 
 export type DashboardQuoteGroupComparisonSummary = {
@@ -127,6 +128,7 @@ export type DashboardQuoteGroupComparisonSummary = {
   vat_rate?: number | string | null;
   scope_preview?: string | null;
   product_preview?: string | null;
+  materials_label?: string | null;
   works?: DashboardQuoteGroupComparisonWorkBreakdown[];
   additional_charges?: DashboardQuoteGroupComparisonChargeLine[];
 };

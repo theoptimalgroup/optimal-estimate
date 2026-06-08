@@ -53,22 +53,42 @@ def _comparison_additional_charges_total(charge_lines: list[DashboardQuoteGroupC
     return sum((line.amount for line in charge_lines), Decimal("0"))
 
 
+_XLSX_MATERIALS_LABEL = "Materials / Parking / CC"
+
+
 def _comparison_work_rows(
     db: Session,
     *,
     step2: Step2Snapshot,
     breakdown_map: dict[int, dict],
+    combined_breakdown: dict | None = None,
 ) -> list[DashboardQuoteGroupComparisonWorkBreakdown]:
     rows: list[DashboardQuoteGroupComparisonWorkBreakdown] = []
     for index, block in enumerate(step2.works):
         work_result = breakdown_map.get(index, {})
         work_breakdown = work_result.get("breakdown") or {}
-        labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_breakdown)
+
+        # For single-work XLSX quotes, parking/CC are folded into the combined
+        # (quote-level) materials bucket and are absent from the per-work breakdown
+        # (which is computed with an empty ChargeInput).  Use the combined breakdown
+        # so the work card subtotal matches the Quote Summary.
+        if len(step2.works) == 1 and combined_breakdown:
+            labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(combined_breakdown)
+            if labour_subtotal is None and materials_subtotal is None:
+                labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_breakdown)
+        else:
+            labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_breakdown)
+
         work_subtotal = None
         if labour_subtotal is not None or materials_subtotal is not None:
             work_subtotal = (labour_subtotal or Decimal("0")) + (materials_subtotal or Decimal("0"))
         product_name, product_code = _resolve_work_product_fields(db, block)
         scope_preview = (block.scope or "").strip() or None
+
+        materials_label: str | None = None
+        if combined_breakdown and combined_breakdown.get("formula_source") == "xlsx":
+            materials_label = _XLSX_MATERIALS_LABEL
+
         rows.append(
             DashboardQuoteGroupComparisonWorkBreakdown(
                 product_name=product_name,
@@ -77,6 +97,7 @@ def _comparison_work_rows(
                 labour_subtotal=labour_subtotal,
                 materials_subtotal=materials_subtotal,
                 work_subtotal=work_subtotal,
+                materials_label=materials_label,
             )
         )
     return rows
@@ -100,16 +121,33 @@ def _session_comparison_summary(db: Session, session: CalculationSession) -> Das
     materials_total = Decimal("0")
     has_labour = False
     has_materials = False
-    for index, block in enumerate(step2.works):
-        work_result = breakdown_map.get(index, {})
-        work_breakdown = work_result.get("breakdown") or {}
-        labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_breakdown)
-        if labour_subtotal is not None:
-            labour_total += labour_subtotal
+
+    # For single-work XLSX quotes, parking/CC are folded into the combined
+    # (quote-level) materials_parking_cc_charge bucket and are absent from the
+    # per-work breakdown.  Use the combined breakdown directly so the summary
+    # labour/materials match works_subtotal (which is already correct).
+    if len(step2.works) == 1:
+        labour_sub, materials_sub = _work_subtotals_from_breakdown(breakdown)
+        if labour_sub is None and materials_sub is None:
+            work_bd = (breakdown_map.get(0) or {}).get("breakdown") or {}
+            labour_sub, materials_sub = _work_subtotals_from_breakdown(work_bd)
+        if labour_sub is not None:
+            labour_total = labour_sub
             has_labour = True
-        if materials_subtotal is not None:
-            materials_total += materials_subtotal
+        if materials_sub is not None:
+            materials_total = materials_sub
             has_materials = True
+    else:
+        for index, block in enumerate(step2.works):
+            work_result = breakdown_map.get(index, {})
+            work_breakdown = work_result.get("breakdown") or {}
+            labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_breakdown)
+            if labour_subtotal is not None:
+                labour_total += labour_subtotal
+                has_labour = True
+            if materials_subtotal is not None:
+                materials_total += materials_subtotal
+                has_materials = True
 
     scope_preview = None
     product_preview = None
@@ -124,6 +162,7 @@ def _session_comparison_summary(db: Session, session: CalculationSession) -> Das
 
     charge_lines = _comparison_charge_lines(breakdown)
     vat_rate = breakdown.get("vat_rate")
+    is_xlsx = breakdown.get("formula_source") == "xlsx"
     return DashboardQuoteGroupComparisonSummary(
         final_total=Decimal(str(breakdown["final_total"])),
         works_subtotal=summary.works_subtotal,
@@ -134,6 +173,7 @@ def _session_comparison_summary(db: Session, session: CalculationSession) -> Das
         vat_rate=Decimal(str(vat_rate)) if vat_rate is not None else None,
         scope_preview=scope_preview,
         product_preview=product_preview,
-        works=_comparison_work_rows(db, step2=step2, breakdown_map=breakdown_map),
+        materials_label=_XLSX_MATERIALS_LABEL if is_xlsx else None,
+        works=_comparison_work_rows(db, step2=step2, breakdown_map=breakdown_map, combined_breakdown=breakdown),
         additional_charges=charge_lines,
     )

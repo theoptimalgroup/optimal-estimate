@@ -507,13 +507,18 @@ def build_all_trades_pdf_context(
     all_trades_works: list[dict[str, object]] = []
     selected_indexes = set(work_indexes) if work_indexes is not None else None
     works_subtotal = Decimal("0")
+    single_work = len(step2.works) == 1
 
     for index, block in enumerate(step2.works):
         if selected_indexes is not None and index not in selected_indexes:
             continue
         work_result = breakdown_map.get(index, {})
         work_breakdown = work_result.get("breakdown") or {}
-        labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_breakdown)
+        # For single-work quotes, the per-work breakdown uses an empty ChargeInput
+        # so parking/CC are missing (materials shows £140 instead of £265). Use
+        # the combined (quote-level) breakdown which includes all charges.
+        breakdown_for_totals = breakdown if single_work else work_breakdown
+        labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(breakdown_for_totals)
         labour_amount = labour_subtotal or Decimal("0")
         materials_amount = materials_subtotal or Decimal("0")
         work_subtotal = labour_amount + materials_amount
@@ -583,4 +588,7 @@ def build_all_trades_pdf_context(
         "all_trades_works": all_trades_works,
         "summary": summary,
         "additional_charges": additional_charges,
+        # For single-work quotes parking/CC is folded into the materials column,
+        # so the header is relabelled to avoid confusion.
+        "materials_column_label": "Materials / Parking / CC" if single_work else "Materials",
     }

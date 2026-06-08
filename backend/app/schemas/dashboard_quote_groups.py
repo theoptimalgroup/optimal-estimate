@@ -98,6 +98,7 @@ class DashboardQuoteGroupComparisonWorkBreakdown(BaseModel):
     labour_subtotal: Decimal | None = None
     materials_subtotal: Decimal | None = None
     work_subtotal: Decimal | None = None
+    materials_label: str | None = None
 
 
 class DashboardQuoteGroupComparisonSummary(BaseModel):
@@ -110,6 +111,7 @@ class DashboardQuoteGroupComparisonSummary(BaseModel):
     vat_rate: Decimal | None = None
     scope_preview: str | None = None
     product_preview: str | None = None
+    materials_label: str | None = None
     works: list[DashboardQuoteGroupComparisonWorkBreakdown] = Field(default_factory=list)
     additional_charges: list[DashboardQuoteGroupComparisonChargeLine] = Field(default_factory=list)
 

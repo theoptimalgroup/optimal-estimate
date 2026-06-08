@@ -168,17 +168,21 @@ def build_work_internal_calculation_note(
     manual = (work_block.other_notes or "").strip() if work_block else ""
 
     generated: str | None = None
-    if work_result is not None:
-        for candidate in (work_result.internal_notes, work_result.breakdown.internal_notes):
-            if candidate and str(candidate).strip():
-                generated = str(candidate).strip()
-                break
-
-    if not generated and work_count == 1:
+    # For single-work quotes, always prefer combined (quote-level) notes over per-work
+    # notes. Per-work breakdowns are computed with an empty ChargeInput, so their
+    # generated notes show Parking: £0 / Materials: £140 (raw) instead of the correct
+    # combined values that include parking/CC charges.
+    if work_count == 1:
         for candidate in (
             quote_internal_notes,
             quote_breakdown.internal_notes if quote_breakdown else None,
         ):
+            if candidate and str(candidate).strip():
+                generated = str(candidate).strip()
+                break
+
+    if not generated and work_result is not None:
+        for candidate in (work_result.internal_notes, work_result.breakdown.internal_notes):
             if candidate and str(candidate).strip():
                 generated = str(candidate).strip()
                 break

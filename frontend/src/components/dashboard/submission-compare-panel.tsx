@@ -232,7 +232,11 @@ export function SubmissionComparePanel({
                               ) : null}
                               <div className="mt-1 space-y-1">
                                 <BreakdownRow label="Labour" amount={work.labour_subtotal} indent />
-                                <BreakdownRow label="Materials" amount={work.materials_subtotal} indent />
+                                <BreakdownRow
+                                  label={work.materials_label ?? "Materials"}
+                                  amount={work.materials_subtotal}
+                                  indent
+                                />
                                 <BreakdownRow label="Work subtotal" amount={work.work_subtotal} />
                               </div>
                             </div>
@@ -291,7 +295,7 @@ export function SubmissionComparePanel({
                         testId={`compare-labour-${sessionId}`}
                       />
                       <BreakdownRow
-                        label="Materials"
+                        label={summary.materials_label ?? "Materials"}
                         amount={summary.materials_subtotal}
                         indent
                         testId={`compare-materials-${sessionId}`}
