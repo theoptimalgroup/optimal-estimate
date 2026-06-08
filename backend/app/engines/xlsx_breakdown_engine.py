@@ -253,4 +253,6 @@ def build_xlsx_calculation_breakdown(
         profit_gbp=result.profit_gbp,
         profit_pct=result.profit_pct,
         internal_notes=internal_notes,
+        cost_to_optimal_labour=result.cost_labour,
+        cost_to_optimal_materials=result.cost_materials,
     )

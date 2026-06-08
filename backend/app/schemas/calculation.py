@@ -105,6 +105,8 @@ class CalculationBreakdown(BaseModel):
     profit_gbp: Decimal | None = None
     profit_pct: Decimal | None = None
     internal_notes: str | None = None
+    cost_to_optimal_labour: Decimal | None = None
+    cost_to_optimal_materials: Decimal | None = None
 
 
 class CalculationSnapshotRead(BaseModel):

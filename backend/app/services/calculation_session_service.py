@@ -365,6 +365,9 @@ def _merge_skill_group_breakdowns(
     labour_charge = Decimal("0")
     direct_labour_cost = Decimal("0")
     profit_gbp = Decimal("0")
+    cost_to_optimal_labour = Decimal("0")
+    cost_to_optimal_materials = Decimal("0")
+    has_cost_to_optimal = False
     materials_lines: list[LineBreakdown] = []
     charges_lines: list[LineBreakdown] = []
     materials_charge = Decimal("0")
@@ -381,6 +384,12 @@ def _merge_skill_group_breakdowns(
             direct_labour_cost += bd.direct_labour_cost
         if bd.profit_gbp:
             profit_gbp += bd.profit_gbp
+        if bd.cost_to_optimal_labour is not None:
+            cost_to_optimal_labour += bd.cost_to_optimal_labour
+            has_cost_to_optimal = True
+        if bd.cost_to_optimal_materials is not None:
+            cost_to_optimal_materials += bd.cost_to_optimal_materials
+            has_cost_to_optimal = True
         for line in bd.materials:
             materials_lines.append(line)
         if bd.materials_parking_cc_charge:
@@ -411,6 +420,8 @@ def _merge_skill_group_breakdowns(
         materials_parking_cc_charge=materials_charge or None,
         profit_gbp=profit_gbp or None,
         internal_notes="\n\n".join(internal_notes_parts) if internal_notes_parts else None,
+        cost_to_optimal_labour=cost_to_optimal_labour if has_cost_to_optimal else None,
+        cost_to_optimal_materials=cost_to_optimal_materials if has_cost_to_optimal else None,
     )
 
 
@@ -1613,12 +1624,30 @@ def _work_item_row(
 ) -> dict:
     material_rows = [*flatten_supplier_links(block.materials_to_order), *block.shelf_materials_rows]
     materials_link = format_links_and_quantity(material_rows)
-    material_cost = sum((line.total for line in breakdown.materials), Decimal("0"))
     labour_charge = breakdown.labour_charge_to_client or Decimal("0")
     materials_charge = breakdown.materials_parking_cc_charge or Decimal("0")
-    direct_labour = breakdown.direct_labour_cost or Decimal("0")
     client_price = breakdown.subtotal
-    optimal_cost = direct_labour + material_cost
+
+    # material_cost = cost-to-Optimal for materials (actual cost, NOT the charge to client).
+    # The materials lines in an XLSX breakdown represent charge amounts (e.g. £265), so summing
+    # them here would give the wrong number.  Use the stored cost field when available.
+    if breakdown.cost_to_optimal_materials is not None:
+        material_cost = breakdown.cost_to_optimal_materials
+    elif breakdown.profit_gbp is not None:
+        # Derive: total optimal cost = subtotal − profit; subtract direct labour for the split.
+        total_optimal = client_price - breakdown.profit_gbp
+        material_cost = total_optimal - (breakdown.direct_labour_cost or Decimal("0"))
+    else:
+        # Last resort (legacy breakdowns without profit): sum the materials charge lines.
+        material_cost = sum((line.total for line in breakdown.materials), Decimal("0"))
+
+    # labour_cost_to_optimal = full cost-to-Optimal for labour (incl. overhead & fee share).
+    if breakdown.cost_to_optimal_labour is not None:
+        labour_cost_to_optimal = breakdown.cost_to_optimal_labour
+    else:
+        labour_cost_to_optimal = breakdown.direct_labour_cost or Decimal("0")
+
+    optimal_cost = labour_cost_to_optimal + material_cost
     profit_gbp = breakdown.profit_gbp if breakdown.profit_gbp is not None else (client_price - optimal_cost)
     margin_pct = breakdown.profit_pct
     if margin_pct is None and client_price > 0:

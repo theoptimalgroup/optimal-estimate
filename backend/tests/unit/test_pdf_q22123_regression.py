@@ -85,6 +85,12 @@ def _q22123_ui_state() -> dict:
         "formula_source": "xlsx",
         "formula_version": "1.0.0",
         "internal_notes": _COMBINED_INTERNAL_NOTES,
+        # cost_to_optimal_* reflect the actual cost to Optimal (not the charge to the client).
+        # Labour cost: overhead (£42.75) + EAF flat fee (£1) = £43.75 (displayed as £44 in notes).
+        # Materials cost: mat_input (£110 materials + £100 parking) = £210.
+        # Verify: 43.75 + 210.00 + 156.25 = 410.00 (client price).
+        "cost_to_optimal_labour": "43.75",
+        "cost_to_optimal_materials": "210.00",
     }
     return {
         "current_step": 3,
@@ -337,3 +343,69 @@ def test_top_level_totals_still_correct(q22123_db, view_type):
 
     assert "492.00" in html, f"Expected grand total £492.00 in {view_type} PDF"
     assert "82.00" in html, f"Expected VAT £82.00 in {view_type} PDF"
+
+
+# ---------------------------------------------------------------------------
+# Optimal PDF: cost/profit consistency
+# Material cost must be cost-to-Optimal (£210), NOT the charge to client (£265).
+# Optimal cost must be labour_cost + material_cost (£253.75), NOT charge-based (£310+).
+# ---------------------------------------------------------------------------
+
+def test_optimal_pdf_material_cost_is_cost_to_optimal_not_charge(q22123_db):
+    """Optimal PDF Mat. cost column must show cost-to-Optimal (£210), not charge (£265)."""
+    db, session_id = q22123_db
+    html = _render(db, session_id, "optimal")
+    if not html:
+        pytest.skip("PDF renderer returned binary output")
+
+    assert "210.00" in html, (
+        "Expected material cost-to-Optimal £210.00 in optimal PDF item row"
+    )
+
+
+def test_optimal_pdf_optimal_cost_uses_cost_fields_not_charges(q22123_db):
+    """Optimal PDF 'Optimal cost' must be labour_cost+mat_cost (£253.75), not charge-based."""
+    db, session_id = q22123_db
+    html = _render(db, session_id, "optimal")
+    if not html:
+        pytest.skip("PDF renderer returned binary output")
+
+    # correct: 43.75 (labour cost) + 210.00 (materials cost) = 253.75
+    assert "253.75" in html, (
+        "Expected optimal cost £253.75 in optimal PDF item row"
+    )
+    # must not show the old broken value (direct_labour_cost + materials_charge = 107+265=372)
+    assert "372.00" not in html, (
+        "Old broken optimal cost £372.00 (direct_labour + materials_charge) must not appear"
+    )
+
+
+def test_optimal_pdf_cost_profit_consistency(q22123_db):
+    """Material cost + labour cost + profit must equal client price (within £1 rounding)."""
+    db, session_id = q22123_db
+    html = _render(db, session_id, "optimal")
+    if not html:
+        pytest.skip("PDF renderer returned binary output")
+
+    # With correct cost fields: 43.75 + 210.00 + 156.25 = 410.00 exactly
+    # Verify all expected values are present (consistency check via HTML content)
+    assert "210.00" in html, "Material cost-to-Optimal £210.00 must be present"
+    assert "253.75" in html, "Optimal cost £253.75 must be present"
+    assert "156.25" in html, "Profit £156.25 must be present"
+    assert "410.00" in html, "Client price £410.00 must be present"
+    assert "38.11" in html, "Margin 38.11% must be present"
+
+
+def test_optimal_pdf_material_cost_differs_from_material_charge(q22123_db):
+    """Material cost (£210) must differ from material charge (£265) in Optimal PDF."""
+    db, session_id = q22123_db
+    html = _render(db, session_id, "optimal")
+    if not html:
+        pytest.skip("PDF renderer returned binary output")
+
+    # Both values must appear (material cost £210 AND materials charge £265 are different columns)
+    assert "210.00" in html, "Material cost £210.00 must appear"
+    assert "265.00" in html, "Materials charge £265.00 must appear"
+    # But they must not be the same: the material_cost column must show £210, not £265
+    # (tested indirectly — if both values appear and optimal_cost=£253.75, cost fields are correct)
+    assert "253.75" in html, "Optimal cost £253.75 confirms cost fields are used correctly"
