@@ -260,6 +260,96 @@ def test_additional_charges_counted_once_at_quote_level(calc_db):
     assert final == KNOWN_FINAL_TOTAL
 
 
+def test_three_works_parking_counted_once_in_all_pdfs(calc_db):
+    """Parking £20 with 3 works must not triple-count in any PDF view."""
+    db, session_id = calc_db
+    client = db.query(Client).one()
+    trade = db.query(Trade).one()
+
+    parking = Decimal("20")
+    work_subtotal_each = Decimal("100")
+    works_subtotal = work_subtotal_each * 3
+    subtotal = works_subtotal + parking
+    vat = (subtotal * Decimal("0.20")).quantize(Decimal("0.01"))
+    final_total = subtotal + vat
+
+    work_breakdowns = []
+    for index in range(3):
+        work_breakdowns.append(
+            {
+                "work_index": index,
+                "scope": f"Work {index + 1}",
+                "breakdown": {
+                    "labour": [{"label": "Labour", "formula": "x", "total": "80.00"}],
+                    "materials": [{"label": "Materials", "formula": "x", "total": "20.00"}],
+                    "charges": [],
+                    "subtotal": "100.00",
+                    "vat_rate": "20",
+                    "vat_total": "20.00",
+                    "final_total": "120.00",
+                    "labour_charge_to_client": "80.00",
+                    "materials_parking_cc_charge": "20.00",
+                    "formula_version": "1.0.0",
+                },
+            }
+        )
+
+    breakdown = {
+        "labour": [{"label": "Labour", "formula": "x", "total": "240.00"}],
+        "materials": [{"label": "Materials", "formula": "x", "total": "60.00"}],
+        "charges": [{"label": "Parking", "formula": "x", "total": str(parking)}],
+        "subtotal": str(subtotal),
+        "vat_rate": "20",
+        "vat_total": str(vat),
+        "final_total": str(final_total),
+        "formula_version": "1.0.0",
+    }
+
+    three_work_session = uuid4()
+    db.add(
+        CalculationSession(
+            id=three_work_session,
+            session_token="token-three-works",
+            source="test",
+            payload_snapshot={},
+            step1_snapshot=_step1(quote_number="Q-PARK"),
+            step2_snapshot={
+                "works": [
+                    {"scope": "Work 1", "product_code": "P-1"},
+                    {"scope": "Work 2", "product_code": "P-2"},
+                    {"scope": "Work 3", "product_code": "P-3"},
+                ],
+                "parking_required": True,
+                "parking_charge": str(parking),
+            },
+            ui_state={
+                "current_step": 3,
+                "max_reachable_step": 3,
+                "last_result": {"breakdown": breakdown, "work_breakdowns": work_breakdowns},
+            },
+            client_id=client.id,
+            trade_id=trade.id,
+            expires_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            status="submitted",
+            submitted_at=datetime(2026, 6, 5, tzinfo=timezone.utc),
+            locked=True,
+        )
+    )
+    db.commit()
+
+    ctx = build_pdf_calculation_context(db, db.get(CalculationSession, three_work_session), allow_recalculate=False)
+    charge_total = sum((line.total for line in ctx.breakdown.charges), Decimal("0"))
+    assert charge_total == parking
+    assert ctx.breakdown.final_total == final_total
+
+    for view in ("client", "internal", "combined", "all-trades"):
+        content, _, media_type = render_manager_quote_pdf(db, session_id=three_work_session, view=view)
+        assert len(content) > 0
+        grand = _extract_grand_total(content, media_type)
+        if grand is not None:
+            assert _normalize_amount(grand) == final_total, view
+
+
 def test_public_client_quote_matches_submitted_total(calc_db):
     db, _ = calc_db
     quote = get_public_client_quote(db, "public-token-552")
@@ -341,7 +431,7 @@ def test_selected_estimate_session_pdf_uses_that_session_totals(calc_db):
     assert _normalize_amount(grand_b) == Decimal("600.00")
 
 
-@patch("app.services.calculation_session_pdf_service.calculate_session")
+@patch("app.services.calculation_session_service.calculate_session")
 def test_full_estimate_pdf_uses_cached_breakdown(mock_calculate, calc_db):
     db, session_id = calc_db
     content, _, media_type = render_session_quote_pdf(

@@ -229,7 +229,7 @@ def test_internal_pdf_uses_optimal_view(
     assert kwargs["view_type"] == "optimal"
 
 
-@patch("app.services.calculation_session_pdf_service.calculate_session")
+@patch("app.services.calculation_session_service.calculate_session")
 @patch("app.auth.dependencies.settings")
 def test_combined_pdf_uses_cached_result_for_submitted_session(
     mock_settings,
@@ -283,9 +283,14 @@ def _five_work_ui_state() -> dict:
             {
                 "work_index": index,
                 "breakdown": {
-                    "labour": [{"label": "Labour", "total": str(labour)}],
-                    "materials": [{"label": "Materials", "total": str(materials)}],
+                    "labour": [{"label": "Labour", "formula": "x", "total": str(labour)}],
+                    "materials": [{"label": "Materials", "formula": "x", "total": str(materials)}],
                     "charges": [],
+                    "subtotal": str((labour + materials).quantize(Decimal("0.01"))),
+                    "vat_rate": "20",
+                    "vat_total": "0.00",
+                    "final_total": str((labour + materials).quantize(Decimal("0.01"))),
+                    "formula_version": "1.0.0",
                 },
             }
         )
@@ -300,14 +305,16 @@ def _five_work_ui_state() -> dict:
         "last_result": {
             "breakdown": {
                 "final_total": str(final_total.quantize(Decimal("0.01"))),
-                "labour": [{"total": "550.00"}],
-                "materials": [{"total": "100.00"}],
+                "subtotal": str(subtotal.quantize(Decimal("0.01"))),
+                "labour": [{"label": "Labour", "formula": "x", "total": "550.00"}],
+                "materials": [{"label": "Materials", "formula": "x", "total": "100.00"}],
                 "charges": [
-                    {"label": "Congestion", "total": "10.00"},
-                    {"label": "Travel", "total": "5.00"},
+                    {"label": "Congestion", "formula": "x", "total": "10.00"},
+                    {"label": "Travel", "formula": "x", "total": "5.00"},
                 ],
                 "vat_total": str(vat_total.quantize(Decimal("0.01"))),
                 "vat_rate": "20",
+                "formula_version": "1.0.0",
             },
             "work_breakdowns": work_breakdowns,
         },
