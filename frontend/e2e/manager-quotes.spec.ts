@@ -1553,6 +1553,38 @@ test.describe("Manager quote group comparison and estimate selection", () => {
     }
   });
 
+  test("change selection opens compare panel with select buttons on other submissions", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    await mockComparableGroupDetailApi(page, {
+      ...COMPARABLE_GROUP_DETAIL,
+      selected_estimate_decision: {
+        id: 1,
+        selected_session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        assignee_name: "Rohit",
+        assignee_email: "rohit@example.com",
+        assignment_id: null,
+        selected_at: "2026-06-06T10:00:00Z",
+      },
+      assignment_submissions: COMPARABLE_GROUP_DETAIL.assignment_submissions.map((row) =>
+        row.linked_session_id === "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+          ? { ...row, is_selected_estimate: true }
+          : row,
+      ),
+    });
+    await page.goto("/manager/review/group?quote_ref=Q22100");
+
+    await expect(page.getByTestId("quote-group-compare-submissions")).toHaveCount(0);
+    await page.getByTestId("change-job-assignment").click();
+
+    await expect(page.getByTestId("quote-group-compare-submissions")).toBeVisible();
+    await expect(page.getByTestId("cancel-change-selection")).toBeVisible();
+    await expect(page.getByTestId("select-estimate-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")).toHaveCount(0);
+    await expect(page.getByTestId("select-estimate-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toBeVisible();
+    await expect(
+      page.getByTestId("compare-selected-elsewhere-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+    ).toHaveCount(0);
+  });
+
   test("PDF download buttons trigger manager PDF endpoints", async ({ page }) => {
     await mockAuthMe(page, "manager");
     const sessionId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";

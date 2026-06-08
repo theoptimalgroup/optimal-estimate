@@ -73,6 +73,7 @@ function QuoteGroupReviewContent() {
   const [selectionLimitMessage, setSelectionLimitMessage] = useState<string | null>(null);
   const [selectingSessionId, setSelectingSessionId] = useState<string | null>(null);
   const [selectionSuccessMessage, setSelectionSuccessMessage] = useState<string | null>(null);
+  const [isChangingSelection, setIsChangingSelection] = useState(false);
 
   const loadGroup = useCallback(async () => {
     if (!quoteRef && eworksQuoteId == null && !groupKey) {
@@ -168,12 +169,41 @@ function QuoteGroupReviewContent() {
         row.comparison_summary?.final_total ?? row.final_total ?? null;
       setSelectionSuccessMessage(`${formatSelectedEstimateSummary(assigneeName, selectedTotal)}.`);
       setSelectedSessionIds(new Set(row.linked_session_id ? [row.linked_session_id] : []));
+      setIsChangingSelection(false);
       await loadGroup();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to select estimate");
     } finally {
       setSelectingSessionId(null);
     }
+  };
+
+  const handleChangeSelection = () => {
+    setSelectionSuccessMessage(null);
+    setSelectionLimitMessage(null);
+    setIsChangingSelection(true);
+
+    const submissions = group?.assignment_submissions ?? [];
+    const submittedSessionIds = submissions
+      .filter(
+        (row) =>
+          row.assignment_status === "submitted" &&
+          row.linked_session_id != null &&
+          (row.can_select_estimate ?? row.can_assign_job),
+      )
+      .map((row) => row.linked_session_id as string);
+
+    if (submittedSessionIds.length > MAX_COMPARE) {
+      setSelectionLimitMessage("Showing the first 3 submitted estimates for comparison.");
+    }
+
+    setSelectedSessionIds(new Set(submittedSessionIds.slice(0, MAX_COMPARE)));
+
+    requestAnimationFrame(() => {
+      document
+        .querySelector('[data-testid="quote-group-compare-submissions"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   };
 
   const pendingAssignments = group?.assignment_summary?.pending_assignments ?? 0;
@@ -295,16 +325,25 @@ function QuoteGroupReviewContent() {
                       <button
                         type="button"
                         className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
-                        onClick={() => {
-                          setSelectionSuccessMessage(null);
-                          if (selectedEstimateDecision.selected_session_id) {
-                            setSelectedSessionIds(new Set([selectedEstimateDecision.selected_session_id]));
-                          }
-                        }}
+                        onClick={handleChangeSelection}
                         data-testid="change-job-assignment"
                       >
                         Change selection
                       </button>
+                      {isChangingSelection ? (
+                        <button
+                          type="button"
+                          className="text-sm font-medium text-slate-600 hover:text-slate-800 hover:underline"
+                          onClick={() => {
+                            setIsChangingSelection(false);
+                            setSelectedSessionIds(new Set());
+                            setSelectionLimitMessage(null);
+                          }}
+                          data-testid="cancel-change-selection"
+                        >
+                          Cancel
+                        </button>
+                      ) : null}
                     </>
                   ) : (
                     <span className="text-slate-600">No estimate selected</span>
@@ -351,6 +390,7 @@ function QuoteGroupReviewContent() {
                 selectingSessionId={selectingSessionId}
                 selectedEstimateDecision={selectedEstimateDecision}
                 quoteRef={group.quote_ref}
+                allowReselect={isChangingSelection}
               />
             </SectionCard>
           ) : null}

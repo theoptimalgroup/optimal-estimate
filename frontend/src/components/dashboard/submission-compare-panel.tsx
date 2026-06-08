@@ -120,12 +120,14 @@ export function SubmissionComparePanel({
   selectingSessionId,
   selectedEstimateDecision,
   quoteRef,
+  allowReselect = false,
 }: {
   rows: DashboardQuoteGroupAssignmentSubmissionRow[];
   onSelectEstimate: (row: DashboardQuoteGroupAssignmentSubmissionRow) => Promise<void>;
   selectingSessionId?: string | null;
   selectedEstimateDecision?: DashboardQuoteJobAssignmentDecision | null;
   quoteRef?: string | null;
+  allowReselect?: boolean;
 }) {
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
@@ -161,7 +163,7 @@ export function SubmissionComparePanel({
             (row.can_select_estimate ?? row.can_assign_job) &&
             row.linked_session_id != null &&
             !isSelected &&
-            !selectedElsewhere;
+            (allowReselect || !selectedElsewhere);
           const roleLabel = row.submitted_by_role
             ? formatRole(row.submitted_by_role)
             : formatRole(row.assignment_type);
@@ -385,7 +387,7 @@ export function SubmissionComparePanel({
                 >
                   {selectingSessionId === row.linked_session_id ? "Selecting…" : "Select this estimate"}
                 </button>
-              ) : selectedElsewhere && selectedEstimateDecision ? (
+              ) : selectedElsewhere && selectedEstimateDecision && !allowReselect ? (
                 <p
                   className="mt-auto pt-4 text-sm text-slate-500"
                   data-testid={`compare-selected-elsewhere-${sessionId}`}
