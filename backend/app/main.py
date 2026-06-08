@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -17,6 +18,7 @@ async def lifespan(_app: FastAPI):
 
     from app.db.session import SessionLocal
     from app.services.background_sync_scheduler import (
+        should_start_scheduler,
         start_background_sync_scheduler,
         stop_background_sync_scheduler,
     )
@@ -35,6 +37,11 @@ async def lifespan(_app: FastAPI):
             )
     elif settings.is_azure_auth:
         startup_logger.info("Azure auth enabled (tenant=%s)", settings.azure_tenant_id)
+
+    if settings.run_background_worker:
+        startup_logger.info("Starting in background worker mode")
+    else:
+        startup_logger.info("Starting in API mode (background scheduler disabled)")
 
     db = SessionLocal()
     try:
@@ -70,12 +77,37 @@ async def app_error_handler(_request: Request, exc: AppError):
 
 @app.get("/health")
 def health():
+    from app.db.session import SessionLocal
+    from app.services.background_sync_scheduler import is_scheduler_running, should_start_scheduler
+
+    database_ok = False
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            database_ok = True
+        finally:
+            db.close()
+    except Exception:
+        database_ok = False
+
+    scheduler_expected = should_start_scheduler()
+    scheduler_running = is_scheduler_running() if settings.run_background_worker else False
+    scheduler_ok = (not scheduler_expected) or scheduler_running
+
+    status = "ok" if database_ok and scheduler_ok else "degraded"
+
     return {
-        "status": "ok",
+        "status": status,
         "environment": settings.environment,
         "storage_backend": settings.storage_backend,
         "run_seed": settings.effective_run_seed,
         "frontend_url": settings.frontend_url or settings.cors_origin_list[0] if settings.cors_origin_list else None,
+        "database_ok": database_ok,
+        "background_worker_mode": settings.run_background_worker,
+        "background_sync_enabled": settings.eworks_background_sync_enabled,
+        "scheduler_expected": scheduler_expected,
+        "scheduler_running": scheduler_running,
     }
 
 

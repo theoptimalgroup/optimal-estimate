@@ -10,7 +10,7 @@
 #
 # Prerequisites:
 #   cp .env.production.example .env.production
-#   Fill AZURE_TENANT_ID, AZURE_API_CLIENT_ID, NEXT_PUBLIC_AZURE_CLIENT_ID
+#   Fill AZURE_TENANT_ID, AZURE_API_CLIENT_ID, NEXT_PUBLIC_AZURE_CLIENT_ID, BACKEND_CORS_ORIGINS
 #
 # Usage:
 #   ./deploy.sh                         # deploy both with tag deploy-YYYYMMDD-HHMMSS
@@ -35,12 +35,14 @@ ACR="acroptimalestimate"
 RESOURCE_GROUP="rg-optimal-estimate"
 API_APP="optimal-estimate-api"
 WEB_APP="optimal-estimate-web"
+WORKER_APP="optimal-estimate-sync-worker"
 API_URL="https://optimal-estimate-api.wonderfulpebble-655f8f4d.northeurope.azurecontainerapps.io"
 WEB_URL="https://optimal-estimate-web.wonderfulpebble-655f8f4d.northeurope.azurecontainerapps.io"
 DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-.env.production}"
 
 DEPLOY_BACKEND=true
 DEPLOY_FRONTEND=true
+DEPLOY_WORKER=true
 BACKEND_NO_CACHE=true
 AZ_NO_WAIT=true
 SKIP_BUILD=false
@@ -137,6 +139,73 @@ require_production_auth_vars() {
   fi
 }
 
+cors_contains_localhost() {
+  local origins=$1
+  local origin lower
+  local IFS=','
+  for origin in $origins; do
+    origin="${origin#"${origin%%[![:space:]]*}"}"
+    origin="${origin%"${origin##*[![:space:]]}"}"
+    [[ -n "$origin" ]] || continue
+    lower="$(printf '%s' "$origin" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower" == *"localhost"* || "$lower" == *"127.0.0.1"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+validate_production_cors_origins() {
+  if [[ -z "${BACKEND_CORS_ORIGINS:-}" ]]; then
+    echo "Missing BACKEND_CORS_ORIGINS in $DEPLOY_ENV_FILE." >&2
+    echo "Set it to your production frontend URL only (e.g. $WEB_URL)." >&2
+    exit 1
+  fi
+  PRODUCTION_CORS_ORIGINS="$BACKEND_CORS_ORIGINS"
+  if cors_contains_localhost "$PRODUCTION_CORS_ORIGINS"; then
+    echo "BACKEND_CORS_ORIGINS must not contain localhost or 127.0.0.1 in production." >&2
+    echo "Current value: $PRODUCTION_CORS_ORIGINS" >&2
+    echo "Use your Azure Container Apps web URL only (e.g. $WEB_URL)." >&2
+    exit 1
+  fi
+}
+
+validate_production_eworks_vars() {
+  local enabled="${EWORKS_API_ENABLED:-}"
+  if [[ "$enabled" != "true" && "$enabled" != "1" ]]; then
+    return 0
+  fi
+
+  local missing=()
+  [[ -n "${EWORKS_BASE_URL:-}" ]] || missing+=("EWORKS_BASE_URL")
+  [[ -n "${EWORKS_API_KEY:-}" ]] || missing+=("EWORKS_API_KEY")
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "EWORKS_API_ENABLED=true requires in $DEPLOY_ENV_FILE: ${missing[*]}" >&2
+    exit 1
+  fi
+}
+
+append_shared_eworks_env_vars() {
+  SHARED_EWORKS_ENV=(
+    "EWORKS_API_ENABLED=${EWORKS_API_ENABLED:-true}"
+    "EWORKS_BASE_URL=${EWORKS_BASE_URL}"
+    "EWORKS_API_KEY=${EWORKS_API_KEY}"
+    "EWORKS_SYNC_ATTACHMENTS_ENABLED=${EWORKS_SYNC_ATTACHMENTS_ENABLED:-true}"
+    "EWORKS_SYNC_JOB_DETAILS_ENABLED=${EWORKS_SYNC_JOB_DETAILS_ENABLED:-true}"
+    "EWORKS_SYNC_JOB_DETAILS_ONLY_WITH_APPOINTMENTS=${EWORKS_SYNC_JOB_DETAILS_ONLY_WITH_APPOINTMENTS:-true}"
+    "EWORKS_SYNC_LOOKBACK_DAYS=${EWORKS_SYNC_LOOKBACK_DAYS:-7}"
+    "EWORKS_SYNC_ATTACHMENT_FILES_ENABLED=${EWORKS_SYNC_ATTACHMENT_FILES_ENABLED:-false}"
+  )
+}
+
+require_production_deploy_vars() {
+  require_production_auth_vars
+  if [[ "$SKIP_AUTH_ENV" == false && "$DEPLOY_BACKEND" == true ]]; then
+    validate_production_cors_origins
+    validate_production_eworks_vars
+  fi
+}
+
 resolve_frontend_build_args() {
   if [[ "$DEV_FRONTEND_BUILD" == true ]]; then
     FRONTEND_AUTH_PROVIDER="dev"
@@ -155,17 +224,92 @@ resolve_frontend_build_args() {
 }
 
 update_backend_auth_env() {
-  echo "==> Updating backend auth env on $API_APP..."
+  echo "==> Updating API env on $API_APP (auth, CORS, eWorks, no background scheduler)..."
+  local -a api_env=(
+    "ENVIRONMENT=production"
+    "CORS_ORIGINS=$PRODUCTION_CORS_ORIGINS"
+    "AUTH_PROVIDER=azure"
+    "DEV_AUTH_ENABLED=false"
+    "AZURE_TENANT_ID=$AZURE_TENANT_ID"
+    "AZURE_API_CLIENT_ID=$AZURE_API_CLIENT_ID"
+    "RUN_BACKGROUND_WORKER=false"
+    "EWORKS_BACKGROUND_SYNC_ENABLED=false"
+  )
+  if [[ "${EWORKS_API_ENABLED:-}" == "true" || "${EWORKS_API_ENABLED:-}" == "1" ]]; then
+    append_shared_eworks_env_vars
+    api_env+=("${SHARED_EWORKS_ENV[@]}")
+  fi
   az containerapp update \
     --name "$API_APP" \
     --resource-group "$RESOURCE_GROUP" \
-    --set-env-vars \
-      "AUTH_PROVIDER=azure" \
-      "DEV_AUTH_ENABLED=false" \
-      "AZURE_TENANT_ID=$AZURE_TENANT_ID" \
-      "AZURE_API_CLIENT_ID=$AZURE_API_CLIENT_ID" \
+    --set-env-vars "${api_env[@]}" \
     >/dev/null
-  echo "    AUTH_PROVIDER=azure DEV_AUTH_ENABLED=false (tenant + API client set)"
+  echo "    API: ENVIRONMENT=production, CORS + eWorks from $DEPLOY_ENV_FILE, scheduler disabled"
+}
+
+get_container_app_env_value() {
+  local app_name=$1
+  local var_name=$2
+  az containerapp show \
+    --name "$app_name" \
+    --resource-group "$RESOURCE_GROUP" \
+    --query "properties.template.containers[0].env[?name=='$var_name'].value | [0]" \
+    -o tsv 2>/dev/null || true
+}
+
+update_worker_sync_env() {
+  echo "==> Updating worker env on $WORKER_APP..."
+  if ! az containerapp show --name "$WORKER_APP" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
+    echo "    Warning: Container App '$WORKER_APP' not found — create it first (see docs/AZURE_DEPLOYMENT.md)" >&2
+    return 1
+  fi
+
+  local api_database_url
+  api_database_url="$(get_container_app_env_value "$API_APP" "DATABASE_URL")"
+  if [[ -z "$api_database_url" ]]; then
+    echo "    Error: DATABASE_URL not set on $API_APP" >&2
+    return 1
+  fi
+
+  local -a worker_env=(
+    "DATABASE_URL=$api_database_url"
+    "ENVIRONMENT=production"
+    "CORS_ORIGINS=$PRODUCTION_CORS_ORIGINS"
+    "RUN_BACKGROUND_WORKER=true"
+    "EWORKS_BACKGROUND_SYNC_ENABLED=true"
+    "WEB_CONCURRENCY=1"
+    "EWORKS_BACKGROUND_CUSTOMERS_ENABLED=true"
+    "EWORKS_CUSTOMERS_SYNC_INTERVAL_MINUTES=720"
+    "EWORKS_BACKGROUND_QUOTES_ENABLED=true"
+    "EWORKS_QUOTES_SYNC_INTERVAL_MINUTES=15"
+    "EWORKS_BACKGROUND_JOBS_ENABLED=true"
+    "EWORKS_JOBS_SYNC_INTERVAL_MINUTES=60"
+    "EWORKS_BACKGROUND_PRODUCTS_ENABLED=true"
+    "EWORKS_PRODUCTS_SYNC_INTERVAL_MINUTES=1440"
+    "EWORKS_SYNC_LOCK_TIMEOUT_MINUTES=30"
+    "EWORKS_SYNC_LOCK_HEARTBEAT_SECONDS=60"
+  )
+
+  if [[ "${EWORKS_API_ENABLED:-}" == "true" || "${EWORKS_API_ENABLED:-}" == "1" ]]; then
+    append_shared_eworks_env_vars
+    worker_env+=("${SHARED_EWORKS_ENV[@]}")
+  fi
+
+  az containerapp update \
+    --name "$WORKER_APP" \
+    --resource-group "$RESOURCE_GROUP" \
+    --min-replicas 1 \
+    --max-replicas 1 \
+    --set-env-vars "${worker_env[@]}" \
+    >/dev/null
+
+  local worker_database_url
+  worker_database_url="$(get_container_app_env_value "$WORKER_APP" "DATABASE_URL")"
+  if [[ "$worker_database_url" != "$api_database_url" ]]; then
+    echo "    Error: worker DATABASE_URL does not match API after update" >&2
+    return 1
+  fi
+  echo "    Worker: ENVIRONMENT=production, CORS from $DEPLOY_ENV_FILE, DATABASE_URL matches API, scheduler enabled (min=1 max=1)"
 }
 
 print_validation_steps() {
@@ -193,11 +337,11 @@ fi
 
 if [[ "$SKIP_BUILD" == false && "$DEPLOY_FRONTEND" == true && "$DEV_FRONTEND_BUILD" == false ]]; then
   load_production_env
-  require_production_auth_vars
+  require_production_deploy_vars
   resolve_frontend_build_args
 elif [[ "$SKIP_AUTH_ENV" == false && "$DEPLOY_BACKEND" == true ]]; then
   load_production_env
-  require_production_auth_vars
+  require_production_deploy_vars
 elif [[ "$DEV_FRONTEND_BUILD" == true ]]; then
   FRONTEND_AUTH_PROVIDER="dev"
   FRONTEND_AZURE_TENANT_ID=""
@@ -302,10 +446,18 @@ fi
 
 if [[ "$SKIP_AUTH_ENV" == false && "$DEPLOY_BACKEND" == true ]]; then
   update_backend_auth_env
+  if [[ "$DEPLOY_WORKER" == true ]]; then
+    update_worker_sync_env || true
+  fi
 fi
 
 if [[ "$DEPLOY_BACKEND" == true ]]; then
   update_container_app "$API_APP" "$BACKEND_IMAGE"
+  if [[ "$DEPLOY_WORKER" == true ]]; then
+    if az containerapp show --name "$WORKER_APP" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
+      update_container_app "$WORKER_APP" "$BACKEND_IMAGE"
+    fi
+  fi
 fi
 
 if [[ "$DEPLOY_FRONTEND" == true ]]; then
@@ -315,6 +467,9 @@ fi
 if [[ "$AZ_NO_WAIT" == true ]]; then
   if [[ "$DEPLOY_BACKEND" == true ]]; then
     wait_for_revision "$API_APP" "$BACKEND_IMAGE" || true
+    if [[ "$DEPLOY_WORKER" == true ]]; then
+      wait_for_revision "$WORKER_APP" "$BACKEND_IMAGE" || true
+    fi
   fi
   if [[ "$DEPLOY_FRONTEND" == true ]]; then
     wait_for_revision "$WEB_APP" "$FRONTEND_IMAGE" || true

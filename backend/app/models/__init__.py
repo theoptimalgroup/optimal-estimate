@@ -2,7 +2,15 @@ from app.models.calculation_session import CalculationSession
 from app.models.calculation_session_version import CalculationSessionVersion
 from app.models.client import Client
 from app.models.client_alias import ClientAlias
-from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksJobAppointment, EworksQuote, EworksSyncRun
+from app.models.eworks_sync import (
+    EworksAttachment,
+    EworksCustomer,
+    EworksJob,
+    EworksJobAppointment,
+    EworksQuote,
+    EworksSyncLock,
+    EworksSyncRun,
+)
 from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.quote_job_assignment import QuoteJobAssignment
 from app.models.selected_estimate_decision import SelectedEstimateDecision
@@ -41,6 +49,7 @@ __all__ = [
     "EworksJobAppointment",
     "EworksCustomer",
     "EworksSyncRun",
+    "EworksSyncLock",
     "EworksAttachment",
     "EworksQuoteAssignment",
     "QuoteJobAssignment",

@@ -17,15 +17,29 @@ export type EworksBackgroundSyncConfig = {
   enabled: boolean;
   worker_enabled: boolean;
   scheduler_active: boolean;
+  customers_enabled: boolean;
   quotes_enabled: boolean;
   jobs_enabled: boolean;
   products_enabled: boolean;
   attachments_enabled: boolean;
+  customers_interval_minutes: number;
   quotes_interval_minutes: number;
   jobs_interval_minutes: number;
   products_interval_minutes: number;
   lookback_days: number;
   running_timeout_minutes: number;
+  lock_timeout_minutes: number;
+  lock_heartbeat_seconds: number;
+};
+
+export type EworksSyncLock = {
+  sync_type: string;
+  locked_by: string | null;
+  status: string;
+  started_at: string | null;
+  heartbeat_at: string | null;
+  expires_at: string | null;
+  is_stale: boolean;
 };
 
 export type EworksBackgroundSyncLastRun = {
@@ -55,6 +69,9 @@ export type EworksSyncStatus = {
   active_sync?: EworksActiveSync | null;
   background_sync: EworksBackgroundSyncConfig;
   last_background_sync?: EworksBackgroundSyncLastRun | null;
+  active_sync_locks?: EworksSyncLock[];
+  stale_lock_warning?: boolean;
+  last_successful_syncs?: Record<string, EworksBackgroundSyncLastRun | null>;
 };
 
 export type EworksSyncStartResponse = {

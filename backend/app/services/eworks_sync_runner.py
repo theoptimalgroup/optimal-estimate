@@ -11,6 +11,12 @@ from app.core.exceptions import AppError
 from app.db.session import SessionLocal
 from app.models.eworks_sync import EworksSyncRun
 from app.services.audit_helpers import record_audit
+from app.services.eworks_sync_lock_service import (
+    SYNC_LOCK_ACTIVE_MESSAGE,
+    release_sync_lock,
+    touch_sync_lock_heartbeat,
+    try_acquire_sync_lock,
+)
 from app.services.eworks_sync_run_state import (
     clear_stale_running_sync_locks,
     fail_sync_run,
@@ -51,6 +57,10 @@ def _audit_action_for_type(sync_type: str, phase: str) -> str:
         return f"eworks_jobs_sync_{phase}"
     if sync_type == "customers":
         return f"eworks_customers_sync_{phase}"
+    if sync_type == "products":
+        return f"eworks_products_sync_{phase}"
+    if sync_type == "appointments":
+        return f"eworks_appointments_sync_{phase}"
     return f"eworks_quotes_sync_{phase}"
 
 
@@ -63,6 +73,11 @@ def get_running_sync_run(db) -> EworksSyncRun | None:
     )
 
 
+def _progress_with_lock(db, run: EworksSyncRun, sync_type: str, **kwargs) -> None:
+    touch_sync_lock_heartbeat(db, sync_type, commit=False)
+    update_sync_run_progress(db, run, **kwargs)
+
+
 def schedule_eworks_sync(
     db,
     *,
@@ -71,6 +86,7 @@ def schedule_eworks_sync(
     user_id: str | uuid.UUID | None,
     actor_email: str | None = None,
     source: str = "manual",
+    locked_by: str | None = None,
 ) -> EworksSyncRun:
     """Create a sync run record and execute sync in a background thread."""
     if sync_type not in {"quotes", "jobs", "customers", "all"}:
@@ -80,11 +96,11 @@ def schedule_eworks_sync(
 
     existing = get_running_sync_run(db)
     if existing is not None:
-        raise AppError(
-            "SYNC_ALREADY_RUNNING",
-            "Another eWorks sync is already running. Wait for it to finish or check Recent Sync Runs.",
-            409,
-        )
+        raise AppError("SYNC_ALREADY_RUNNING", SYNC_LOCK_ACTIVE_MESSAGE, 409)
+
+    lock = try_acquire_sync_lock(db, sync_type, locked_by=locked_by)
+    if lock is None:
+        raise AppError("SYNC_ALREADY_RUNNING", SYNC_LOCK_ACTIVE_MESSAGE, 409)
 
     parsed_user_id = _parse_user_id(user_id)
     run = _start_run(db, sync_type=sync_type, user_id=parsed_user_id)
@@ -115,6 +131,14 @@ def schedule_eworks_sync(
     return run
 
 
+def _run_job_appointment_backfill(db, run: EworksSyncRun | None = None) -> None:
+    from app.services.eworks_job_detail_sync_service import backfill_job_appointments_from_details
+
+    if run is not None:
+        _progress_with_lock(db, run, "jobs", phase="appointments_backfill", commit=True)
+    backfill_job_appointments_from_details(db)
+
+
 def _run_sync_worker(
     run_id: uuid.UUID,
     sync_type: str,
@@ -124,14 +148,16 @@ def _run_sync_worker(
 ) -> None:
     db = SessionLocal()
     run: EworksSyncRun | None = None
+    lock_status = "success"
     try:
         run = db.get(EworksSyncRun, run_id)
         if run is None:
             logger.error("Background sync run %s not found", run_id)
+            lock_status = "failed"
             return
 
         run.metadata_ = {**(run.metadata_ or {}), "phase": "running"}
-        update_sync_run_progress(db, run, phase="running", commit=True)
+        _progress_with_lock(db, run, sync_type, phase="running", commit=True)
 
         if sync_type == "quotes":
             summary, _ = sync_quotes_from_eworks(db, filters=filters, user_id=user_id, run=run)
@@ -176,6 +202,12 @@ def _run_sync_worker(
         if sync_type == "jobs":
             summary, _ = sync_jobs_from_eworks(db, filters=filters, user_id=user_id, run=run)
             db.commit()
+            try:
+                _run_job_appointment_backfill(db, run)
+                db.commit()
+            except Exception:
+                logger.exception("Job appointment backfill failed after jobs sync run_id=%s", run_id)
+                db.rollback()
             record_audit(
                 db,
                 actor=None,
@@ -195,6 +227,12 @@ def _run_sync_worker(
 
         result = sync_all_eworks(db, filters=filters, user_id=user_id, run=run)
         db.commit()
+        try:
+            _run_job_appointment_backfill(db, run)
+            db.commit()
+        except Exception:
+            logger.exception("Job appointment backfill failed after all sync run_id=%s", run_id)
+            db.rollback()
         record_audit(
             db,
             actor=None,
@@ -211,6 +249,7 @@ def _run_sync_worker(
         )
         db.commit()
     except Exception as exc:
+        lock_status = "failed"
         logger.exception("Background eWorks sync failed run_id=%s type=%s", run_id, sync_type)
         db.rollback()
         try:
@@ -234,6 +273,8 @@ def _run_sync_worker(
             run = db.get(EworksSyncRun, run_id)
             if run is not None and run.status == "running":
                 fail_sync_run(db, run, error_message=_UNEXPECTED_EXIT_MESSAGE, commit=True)
+                lock_status = "failed"
+            release_sync_lock(db, sync_type, status=lock_status, commit=True)
         except Exception:
             logger.exception("Failed to finalize background sync run run_id=%s", run_id)
             db.rollback()

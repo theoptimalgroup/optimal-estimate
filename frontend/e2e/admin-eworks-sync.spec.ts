@@ -104,16 +104,23 @@ const MOCK_IDLE_STATUS = {
     enabled: false,
     worker_enabled: false,
     scheduler_active: false,
+    customers_enabled: false,
     quotes_enabled: false,
     jobs_enabled: false,
     products_enabled: false,
     attachments_enabled: false,
-    quotes_interval_minutes: 10,
-    jobs_interval_minutes: 30,
+    customers_interval_minutes: 720,
+    quotes_interval_minutes: 15,
+    jobs_interval_minutes: 60,
     products_interval_minutes: 1440,
     lookback_days: 7,
     running_timeout_minutes: 30,
+    lock_timeout_minutes: 30,
+    lock_heartbeat_seconds: 60,
   },
+  active_sync_locks: [],
+  stale_lock_warning: false,
+  last_successful_syncs: {},
   last_background_sync: null,
 };
 
@@ -143,6 +150,10 @@ async function clearEworksSyncSessionStorage(page: Page) {
 async function proxyEworksSyncReads(page: Page) {
   await page.route("**/api/v1/eworks-sync/**", async (route) => {
     if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    if (route.request().url().includes("/eworks-sync/status")) {
       await route.fallback();
       return;
     }
@@ -355,6 +366,7 @@ test.describe("Admin: /admin/eworks-sync", () => {
   test.beforeEach(async ({ page }) => {
     await clearEworksSyncSessionStorage(page);
     await mockAuthMe(page, "admin");
+    await mockIdleEworksSyncStatus(page);
     await proxyEworksSyncReads(page);
   });
 

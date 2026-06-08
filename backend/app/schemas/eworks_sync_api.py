@@ -173,15 +173,29 @@ class EworksBackgroundSyncConfigRead(BaseModel):
     enabled: bool
     worker_enabled: bool
     scheduler_active: bool
+    customers_enabled: bool = True
     quotes_enabled: bool
     jobs_enabled: bool
     products_enabled: bool
     attachments_enabled: bool
+    customers_interval_minutes: int = 720
     quotes_interval_minutes: int
     jobs_interval_minutes: int
     products_interval_minutes: int
     lookback_days: int
     running_timeout_minutes: int
+    lock_timeout_minutes: int = 30
+    lock_heartbeat_seconds: int = 60
+
+
+class EworksSyncLockRead(BaseModel):
+    sync_type: str
+    locked_by: str | None = None
+    status: str
+    started_at: str | None = None
+    heartbeat_at: str | None = None
+    expires_at: str | None = None
+    is_stale: bool = False
 
 
 class EworksBackgroundSyncLastRunRead(BaseModel):
@@ -211,6 +225,9 @@ class EworksSyncStatusResponse(BaseModel):
     active_sync: EworksActiveSyncRun | None = None
     background_sync: EworksBackgroundSyncConfigRead
     last_background_sync: EworksBackgroundSyncLastRunRead | None = None
+    active_sync_locks: list[EworksSyncLockRead] = []
+    stale_lock_warning: bool = False
+    last_successful_syncs: dict[str, EworksBackgroundSyncLastRunRead | None] = {}
 
 
 class EworksQuoteDetailRead(EworksQuoteRead):

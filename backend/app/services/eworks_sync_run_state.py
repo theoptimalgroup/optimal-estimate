@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.eworks_sync import EworksSyncRun
+from app.services.eworks_sync_lock_service import clear_stale_sync_locks
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +38,22 @@ def is_running_lock_stale(run: EworksSyncRun, *, now: datetime | None = None) ->
     if run.status != "running" or run.finished_at is not None:
         return False
 
+    now = now or _utcnow()
+    metadata = run.metadata_ or {}
+    heartbeat_raw = metadata.get("last_heartbeat_at")
+    if heartbeat_raw:
+        try:
+            heartbeat = datetime.fromisoformat(str(heartbeat_raw))
+            heartbeat = _normalize_utc(heartbeat)
+            if heartbeat is not None and now - heartbeat > timedelta(minutes=_running_timeout_minutes()):
+                return True
+        except ValueError:
+            pass
+
     started_at = _normalize_utc(run.started_at)
     if started_at is None:
         return True
 
-    now = now or _utcnow()
     return now - started_at > timedelta(minutes=_running_timeout_minutes())
 
 
@@ -73,6 +85,7 @@ def fail_sync_run(
 
 def clear_stale_running_sync_locks(db: Session) -> int:
     """Mark stale running sync rows as failed so new syncs can start."""
+    clear_stale_sync_locks(db)
     now = _utcnow()
     running = db.query(EworksSyncRun).filter(EworksSyncRun.status == "running").all()
     cleared = 0

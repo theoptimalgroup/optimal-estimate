@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     eworks_sync_attachments_enabled: bool = False
     eworks_sync_attachment_files_enabled: bool = False
     eworks_sync_running_timeout_minutes: int = 30
+    eworks_sync_lock_timeout_minutes: int = 30
+    eworks_sync_lock_heartbeat_seconds: int = 60
     eworks_sync_lookback_days: int = 7
     eworks_sync_job_details_enabled: bool = False
     eworks_sync_job_details_only_with_appointments: bool = True
@@ -65,12 +67,14 @@ class Settings(BaseSettings):
 
     # Background eWorks sync scheduler (disabled by default; enable on one worker only)
     eworks_background_sync_enabled: bool = False
+    eworks_background_customers_enabled: bool = True
     eworks_background_quotes_enabled: bool = True
     eworks_background_jobs_enabled: bool = True
     eworks_background_products_enabled: bool = False
     eworks_background_attachments_enabled: bool = True
-    eworks_quotes_sync_interval_minutes: int = 10
-    eworks_jobs_sync_interval_minutes: int = 30
+    eworks_customers_sync_interval_minutes: int = 720
+    eworks_quotes_sync_interval_minutes: int = 15
+    eworks_jobs_sync_interval_minutes: int = 60
     eworks_products_sync_interval_minutes: int = 1440
     run_background_worker: bool = False
 

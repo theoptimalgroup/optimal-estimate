@@ -32,15 +32,19 @@ class EworksBackgroundSyncSettingsRead(BaseModel):
     enabled: bool = False
     worker_enabled: bool = False
     scheduler_active: bool = False
+    customers_enabled: bool = True
     quotes_enabled: bool = True
     jobs_enabled: bool = True
     products_enabled: bool = False
     attachments_enabled: bool = True
-    quotes_interval_minutes: int = 10
-    jobs_interval_minutes: int = 30
+    customers_interval_minutes: int = 720
+    quotes_interval_minutes: int = 15
+    jobs_interval_minutes: int = 60
     products_interval_minutes: int = 1440
     lookback_days: int = 7
     running_timeout_minutes: int = 30
+    lock_timeout_minutes: int = 30
+    lock_heartbeat_seconds: int = 60
 
 
 class EworksSettingsRead(BaseModel):

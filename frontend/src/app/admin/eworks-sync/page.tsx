@@ -235,19 +235,37 @@ function BackgroundSyncPanel({
 }) {
   const bg = status.background_sync;
   const last = status.last_background_sync;
+  const locks = status.active_sync_locks ?? [];
 
   return (
     <SectionCard title="Background Sync" testId="eworks-sync-background-config">
+      {status.stale_lock_warning ? (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="background-sync-stale-warning">
+          A stale sync lock was detected. It will be cleared automatically before the next sync attempt.
+        </p>
+      ) : null}
       <dl className="grid gap-3 sm:grid-cols-2">
         <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</dt>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Worker</dt>
           <dd className="mt-1 text-sm text-slate-900" data-testid="background-sync-status">
-            {bg.scheduler_active ? "Active" : bg.enabled ? "Enabled (worker inactive)" : "Disabled"}
+            {bg.scheduler_active
+              ? "Active (dedicated worker)"
+              : bg.worker_enabled
+                ? "Worker enabled (scheduler inactive on this instance)"
+                : bg.enabled
+                  ? "Enabled (worker inactive)"
+                  : "Disabled"}
           </dd>
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Lookback window</dt>
           <dd className="mt-1 text-sm text-slate-900">{bg.lookback_days} days</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Customers</dt>
+          <dd className="mt-1 text-sm text-slate-900">
+            {bg.customers_enabled ? `Every ${bg.customers_interval_minutes} minutes` : "Disabled"}
+          </dd>
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Quotes</dt>
@@ -265,6 +283,14 @@ function BackgroundSyncPanel({
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Products</dt>
           <dd className="mt-1 text-sm text-slate-900">
             {bg.products_enabled ? `Every ${bg.products_interval_minutes} minutes` : "Disabled"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Active locks</dt>
+          <dd className="mt-1 text-sm text-slate-900" data-testid="background-sync-active-locks">
+            {locks.length > 0
+              ? locks.map((lock) => `${lock.sync_type} (${lock.locked_by ?? "unknown"})`).join(", ")
+              : "None"}
           </dd>
         </div>
         <div>

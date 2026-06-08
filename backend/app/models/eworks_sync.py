@@ -203,6 +203,25 @@ class EworksSyncRun(Base):
     metadata_: Mapped[dict | None] = mapped_column("metadata", _json_col())
 
 
+class EworksSyncLock(Base):
+    """Database-backed lock for eWorks sync jobs (background worker + manual sync)."""
+
+    __tablename__ = "eworks_sync_locks"
+    __table_args__ = (Index("ix_eworks_sync_locks_status", "status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sync_type: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    locked_by: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class EworksAttachment(Base):
     """Metadata mirror of eWorks quote/job attachments (read-only sync; files not downloaded by default)."""
 

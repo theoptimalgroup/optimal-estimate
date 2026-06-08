@@ -34,6 +34,7 @@ from app.schemas.eworks_sync_api import (
     EworksQuoteRead,
     EworksQuoteSafeDetailRead,
     EworksSyncRequest,
+    EworksSyncLockRead,
     EworksSyncRunRead,
     EworksSyncStartResponse,
     EworksSyncStatusResponse,
@@ -42,7 +43,13 @@ from app.services.eworks_sync_runner import get_running_sync_run, schedule_ework
 from app.services.background_sync_scheduler import (
     build_background_sync_config,
     get_last_background_sync_run,
+    get_last_successful_sync_runs,
     serialize_background_sync_run,
+)
+from app.services.eworks_sync_lock_service import (
+    get_active_sync_locks,
+    has_stale_running_locks,
+    serialize_sync_lock,
 )
 from app.services.eworks_sync_run_state import clear_stale_running_sync_locks, fail_sync_run
 from app.services.eworks_attachment_sync_service import (
@@ -347,6 +354,13 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
     active = get_running_sync_run(db)
     background_config = build_background_sync_config()
     last_background = serialize_background_sync_run(get_last_background_sync_run(db))
+    active_locks = [EworksSyncLockRead(**serialize_sync_lock(lock)) for lock in get_active_sync_locks(db)]
+    stale_warning = has_stale_running_locks(db)
+    last_successful_raw = get_last_successful_sync_runs(db)
+    last_successful = {
+        key: EworksBackgroundSyncLastRunRead(**value) if value else None
+        for key, value in last_successful_raw.items()
+    }
 
     return success_response(
         EworksSyncStatusResponse(
@@ -364,6 +378,9 @@ def get_sync_status(db: DbSession, actor: AdminOnly):
             last_background_sync=(
                 EworksBackgroundSyncLastRunRead(**last_background) if last_background else None
             ),
+            active_sync_locks=active_locks,
+            stale_lock_warning=stale_warning,
+            last_successful_syncs=last_successful,
         ).model_dump()
     )
 

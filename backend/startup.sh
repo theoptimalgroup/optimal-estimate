@@ -53,6 +53,13 @@ fi
 WORKERS="${WEB_CONCURRENCY:-2}"
 PORT="${PORT:-8000}"
 
+if [[ "${RUN_BACKGROUND_WORKER:-false}" == "true" ]]; then
+  WORKERS=1
+  echo "[startup] Background worker mode: forcing WEB_CONCURRENCY=1"
+fi
+
+echo "[startup] RUN_BACKGROUND_WORKER=${RUN_BACKGROUND_WORKER:-false}"
+echo "[startup] EWORKS_BACKGROUND_SYNC_ENABLED=${EWORKS_BACKGROUND_SYNC_ENABLED:-false}"
 echo "[startup] Starting Gunicorn with ${WORKERS} workers on port ${PORT}..."
 exec gunicorn app.main:app \
   --workers "${WORKERS}" \
