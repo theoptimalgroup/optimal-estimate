@@ -28,6 +28,10 @@ class ManagerDashboardCategories(BaseModel):
     new_quotes: ManagerDashboardCategory
     awaiting_supplier: ManagerDashboardCategory
     ready_to_send: ManagerDashboardCategory
+    booked: ManagerDashboardCategory
+    must_attend: ManagerDashboardCategory
+    awaiting_desktop_info: ManagerDashboardCategory
+    awaiting_internal_info: ManagerDashboardCategory
 
 
 class ManagerDashboardTotals(BaseModel):

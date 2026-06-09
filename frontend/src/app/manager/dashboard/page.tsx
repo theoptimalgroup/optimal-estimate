@@ -13,7 +13,11 @@ import {
   StatCard,
 } from "@/components/ui";
 import {
+  AWAITING_DESKTOP_INFO_TAG,
+  AWAITING_INTERNAL_INFO_TAG,
   AWAITING_SUPPLIER_TAG,
+  BOOKED_TAG,
+  MUST_ATTEND_TAG,
   READY_TO_SEND_TAG,
   buildQuotesFilterUrl,
   getManagerDashboard,
@@ -125,6 +129,34 @@ export default function ManagerDashboardPage() {
                 className="border-t-2 border-t-emerald-500"
               />
             </div>
+            <div data-testid="kpi-booked">
+              <StatCard
+                label="Booked"
+                value={dashboard.categories.booked.count}
+                className="border-t-2 border-t-violet-500"
+              />
+            </div>
+            <div data-testid="kpi-must-attend">
+              <StatCard
+                label="Must Attend"
+                value={dashboard.categories.must_attend.count}
+                className="border-t-2 border-t-rose-500"
+              />
+            </div>
+            <div data-testid="kpi-awaiting-desktop-info">
+              <StatCard
+                label="Awaiting Desktop Info"
+                value={dashboard.categories.awaiting_desktop_info.count}
+                className="border-t-2 border-t-teal-500"
+              />
+            </div>
+            <div data-testid="kpi-awaiting-internal-info">
+              <StatCard
+                label="Awaiting Internal Info"
+                value={dashboard.categories.awaiting_internal_info.count}
+                className="border-t-2 border-t-orange-500"
+              />
+            </div>
             <div data-testid="kpi-last-sync">
               <StatCard
                 label="Last Sync"
@@ -167,6 +199,42 @@ export default function ManagerDashboardPage() {
               viewAllHref: buildQuotesFilterUrl({ type: "quotes", status: "1", tag: READY_TO_SEND_TAG }),
               testId: "category-ready-to-send",
               viewAllTestId: "view-all-ready_to_send",
+            }}
+            booked={{
+              title: "Booked",
+              count: dashboard.categories.booked.count,
+              filteredCount: dashboard.categories.booked.filtered_count,
+              quotes: dashboard.categories.booked.quotes,
+              viewAllHref: buildQuotesFilterUrl({ type: "quotes", status: "1", tag: BOOKED_TAG }),
+              testId: "category-booked",
+              viewAllTestId: "view-all-booked",
+            }}
+            mustAttend={{
+              title: "Must Attend",
+              count: dashboard.categories.must_attend.count,
+              filteredCount: dashboard.categories.must_attend.filtered_count,
+              quotes: dashboard.categories.must_attend.quotes,
+              viewAllHref: buildQuotesFilterUrl({ type: "quotes", status: "1", tag: MUST_ATTEND_TAG }),
+              testId: "category-must-attend",
+              viewAllTestId: "view-all-must_attend",
+            }}
+            awaitingDesktopInfo={{
+              title: "Awaiting Desktop Info",
+              count: dashboard.categories.awaiting_desktop_info.count,
+              filteredCount: dashboard.categories.awaiting_desktop_info.filtered_count,
+              quotes: dashboard.categories.awaiting_desktop_info.quotes,
+              viewAllHref: buildQuotesFilterUrl({ type: "quotes", status: "1", tag: AWAITING_DESKTOP_INFO_TAG }),
+              testId: "category-awaiting-desktop-info",
+              viewAllTestId: "view-all-awaiting_desktop_info",
+            }}
+            awaitingInternalInfo={{
+              title: "Awaiting Internal Info",
+              count: dashboard.categories.awaiting_internal_info.count,
+              filteredCount: dashboard.categories.awaiting_internal_info.filtered_count,
+              quotes: dashboard.categories.awaiting_internal_info.quotes,
+              viewAllHref: buildQuotesFilterUrl({ type: "quotes", status: "1", tag: AWAITING_INTERNAL_INFO_TAG }),
+              testId: "category-awaiting-internal-info",
+              viewAllTestId: "view-all-awaiting_internal_info",
             }}
             onQuoteClick={(id) => void openQuoteDetail(id)}
           />

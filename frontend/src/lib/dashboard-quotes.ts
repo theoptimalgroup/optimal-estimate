@@ -1,5 +1,9 @@
 export const AWAITING_SUPPLIER_TAG = "Awaiting Supplier Info (Quotes)";
 export const READY_TO_SEND_TAG = "Quotes Ready to send (Quotes)";
+export const MUST_ATTEND_TAG = "Must Attend (Quotes)";
+export const BOOKED_TAG = "Booked (Quotes)";
+export const AWAITING_DESKTOP_INFO_TAG = "Awaiting Desktop Info (Quotes)";
+export const AWAITING_INTERNAL_INFO_TAG = "Awaiting Internal Info (Quotes)";
 
 export type DashboardQuoteRow = {
   id: number;
@@ -26,6 +30,10 @@ export type OperationalDashboardData = {
     new_quotes: DashboardCategory;
     awaiting_supplier: DashboardCategory;
     ready_to_send: DashboardCategory;
+    booked: DashboardCategory;
+    must_attend: DashboardCategory;
+    awaiting_desktop_info: DashboardCategory;
+    awaiting_internal_info: DashboardCategory;
   };
   last_synced_at: string | null;
   totals: {

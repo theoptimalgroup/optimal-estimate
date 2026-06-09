@@ -18,11 +18,19 @@ from app.main import app
 from app.models.eworks_sync import EworksQuote
 from app.models.user import User
 from app.services.manager_dashboard_service import (
+    AWAITING_DESKTOP_INFO_TAG,
+    AWAITING_INTERNAL_INFO_TAG,
     AWAITING_SUPPLIER_TAG,
+    BOOKED_TAG,
+    MUST_ATTEND_TAG,
     READY_TO_SEND_TAG,
     classify_eworks_quote_bucket,
     extract_all_tags,
+    is_awaiting_desktop_info_tag,
+    is_awaiting_internal_info_tag,
     is_awaiting_supplier_tag,
+    is_booked_tag,
+    is_must_attend_tag,
     is_ready_to_send_tag,
     normalize_tag_text,
 )
@@ -778,3 +786,240 @@ def test_dashboard_search_excludes_non_draft_quotes(mock_settings, api_client, d
     assert data["categories"]["new_quotes"]["filtered_count"] == 1
     assert data["categories"]["new_quotes"]["quotes"][0]["quote_ref"] == "Q-DRAFT-MATCH"
     assert data["quotes_excluded_non_draft"] == 1
+
+
+# ---------------------------------------------------------------------------
+# New tag-based bucket classification tests
+# ---------------------------------------------------------------------------
+
+
+def test_classify_must_attend_tag_with_draft():
+    """Draft + Must Attend tag → must_attend bucket."""
+    quote = _make_quote(status="1", tags=[MUST_ATTEND_TAG])
+    assert classify_eworks_quote_bucket(quote) == "must_attend"
+
+
+def test_classify_booked_tag_with_draft():
+    """Draft + Booked tag → booked bucket."""
+    quote = _make_quote(status="1", tags=[BOOKED_TAG])
+    assert classify_eworks_quote_bucket(quote) == "booked"
+
+
+def test_classify_awaiting_desktop_info_tag_with_draft():
+    """Draft + Awaiting Desktop Info tag → awaiting_desktop_info bucket."""
+    quote = _make_quote(status="1", tags=[AWAITING_DESKTOP_INFO_TAG])
+    assert classify_eworks_quote_bucket(quote) == "awaiting_desktop_info"
+
+
+def test_classify_awaiting_internal_info_tag_with_draft():
+    """Draft + Awaiting Internal Info tag → awaiting_internal_info bucket."""
+    quote = _make_quote(status="1", tags=[AWAITING_INTERNAL_INFO_TAG])
+    assert classify_eworks_quote_bucket(quote) == "awaiting_internal_info"
+
+
+def test_classify_must_attend_tag_non_draft_excluded():
+    """Non-draft + Must Attend tag → excluded (None)."""
+    quote = _make_quote(status="2", tags=[MUST_ATTEND_TAG])
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_booked_tag_non_draft_excluded():
+    """Non-draft + Booked tag → excluded (None)."""
+    quote = _make_quote(status="2", tags=[BOOKED_TAG])
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_priority_ready_over_must_attend():
+    """Draft + Ready to Send + Must Attend → ready_to_send wins."""
+    quote = _make_quote(status="1", tags=[READY_TO_SEND_TAG, MUST_ATTEND_TAG])
+    assert classify_eworks_quote_bucket(quote) == "ready_to_send"
+
+
+def test_classify_priority_booked_over_must_attend():
+    """Draft + Booked + Must Attend → booked wins."""
+    quote = _make_quote(status="1", tags=[BOOKED_TAG, MUST_ATTEND_TAG])
+    assert classify_eworks_quote_bucket(quote) == "booked"
+
+
+def test_classify_priority_awaiting_supplier_over_awaiting_desktop():
+    """Draft + Awaiting Supplier + Awaiting Desktop Info → awaiting_supplier wins."""
+    quote = _make_quote(status="1", tags=[AWAITING_SUPPLIER_TAG, AWAITING_DESKTOP_INFO_TAG])
+    assert classify_eworks_quote_bucket(quote) == "awaiting_supplier"
+
+
+def test_is_must_attend_tag_case_insensitive():
+    assert is_must_attend_tag("MUST ATTEND (QUOTES)")
+    assert is_must_attend_tag("Must Attend (Quotes)")
+    assert is_must_attend_tag("must attend")
+
+
+def test_is_booked_tag_case_insensitive():
+    assert is_booked_tag("BOOKED (QUOTES)")
+    assert is_booked_tag("Booked (Quotes)")
+
+
+def test_is_awaiting_desktop_info_tag_case_insensitive():
+    assert is_awaiting_desktop_info_tag("AWAITING DESKTOP INFO (QUOTES)")
+    assert is_awaiting_desktop_info_tag("Awaiting Desktop Info (Quotes)")
+
+
+def test_is_awaiting_internal_info_tag_case_insensitive():
+    assert is_awaiting_internal_info_tag("AWAITING INTERNAL INFO (QUOTES)")
+    assert is_awaiting_internal_info_tag("Awaiting Internal Info (Quotes)")
+
+
+@patch("app.auth.dependencies.settings")
+def test_dashboard_api_includes_all_seven_bucket_categories(mock_settings, api_client):
+    """API response categories include all 7 bucket keys."""
+    _patch_dev_user(mock_settings, role="manager")
+    resp = api_client.get("/api/v1/manager/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    expected_buckets = {
+        "new_quotes",
+        "awaiting_supplier",
+        "ready_to_send",
+        "booked",
+        "must_attend",
+        "awaiting_desktop_info",
+        "awaiting_internal_info",
+    }
+    assert set(data["categories"].keys()) == expected_buckets
+
+
+@patch("app.auth.dependencies.settings")
+def test_dashboard_bucketed_quotes_total_includes_all_seven_buckets(
+    mock_settings, api_client, db_session
+):
+    """totals.all_open_quotes sums across all 7 buckets."""
+    _patch_dev_user(mock_settings, role="manager")
+    synced = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            EworksQuote(
+                eworks_quote_id=701,
+                quote_ref="Q-NEW",
+                status="1",
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=702,
+                quote_ref="Q-AWAIT",
+                status="1",
+                tags=[AWAITING_SUPPLIER_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=703,
+                quote_ref="Q-READY",
+                status="1",
+                tags=[READY_TO_SEND_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=704,
+                quote_ref="Q-BOOKED",
+                status="1",
+                tags=[BOOKED_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=705,
+                quote_ref="Q-MUST",
+                status="1",
+                tags=[MUST_ATTEND_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=706,
+                quote_ref="Q-DESKTOP",
+                status="1",
+                tags=[AWAITING_DESKTOP_INFO_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=707,
+                quote_ref="Q-INTERNAL",
+                status="1",
+                tags=[AWAITING_INTERNAL_INFO_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    resp = api_client.get("/api/v1/manager/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["totals"]["all_open_quotes"] == 7
+    assert data["categories"]["booked"]["count"] == 1
+    assert data["categories"]["must_attend"]["count"] == 1
+    assert data["categories"]["awaiting_desktop_info"]["count"] == 1
+    assert data["categories"]["awaiting_internal_info"]["count"] == 1
+
+
+@patch("app.auth.dependencies.settings")
+def test_search_finds_quotes_in_new_buckets(mock_settings, api_client, db_session):
+    """Search by customer name works across all new buckets."""
+    _patch_dev_user(mock_settings, role="manager")
+    synced = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            EworksQuote(
+                eworks_quote_id=801,
+                quote_ref="Q-BOOKED-SEARCH",
+                customer_name="Foxglove Ltd",
+                status="1",
+                tags=[BOOKED_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=802,
+                quote_ref="Q-MUST-SEARCH",
+                customer_name="Redwood Corp",
+                status="1",
+                tags=[MUST_ATTEND_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=803,
+                quote_ref="Q-DESKTOP-SEARCH",
+                customer_name="Pinewood Inc",
+                status="1",
+                tags=[AWAITING_DESKTOP_INFO_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=804,
+                quote_ref="Q-INTERNAL-SEARCH",
+                customer_name="Elmwood PLC",
+                status="1",
+                tags=[AWAITING_INTERNAL_INFO_TAG],
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    for ref, bucket, term in [
+        ("Q-BOOKED-SEARCH", "booked", "foxglove"),
+        ("Q-MUST-SEARCH", "must_attend", "redwood"),
+        ("Q-DESKTOP-SEARCH", "awaiting_desktop_info", "pinewood"),
+        ("Q-INTERNAL-SEARCH", "awaiting_internal_info", "elmwood"),
+    ]:
+        resp = api_client.get("/api/v1/manager/dashboard", params={"search": term})
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["categories"][bucket]["filtered_count"] == 1, f"bucket={bucket} term={term}"
+        assert data["categories"][bucket]["quotes"][0]["quote_ref"] == ref

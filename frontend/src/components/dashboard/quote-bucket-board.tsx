@@ -6,7 +6,7 @@ import type { KeyboardEvent } from "react";
 import { DateText, TagBadges } from "@/components/ui";
 import type { DashboardQuoteRow } from "@/lib/dashboard-quotes";
 
-type BucketAccent = "blue" | "amber" | "emerald";
+type BucketAccent = "blue" | "amber" | "emerald" | "rose" | "violet" | "teal" | "orange";
 
 const ACCENT_STYLES: Record<
   BucketAccent,
@@ -23,6 +23,22 @@ const ACCENT_STYLES: Record<
   emerald: {
     border: "border-t-emerald-500",
     badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  },
+  rose: {
+    border: "border-t-rose-500",
+    badge: "bg-rose-50 text-rose-700 ring-rose-200",
+  },
+  violet: {
+    border: "border-t-violet-500",
+    badge: "bg-violet-50 text-violet-700 ring-violet-200",
+  },
+  teal: {
+    border: "border-t-teal-500",
+    badge: "bg-teal-50 text-teal-700 ring-teal-200",
+  },
+  orange: {
+    border: "border-t-orange-500",
+    badge: "bg-orange-50 text-orange-700 ring-orange-200",
   },
 };
 
@@ -188,81 +204,67 @@ export function QuoteBucketColumn({
   );
 }
 
+type BucketColumnData = {
+  title: string;
+  count: number;
+  filteredCount?: number | null;
+  quotes: DashboardQuoteRow[];
+  viewAllHref: string;
+  testId: string;
+  viewAllTestId: string;
+};
+
 export function QuoteBucketBoard({
   newQuotes,
   awaitingSupplier,
   readyToSend,
+  booked,
+  mustAttend,
+  awaitingDesktopInfo,
+  awaitingInternalInfo,
   searchActive = false,
   onQuoteClick,
 }: {
-  newQuotes: {
-    title: string;
-    count: number;
-    filteredCount?: number | null;
-    quotes: DashboardQuoteRow[];
-    viewAllHref: string;
-    testId: string;
-    viewAllTestId: string;
-  };
-  awaitingSupplier: {
-    title: string;
-    count: number;
-    filteredCount?: number | null;
-    quotes: DashboardQuoteRow[];
-    viewAllHref: string;
-    testId: string;
-    viewAllTestId: string;
-  };
-  readyToSend: {
-    title: string;
-    count: number;
-    filteredCount?: number | null;
-    quotes: DashboardQuoteRow[];
-    viewAllHref: string;
-    testId: string;
-    viewAllTestId: string;
-  };
+  newQuotes: BucketColumnData;
+  awaitingSupplier: BucketColumnData;
+  readyToSend: BucketColumnData;
+  booked: BucketColumnData;
+  mustAttend: BucketColumnData;
+  awaitingDesktopInfo: BucketColumnData;
+  awaitingInternalInfo: BucketColumnData;
   searchActive?: boolean;
   onQuoteClick: (id: number) => void;
 }) {
+  const columns: Array<BucketColumnData & { accent: BucketAccent }> = [
+    { ...newQuotes, accent: "blue" },
+    { ...awaitingSupplier, accent: "amber" },
+    { ...readyToSend, accent: "emerald" },
+    { ...booked, accent: "violet" },
+    { ...mustAttend, accent: "rose" },
+    { ...awaitingDesktopInfo, accent: "teal" },
+    { ...awaitingInternalInfo, accent: "orange" },
+  ];
+
   return (
-    <div className="grid gap-6 xl:grid-cols-3" data-testid="quote-bucket-board">
-      <QuoteBucketColumn
-        title={newQuotes.title}
-        accent="blue"
-        count={newQuotes.count}
-        filteredCount={newQuotes.filteredCount}
-        searchActive={searchActive}
-        quotes={newQuotes.quotes}
-        viewAllHref={newQuotes.viewAllHref}
-        testId={newQuotes.testId}
-        viewAllTestId={newQuotes.viewAllTestId}
-        onQuoteClick={onQuoteClick}
-      />
-      <QuoteBucketColumn
-        title={awaitingSupplier.title}
-        accent="amber"
-        count={awaitingSupplier.count}
-        filteredCount={awaitingSupplier.filteredCount}
-        searchActive={searchActive}
-        quotes={awaitingSupplier.quotes}
-        viewAllHref={awaitingSupplier.viewAllHref}
-        testId={awaitingSupplier.testId}
-        viewAllTestId={awaitingSupplier.viewAllTestId}
-        onQuoteClick={onQuoteClick}
-      />
-      <QuoteBucketColumn
-        title={readyToSend.title}
-        accent="emerald"
-        count={readyToSend.count}
-        filteredCount={readyToSend.filteredCount}
-        searchActive={searchActive}
-        quotes={readyToSend.quotes}
-        viewAllHref={readyToSend.viewAllHref}
-        testId={readyToSend.testId}
-        viewAllTestId={readyToSend.viewAllTestId}
-        onQuoteClick={onQuoteClick}
-      />
+    <div
+      className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      data-testid="quote-bucket-board"
+    >
+      {columns.map((col) => (
+        <QuoteBucketColumn
+          key={col.testId}
+          title={col.title}
+          accent={col.accent}
+          count={col.count}
+          filteredCount={col.filteredCount}
+          searchActive={searchActive}
+          quotes={col.quotes}
+          viewAllHref={col.viewAllHref}
+          testId={col.testId}
+          viewAllTestId={col.viewAllTestId}
+          onQuoteClick={onQuoteClick}
+        />
+      ))}
     </div>
   );
 }

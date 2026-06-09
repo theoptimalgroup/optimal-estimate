@@ -13,9 +13,20 @@ from app.models.eworks_sync import EworksQuote
 
 AWAITING_SUPPLIER_TAG = "Awaiting Supplier Info (Quotes)"
 READY_TO_SEND_TAG = "Quotes Ready to send (Quotes)"
+MUST_ATTEND_TAG = "Must Attend (Quotes)"
+BOOKED_TAG = "Booked (Quotes)"
+AWAITING_DESKTOP_INFO_TAG = "Awaiting Desktop Info (Quotes)"
+AWAITING_INTERNAL_INFO_TAG = "Awaiting Internal Info (Quotes)"
 
-QuoteBucket = Literal["new_quotes", "awaiting_supplier", "ready_to_send"]
-MatchReason = Literal["draft_no_tags", "tag_awaiting_supplier", "tag_ready_to_send"]
+QuoteBucket = Literal[
+    "new_quotes", "awaiting_supplier", "ready_to_send",
+    "booked", "must_attend", "awaiting_desktop_info", "awaiting_internal_info",
+]
+MatchReason = Literal[
+    "status_1", "tag_ready_to_send", "tag_awaiting_supplier", "tag_booked",
+    "tag_must_attend", "tag_awaiting_desktop_info", "tag_awaiting_internal_info",
+    "draft_no_tags",
+]
 
 _FETCH_LIMIT = 2000
 
@@ -37,6 +48,22 @@ def is_ready_to_send_tag(tag: str) -> bool:
 def is_awaiting_supplier_tag(tag: str) -> bool:
     """True when tag text indicates an Awaiting Supplier bucket tag."""
     return "awaiting supplier" in normalize_tag_text(tag)
+
+
+def is_must_attend_tag(tag: str) -> bool:
+    return "must attend" in normalize_tag_text(tag)
+
+
+def is_booked_tag(tag: str) -> bool:
+    return "booked" in normalize_tag_text(tag)
+
+
+def is_awaiting_desktop_info_tag(tag: str) -> bool:
+    return "awaiting desktop info" in normalize_tag_text(tag)
+
+
+def is_awaiting_internal_info_tag(tag: str) -> bool:
+    return "awaiting internal info" in normalize_tag_text(tag)
 
 
 def _value_is_one(value: object | None) -> bool:
@@ -164,11 +191,23 @@ def classify_eworks_quote_bucket_with_reason(
 
     tags = extract_all_tags(quote)
 
-    if any(is_ready_to_send_tag(tag) for tag in tags):
+    if any(is_ready_to_send_tag(t) for t in tags):
         return "ready_to_send", "tag_ready_to_send"
 
-    if any(is_awaiting_supplier_tag(tag) for tag in tags):
+    if any(is_booked_tag(t) for t in tags):
+        return "booked", "tag_booked"
+
+    if any(is_must_attend_tag(t) for t in tags):
+        return "must_attend", "tag_must_attend"
+
+    if any(is_awaiting_supplier_tag(t) for t in tags):
         return "awaiting_supplier", "tag_awaiting_supplier"
+
+    if any(is_awaiting_desktop_info_tag(t) for t in tags):
+        return "awaiting_desktop_info", "tag_awaiting_desktop_info"
+
+    if any(is_awaiting_internal_info_tag(t) for t in tags):
+        return "awaiting_internal_info", "tag_awaiting_internal_info"
 
     if quote_has_no_tags(quote):
         return "new_quotes", "draft_no_tags"
@@ -319,6 +358,10 @@ def get_manager_dashboard(
         "new_quotes": [],
         "awaiting_supplier": [],
         "ready_to_send": [],
+        "booked": [],
+        "must_attend": [],
+        "awaiting_desktop_info": [],
+        "awaiting_internal_info": [],
     }
 
     quotes_excluded_non_draft = 0

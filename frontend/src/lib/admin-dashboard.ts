@@ -1,11 +1,22 @@
 import { apiFetch } from "@/lib/api";
 import {
+  AWAITING_DESKTOP_INFO_TAG,
+  AWAITING_INTERNAL_INFO_TAG,
   AWAITING_SUPPLIER_TAG,
+  BOOKED_TAG,
+  MUST_ATTEND_TAG,
   READY_TO_SEND_TAG,
   type OperationalDashboardData,
 } from "@/lib/dashboard-quotes";
 
-export { AWAITING_SUPPLIER_TAG, READY_TO_SEND_TAG };
+export {
+  AWAITING_DESKTOP_INFO_TAG,
+  AWAITING_INTERNAL_INFO_TAG,
+  AWAITING_SUPPLIER_TAG,
+  BOOKED_TAG,
+  MUST_ATTEND_TAG,
+  READY_TO_SEND_TAG,
+};
 
 export type AdminDashboardStats = {
   users: number;
