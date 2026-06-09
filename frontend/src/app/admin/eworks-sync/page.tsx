@@ -47,6 +47,7 @@ import {
   triggerCustomersSync,
   triggerJobsSync,
   triggerQuotesSync,
+  triggerQuotesIncrementalSync,
   type EworksSyncBucketSummary,
   type EworksSyncResult,
   type EworksSyncRunRecord,
@@ -65,7 +66,7 @@ import {
 } from "@/lib/products";
 
 type TabId = "sync" | "customers" | "quotes" | "jobs" | "products";
-type SyncType = "customers" | "quotes" | "jobs" | "all";
+type SyncType = "customers" | "quotes" | "quotes_incremental" | "jobs" | "all";
 
 const PAGE_SIZE = 50;
 const POLL_INTERVAL_MS = 2500;
@@ -224,6 +225,7 @@ type SyncTabProps = {
   fullSync: boolean;
   onFullSyncChange: (value: boolean) => void;
   onSync: (type: SyncType) => void;
+  onIncrementalQuotesSync: () => void;
   productSyncing: boolean;
   productSyncSummary: ProductSyncSummary | null;
   productSyncError: string | null;
@@ -272,7 +274,11 @@ function BackgroundSyncPanel({
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Quotes</dt>
           <dd className="mt-1 text-sm text-slate-900">
-            {bg.quotes_enabled ? `Every ${bg.quotes_interval_minutes} minutes` : "Disabled"}
+            {bg.quotes_enabled
+              ? bg.quotes_sync_mode === "incremental_recent"
+                ? `Incremental recent · every ${bg.quotes_interval_minutes} min · last ${bg.quotes_recent_window_minutes ?? 60} min · ${bg.quotes_timeout_seconds ?? 120}s timeout`
+                : `Full sync · every ${bg.quotes_interval_minutes} minutes`
+              : "Disabled"}
           </dd>
         </div>
         <div>
@@ -320,6 +326,7 @@ function SyncTab({
   fullSync,
   onFullSyncChange,
   onSync,
+  onIncrementalQuotesSync,
   productSyncing,
   productSyncSummary,
   productSyncError,
@@ -451,13 +458,29 @@ function SyncTab({
               disabled={!!syncing || productSyncing}
               data-testid="btn-sync-quotes"
               className="h-10"
+              title="Full historical quote sync — walks all pages. Use for initial import or repair."
             >
               {syncing === "quotes" ? (
                 <span className="flex items-center gap-2">
                   <RefreshCw className="h-4 w-4 animate-spin" /> Starting…
                 </span>
               ) : (
-                "Quotes"
+                "Full Quote Sync (slow)"
+              )}
+            </SecondaryButton>
+            <SecondaryButton
+              onClick={onIncrementalQuotesSync}
+              disabled={!!syncing || productSyncing}
+              data-testid="btn-sync-quotes-incremental"
+              className="h-10"
+              title="Incremental sync — only quotes updated in the last hour. Fast, same as background scheduler."
+            >
+              {syncing === "quotes_incremental" ? (
+                <span className="flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin" /> Starting…
+                </span>
+              ) : (
+                "Sync Recent Quotes Now"
               )}
             </SecondaryButton>
             <SecondaryButton
@@ -1395,6 +1418,20 @@ export default function EworksSyncPage() {
     [fullSync, loadOverview, startTracking]
   );
 
+  const handleIncrementalQuotesSync = useCallback(async () => {
+    setSyncing("quotes_incremental");
+    setSyncError(null);
+    setLastResult(null);
+    try {
+      const started = await triggerQuotesIncrementalSync();
+      startTracking(started.run_id, "quotes_incremental");
+      void loadOverview();
+    } catch (e: unknown) {
+      setSyncError(e instanceof Error ? e.message : "Incremental quotes sync failed");
+      setSyncing(null);
+    }
+  }, [loadOverview, startTracking]);
+
   const handleProductSync = useCallback(async () => {
     setProductSyncing(true);
     setProductSyncError(null);
@@ -1468,6 +1505,7 @@ export default function EworksSyncPage() {
           fullSync={fullSync}
           onFullSyncChange={setFullSync}
           onSync={handleSync}
+          onIncrementalQuotesSync={() => void handleIncrementalQuotesSync()}
           productSyncing={productSyncing}
           productSyncSummary={productSyncSummary}
           productSyncError={productSyncError}

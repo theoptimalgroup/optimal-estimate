@@ -186,6 +186,13 @@ class EworksBackgroundSyncConfigRead(BaseModel):
     running_timeout_minutes: int
     lock_timeout_minutes: int = 30
     lock_heartbeat_seconds: int = 60
+    max_pages: int = 0
+    # Incremental quote sync
+    quotes_sync_mode: str = "incremental_recent"
+    quotes_recent_window_minutes: int = 60
+    quotes_timeout_seconds: int = 120
+    attachments_during_quote_sync: bool = False
+    quote_appointments_during_quote_sync: bool = False
 
 
 class EworksSyncLockRead(BaseModel):

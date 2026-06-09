@@ -30,6 +30,12 @@ export type EworksBackgroundSyncConfig = {
   running_timeout_minutes: number;
   lock_timeout_minutes: number;
   lock_heartbeat_seconds: number;
+  // Incremental quote sync
+  quotes_sync_mode?: string | null;
+  quotes_recent_window_minutes?: number | null;
+  quotes_timeout_seconds?: number | null;
+  attachments_during_quote_sync?: boolean | null;
+  quote_appointments_during_quote_sync?: boolean | null;
 };
 
 export type EworksSyncLock = {
@@ -311,6 +317,14 @@ export async function triggerQuotesSync(req: EworksSyncRequest = {}): Promise<Ew
   const resp = await apiFetch<EworksSyncStartResponse>(
     "/api/v1/eworks-sync/quotes",
     { method: "POST", body: JSON.stringify(req) }
+  );
+  return resp.data;
+}
+
+export async function triggerQuotesIncrementalSync(): Promise<EworksSyncStartResponse> {
+  const resp = await apiFetch<EworksSyncStartResponse>(
+    "/api/v1/eworks-sync/quotes/incremental",
+    { method: "POST" }
   );
   return resp.data;
 }

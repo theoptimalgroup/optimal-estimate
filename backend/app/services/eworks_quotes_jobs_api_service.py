@@ -19,7 +19,7 @@ from app.schemas.eworks_sync_api import EworksSyncApiResponse
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PER_PAGE = 100
-_MAX_PAGES = 500  # safety ceiling
+_MAX_PAGES = 500  # legacy fallback; overridden by EWORKS_API_MAX_PAGES (0 = unlimited)
 
 
 @dataclass
@@ -137,6 +137,16 @@ def _fetch_page(
     )
 
 
+def _effective_max_pages() -> int:
+    """Return the page ceiling: EWORKS_API_MAX_PAGES if set, else _MAX_PAGES fallback. 0 means unlimited."""
+    configured = int(settings.eworks_api_max_pages or 0)
+    if configured > 0:
+        return configured
+    if configured == 0:
+        return 0
+    return _MAX_PAGES
+
+
 def _fetch_all(
     *,
     resource_path: str,
@@ -150,7 +160,13 @@ def _fetch_all(
 
     base_url, api_key = _require_eworks_credentials()
     url = f"{base_url}/{resource_path.lstrip('/')}"
-    ceiling = min(page_limit or _MAX_PAGES, _MAX_PAGES)
+    effective_max = _effective_max_pages()
+    if page_limit is not None:
+        ceiling = page_limit if effective_max == 0 else min(page_limit, effective_max)
+    elif effective_max > 0:
+        ceiling = effective_max
+    else:
+        ceiling = None  # truly unlimited
 
     all_records: list[dict[str, Any]] = []
     page = 1
@@ -158,7 +174,7 @@ def _fetch_all(
     pages_fetched = 0
 
     with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
-        while page <= last_page and pages_fetched < ceiling:
+        while page <= last_page and (ceiling is None or pages_fetched < ceiling):
             result = _fetch_page(
                 client,
                 url=url,
@@ -187,14 +203,46 @@ def _fetch_all(
 
             page = result.current_page + 1
 
-    if pages_fetched >= ceiling:
+    if ceiling is not None and pages_fetched >= ceiling:
         logger.warning(
-            "eWorks %s: hit page_limit=%s safety ceiling; may not have fetched all records",
+            "eWorks %s: hit page_limit=%s ceiling; may not have fetched all records",
             resource_path,
             ceiling,
         )
 
     return all_records
+
+
+@dataclass
+class QuotePageResult:
+    """Single-page fetch result for incremental sync loops."""
+    records: list[dict[str, Any]]
+    current_page: int
+    last_page: int
+
+
+def fetch_quote_page(
+    page: int = 1,
+    *,
+    per_page: int = _DEFAULT_PER_PAGE,
+    extra_params: dict[str, Any] | None = None,
+) -> QuotePageResult:
+    """Fetch a single page of Quotes from eWorks. Used by incremental sync."""
+    if not settings.eworks_api_enabled:
+        raise AppError("EWORKS_API_DISABLED", "eWorks API is disabled (EWORKS_API_ENABLED=false)", 503)
+
+    base_url, api_key = _require_eworks_credentials()
+    url = f"{base_url}/Quote"
+    with httpx.Client(timeout=settings.eworks_api_timeout_seconds) as client:
+        result = _fetch_page(
+            client, url=url, api_key=api_key, page=page,
+            per_page=per_page, extra_params=extra_params,
+        )
+    return QuotePageResult(
+        records=result.records,
+        current_page=result.current_page,
+        last_page=result.last_page,
+    )
 
 
 def fetch_all_quotes(

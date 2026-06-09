@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     eworks_api_request_delay_seconds: float = 0.2
     eworks_api_max_retries: int = 3
     eworks_api_retry_backoff_seconds: float = 2.0
+    eworks_api_max_pages: int = 0
     eworks_customers_resource_path: str = "Customer"
     eworks_sync_attachments_enabled: bool = False
     eworks_sync_attachment_files_enabled: bool = False
@@ -69,6 +70,17 @@ class Settings(BaseSettings):
     eworks_sync_job_details_limit_per_run: int | None = None
     eworks_sync_sales_appointments_enabled: bool = False
     eworks_sync_quote_details_for_appointments_enabled: bool = False
+
+    # Quote incremental recent sync (background 1-minute sync mode)
+    eworks_quotes_sync_mode: str = "incremental_recent"  # incremental_recent | full
+    eworks_quotes_sync_recent_window_minutes: int = 60
+    eworks_quotes_sync_timeout_seconds: int = 120
+
+    # Controls whether heavy per-quote child API calls run during background/automatic quote sync.
+    # Defaults False to keep the 1-minute incremental sync lightweight.
+    # Set True to re-enable during manual/full quote syncs if needed, or use the backfill endpoints.
+    eworks_sync_attachments_during_quote_sync: bool = False
+    eworks_sync_quote_appointments_during_quote_sync: bool = False
 
     # Background eWorks sync scheduler (disabled by default; enable on one worker only)
     eworks_background_sync_enabled: bool = False

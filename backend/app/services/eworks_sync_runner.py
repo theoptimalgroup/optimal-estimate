@@ -28,6 +28,7 @@ from app.services.eworks_sync_service import (
     sync_customers_from_eworks,
     sync_jobs_from_eworks,
     sync_quotes_from_eworks,
+    sync_quotes_incremental_recent,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,16 +88,22 @@ def schedule_eworks_sync(
     actor_email: str | None = None,
     source: str = "manual",
     locked_by: str | None = None,
+    check_global_running: bool = True,
 ) -> EworksSyncRun:
-    """Create a sync run record and execute sync in a background thread."""
+    """Create a sync run record and execute sync in a background thread.
+
+    check_global_running=False skips the global running-sync guard so that
+    an incremental quotes sync can proceed even while another sync type runs.
+    """
     if sync_type not in {"quotes", "jobs", "customers", "all"}:
         raise AppError("INVALID_SYNC_TYPE", f"Unsupported sync type: {sync_type}", 400)
 
     clear_stale_running_sync_locks(db)
 
-    existing = get_running_sync_run(db)
-    if existing is not None:
-        raise AppError("SYNC_ALREADY_RUNNING", SYNC_LOCK_ACTIVE_MESSAGE, 409)
+    if check_global_running:
+        existing = get_running_sync_run(db)
+        if existing is not None:
+            raise AppError("SYNC_ALREADY_RUNNING", SYNC_LOCK_ACTIVE_MESSAGE, 409)
 
     lock = try_acquire_sync_lock(db, sync_type, locked_by=locked_by)
     if lock is None:
@@ -160,7 +167,17 @@ def _run_sync_worker(
         _progress_with_lock(db, run, sync_type, phase="running", commit=True)
 
         if sync_type == "quotes":
-            summary, _ = sync_quotes_from_eworks(db, filters=filters, user_id=user_id, run=run)
+            mode = (filters or {}).get("mode", "full")
+            if mode == "incremental_recent":
+                summary, _ = sync_quotes_incremental_recent(
+                    db,
+                    window_minutes=int((filters or {}).get("recent_window_minutes", 60)),
+                    timeout_seconds=int((filters or {}).get("timeout_seconds", 120)),
+                    user_id=user_id,
+                    run=run,
+                )
+            else:
+                summary, _ = sync_quotes_from_eworks(db, filters=filters, user_id=user_id, run=run)
             db.commit()
             record_audit(
                 db,

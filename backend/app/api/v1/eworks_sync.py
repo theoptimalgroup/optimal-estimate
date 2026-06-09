@@ -261,8 +261,47 @@ def trigger_quotes_sync(
     actor: AdminOnly,
     req: EworksSyncRequest = EworksSyncRequest(),
 ):
-    """Start background sync of eWorks Quotes into local DB (admin only, read-only from eWorks)."""
+    """Start a full background sync of eWorks Quotes into local DB (admin only, read-only from eWorks)."""
     return _start_background_sync(db, actor, "quotes", req)
+
+
+@router.post("/quotes/incremental")
+def trigger_quotes_incremental_sync(
+    db: DbSession,
+    actor: AdminOnly,
+):
+    """Start an incremental quotes sync (last-1-hour window, no full pagination).
+
+    This is the same mode used by the background 1-minute scheduler.
+    Useful for manual admin trigger without walking all historical pages.
+    """
+    from app.core.config import settings as cfg
+
+    filters = {
+        "mode": "incremental_recent",
+        "recent_window_minutes": max(1, int(cfg.eworks_quotes_sync_recent_window_minutes)),
+        "timeout_seconds": max(30, int(cfg.eworks_quotes_sync_timeout_seconds)),
+    }
+    try:
+        run = schedule_eworks_sync(
+            db,
+            sync_type="quotes",
+            filters=filters,
+            user_id=actor.id,
+            actor_email=actor.email,
+            check_global_running=False,
+        )
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    return success_response(
+        EworksSyncStartResponse(
+            run_id=str(run.id),
+            sync_type="quotes",
+            status="running",
+            message="Incremental quotes sync started (last-1-hour window). Poll /eworks-sync/runs/{run_id} for progress.",
+        ).model_dump()
+    )
 
 
 @router.post("/jobs")

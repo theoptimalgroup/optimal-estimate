@@ -57,6 +57,13 @@ def build_background_sync_config() -> dict[str, Any]:
         "running_timeout_minutes": max(1, int(settings.eworks_sync_running_timeout_minutes)),
         "lock_timeout_minutes": max(1, int(settings.eworks_sync_lock_timeout_minutes)),
         "lock_heartbeat_seconds": max(15, int(settings.eworks_sync_lock_heartbeat_seconds)),
+        "max_pages": max(0, int(settings.eworks_api_max_pages)),
+        # Incremental quote sync config
+        "quotes_sync_mode": settings.eworks_quotes_sync_mode,
+        "quotes_recent_window_minutes": max(1, int(settings.eworks_quotes_sync_recent_window_minutes)),
+        "quotes_timeout_seconds": max(30, int(settings.eworks_quotes_sync_timeout_seconds)),
+        "attachments_during_quote_sync": settings.eworks_sync_attachments_during_quote_sync,
+        "quote_appointments_during_quote_sync": settings.eworks_sync_quote_appointments_during_quote_sync,
     }
 
 
@@ -71,6 +78,14 @@ def _prepare_sync_session(db) -> bool:
 
 def _background_sync_filters() -> dict[str, Any]:
     return resolve_sync_filters(full=False)
+
+
+def _background_incremental_quotes_filters() -> dict[str, Any]:
+    return {
+        "mode": "incremental_recent",
+        "recent_window_minutes": max(1, int(settings.eworks_quotes_sync_recent_window_minutes)),
+        "timeout_seconds": max(30, int(settings.eworks_quotes_sync_timeout_seconds)),
+    }
 
 
 def _schedule_background_sync(sync_type: str) -> None:
@@ -99,6 +114,37 @@ def _schedule_background_sync(sync_type: str) -> None:
         db.close()
 
 
+def _schedule_incremental_quotes_sync() -> None:
+    """Schedule a quotes incremental sync that only blocks on a quotes-specific lock.
+
+    Unlike _schedule_background_sync, this does NOT abort when another sync type is
+    running — allowing the 1-minute quote sync to proceed alongside e.g. a jobs sync.
+    """
+    db = SessionLocal()
+    try:
+        clear_stale_running_sync_locks(db)
+        schedule_eworks_sync(
+            db,
+            sync_type="quotes",
+            filters=_background_incremental_quotes_filters(),
+            user_id=None,
+            actor_email="background-scheduler",
+            source="background",
+            locked_by=get_worker_id(),
+            check_global_running=False,
+        )
+        logger.info("Background incremental quotes sync scheduled")
+    except AppError as exc:
+        if exc.code == "SYNC_ALREADY_RUNNING":
+            logger.info("Skipped incremental quotes sync: quotes sync already running")
+        else:
+            logger.exception("Background incremental quotes sync failed to start: %s", exc.message)
+    except Exception:
+        logger.exception("Background incremental quotes sync failed unexpectedly")
+    finally:
+        db.close()
+
+
 def run_background_customers_sync() -> None:
     if not settings.eworks_background_customers_enabled:
         return
@@ -114,7 +160,11 @@ def run_background_quotes_sync() -> None:
     if not settings.eworks_api_enabled:
         logger.info("Skipped background quotes sync: eWorks API disabled")
         return
-    _schedule_background_sync("quotes")
+
+    if settings.eworks_quotes_sync_mode == "incremental_recent":
+        _schedule_incremental_quotes_sync()
+    else:
+        _schedule_background_sync("quotes")
 
 
 def run_background_jobs_sync() -> None:

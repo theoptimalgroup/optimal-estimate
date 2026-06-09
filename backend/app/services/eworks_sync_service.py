@@ -6,6 +6,8 @@ Never writes back to eWorks. Never overwrites local CalculationSession data.
 from __future__ import annotations
 
 import logging
+import re
+import time as _time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -18,7 +20,7 @@ from app.models.eworks_sync import EworksCustomer, EworksJob, EworksQuote, Ework
 from app.schemas.eworks_sync_api import EworksSyncBucketSummary, EworksSyncSummary
 from app.services.eworks_attachment_sync_service import sync_parent_attachments
 from app.services.eworks_customers_api_service import fetch_all_customers
-from app.services.eworks_quotes_jobs_api_service import fetch_all_jobs, fetch_all_quotes
+from app.services.eworks_quotes_jobs_api_service import fetch_all_jobs, fetch_all_quotes, fetch_quote_page
 from app.services.eworks_sync_run_state import (
     _PROGRESS_COMMIT_EVERY,
     update_sync_run_progress,
@@ -27,6 +29,50 @@ from app.services.eworks_sync_run_state import (
 logger = logging.getLogger(__name__)
 
 SYNC_DEFAULT_DAYS = 7
+
+_FRACTIONAL_SECONDS_RE = re.compile(r"\.\d+")
+
+
+def _parse_eworks_datetime(value: str | None) -> datetime | None:
+    """Parse an eWorks ISO-8601 datetime string to a UTC-aware datetime.
+
+    Handles fractional seconds (e.g. "2024-01-15T10:30:00.123456") by stripping
+    them before parsing, matching the behaviour of the verified jq filter.
+    Returns None when value is absent, empty, or unparseable (caller counts these).
+    """
+    if not value:
+        return None
+    try:
+        stripped = _FRACTIONAL_SECONDS_RE.sub("", str(value).strip())
+        dt = datetime.fromisoformat(stripped)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, AttributeError):
+        return None
+
+
+def _is_quote_recent(raw: dict[str, Any], cutoff: datetime) -> tuple[bool, bool]:
+    """Return (is_recent, has_invalid_date).
+
+    is_recent  – True when created_on OR last_updated_on >= cutoff.
+    has_invalid_date – True when at least one date field exists but neither could be parsed.
+    """
+    created_str = raw.get("created_on")
+    updated_str = raw.get("last_updated_on")
+
+    created_dt = _parse_eworks_datetime(created_str)
+    updated_dt = _parse_eworks_datetime(updated_str)
+
+    has_invalid_date = bool(
+        (created_str and created_dt is None) or (updated_str and updated_dt is None)
+    )
+
+    is_recent = (
+        (created_dt is not None and created_dt >= cutoff)
+        or (updated_dt is not None and updated_dt >= cutoff)
+    )
+    return is_recent, has_invalid_date
 
 
 def default_sync_lookback_days() -> int:
@@ -645,9 +691,23 @@ def _upsert_quotes(
     records: list[dict[str, Any]],
     *,
     run: EworksSyncRun | None = None,
+    skip_child_sync: bool = False,
 ) -> EworksSyncBucketSummary:
+    """Upsert a list of raw eWorks Quote payloads into the local DB.
+
+    skip_child_sync=True skips per-quote attachment and appointment API calls.
+    When False, per-quote calls are also gated by
+    eworks_sync_attachments_during_quote_sync / eworks_sync_quote_appointments_during_quote_sync.
+    """
     summary = EworksSyncBucketSummary(fetched=len(records))
     now = datetime.now(timezone.utc)
+
+    fetch_attachments = (
+        not skip_child_sync and settings.eworks_sync_attachments_during_quote_sync
+    )
+    fetch_appointments = (
+        not skip_child_sync and settings.eworks_sync_quote_appointments_during_quote_sync
+    )
 
     if run is not None:
         update_sync_run_progress(
@@ -688,6 +748,7 @@ def _upsert_quotes(
                 db.flush()
                 summary.updated += 1
 
+            # Always sync lightweight embedded attachment metadata from the list payload
             sync_parent_attachments(
                 db,
                 parent_type="quote",
@@ -696,29 +757,31 @@ def _upsert_quotes(
                 raw_payload=raw,
             )
 
-            try:
-                from app.services.eworks_quote_attachment_sync_service import (
-                    maybe_fetch_quote_attachments_after_list_upsert,
-                )
+            if fetch_attachments:
+                try:
+                    from app.services.eworks_quote_attachment_sync_service import (
+                        maybe_fetch_quote_attachments_after_list_upsert,
+                    )
 
-                maybe_fetch_quote_attachments_after_list_upsert(db, row, raw)
-            except Exception:
-                logger.exception(
-                    "Failed to fetch quote attachments for eWorks Quote id=%s; continuing quote upsert",
-                    eworks_id,
-                )
+                    maybe_fetch_quote_attachments_after_list_upsert(db, row, raw)
+                except Exception:
+                    logger.exception(
+                        "Failed to fetch quote attachments for eWorks Quote id=%s; continuing quote upsert",
+                        eworks_id,
+                    )
 
-            try:
-                from app.services.eworks_quote_appointment_service import (
-                    maybe_fetch_quote_sales_appointments_after_list_upsert,
-                )
+            if fetch_appointments:
+                try:
+                    from app.services.eworks_quote_appointment_service import (
+                        maybe_fetch_quote_sales_appointments_after_list_upsert,
+                    )
 
-                maybe_fetch_quote_sales_appointments_after_list_upsert(db, row, raw)
-            except Exception:
-                logger.exception(
-                    "Failed to fetch quote sales appointments for eWorks Quote id=%s; continuing quote upsert",
-                    eworks_id,
-                )
+                    maybe_fetch_quote_sales_appointments_after_list_upsert(db, row, raw)
+                except Exception:
+                    logger.exception(
+                        "Failed to fetch quote sales appointments for eWorks Quote id=%s; continuing quote upsert",
+                        eworks_id,
+                    )
 
         except Exception as exc:
             logger.exception("Failed to upsert eWorks Quote id=%s: %s", raw.get("id"), exc)
@@ -1037,6 +1100,183 @@ def sync_quotes_from_eworks(
             _finish_run(
                 db,
                 run,
+                status="failed",
+                fetched=summary.fetched,
+                created=summary.created,
+                updated=summary.updated,
+                failed=summary.failed,
+                error_message="Sync ended without completing.",
+            )
+
+    return summary, run
+
+
+def sync_quotes_incremental_recent(
+    db: Session,
+    *,
+    window_minutes: int = 60,
+    timeout_seconds: int = 120,
+    user_id: uuid.UUID | None = None,
+    run: EworksSyncRun | None = None,
+) -> tuple[EworksSyncBucketSummary, EworksSyncRun]:
+    """Incremental quote sync: upsert only quotes created or updated in the last window_minutes.
+
+    Strategy:
+    - Fetches Quote list pages from eWorks without walking all history.
+    - Applies local filtering: created_on >= cutoff OR last_updated_on >= cutoff.
+    - Stops early when a page yields zero recent records (assumes API returns newest first)
+      or when the hard timeout is reached.
+    - Does NOT fetch per-quote attachments or sales appointments (skip_child_sync=True).
+    """
+    if run is None:
+        run = _start_run(db, sync_type="quotes", user_id=user_id)
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=window_minutes)
+    deadline = _time.monotonic() + timeout_seconds
+
+    summary = EworksSyncBucketSummary()
+    source_records_seen = 0
+    skipped_old = 0
+    skipped_invalid_date = 0
+    stopped_reason = "completed"
+    recent_records: list[dict[str, Any]] = []
+
+    run.metadata_ = {
+        **(run.metadata_ or {}),
+        "mode": "incremental_recent",
+        "recent_window_minutes": window_minutes,
+        "timeout_seconds": timeout_seconds,
+        "started_cutoff": cutoff.isoformat(),
+        "attachments_during_sync": False,
+        "quote_appointments_during_sync": False,
+        "phase": "fetching",
+    }
+    db.flush()
+
+    try:
+        update_sync_run_progress(db, run, phase="fetching")
+
+        page = 1
+        last_page = 1
+
+        while page <= last_page:
+            if _time.monotonic() > deadline:
+                stopped_reason = "timeout"
+                logger.warning(
+                    "Incremental quotes sync: reached %ss timeout at page %s/%s; stopping cleanly",
+                    timeout_seconds, page, last_page,
+                )
+                break
+
+            page_result = fetch_quote_page(page)
+            last_page = page_result.last_page
+            source_records_seen += len(page_result.records)
+
+            recent_on_page = 0
+            for raw in page_result.records:
+                is_recent, has_invalid = _is_quote_recent(raw, cutoff)
+                if has_invalid:
+                    skipped_invalid_date += 1
+                    continue
+                if is_recent:
+                    recent_records.append(raw)
+                    recent_on_page += 1
+                else:
+                    skipped_old += 1
+
+            update_sync_run_progress(
+                db, run,
+                phase="fetching",
+                fetched=len(recent_records),
+            )
+
+            logger.info(
+                "Incremental quotes sync: page %s/%s — seen=%s recent=%s total_recent_so_far=%s",
+                page_result.current_page, last_page,
+                len(page_result.records), recent_on_page, len(recent_records),
+            )
+
+            # Early stop: if this page returned no recent records, eWorks API likely returns
+            # records sorted newest-first so all remaining pages will also have no recent records.
+            if recent_on_page == 0 and len(page_result.records) > 0:
+                logger.info(
+                    "Incremental quotes sync: page %s had no recent records; stopping early",
+                    page_result.current_page,
+                )
+                break
+
+            if not page_result.records or page_result.current_page >= last_page:
+                break
+
+            page = page_result.current_page + 1
+
+        # Upsert only the matched recent records; skip expensive per-quote child API calls
+        update_sync_run_progress(db, run, phase="upserting", fetched=len(recent_records))
+        summary = _upsert_quotes(db, recent_records, run=run, skip_child_sync=True)
+
+        if stopped_reason == "timeout":
+            run_status = "partial"
+        elif summary.failed > 0:
+            run_status = "partial"
+        else:
+            run_status = "success"
+
+        _finish_run(
+            db, run,
+            status=run_status,
+            fetched=summary.fetched,
+            created=summary.created,
+            updated=summary.updated,
+            failed=summary.failed,
+        )
+        run.metadata_ = {
+            **(run.metadata_ or {}),
+            "mode": "incremental_recent",
+            "recent_window_minutes": window_minutes,
+            "timeout_seconds": timeout_seconds,
+            "started_cutoff": cutoff.isoformat(),
+            "source_records_seen": source_records_seen,
+            "recent_records_matched": len(recent_records),
+            "skipped_old": skipped_old,
+            "skipped_invalid_date": skipped_invalid_date,
+            "attachments_during_sync": False,
+            "quote_appointments_during_sync": False,
+            "stopped_reason": stopped_reason,
+        }
+        db.flush()
+
+        logger.info(
+            "Incremental quotes sync finished: seen=%s matched=%s created=%s updated=%s "
+            "failed=%s skipped_old=%s skipped_invalid=%s stopped=%s",
+            source_records_seen, len(recent_records),
+            summary.created, summary.updated, summary.failed,
+            skipped_old, skipped_invalid_date, stopped_reason,
+        )
+
+    except Exception as exc:
+        stopped_reason = "api_error"
+        _finish_run(
+            db, run,
+            status="failed",
+            fetched=summary.fetched,
+            created=summary.created,
+            updated=summary.updated,
+            failed=summary.failed,
+            error_message=str(exc),
+        )
+        run.metadata_ = {
+            **(run.metadata_ or {}),
+            "stopped_reason": stopped_reason,
+            "source_records_seen": source_records_seen,
+            "skipped_old": skipped_old,
+            "skipped_invalid_date": skipped_invalid_date,
+        }
+        raise
+    finally:
+        if run.status == "running":
+            _finish_run(
+                db, run,
                 status="failed",
                 fetched=summary.fetched,
                 created=summary.created,
