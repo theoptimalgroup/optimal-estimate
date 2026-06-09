@@ -38,3 +38,4 @@ class ManagerDashboardRead(BaseModel):
     categories: ManagerDashboardCategories
     last_synced_at: str | None
     totals: ManagerDashboardTotals
+    quotes_excluded_non_draft: int = 0

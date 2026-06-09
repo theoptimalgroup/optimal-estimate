@@ -26,6 +26,7 @@ from app.services.manager_dashboard_service import (
     is_ready_to_send_tag,
     normalize_tag_text,
 )
+from app.services.quote_search_service import quote_is_draft
 
 
 @pytest.fixture()
@@ -126,6 +127,75 @@ def _make_quote(**kwargs) -> EworksQuote:
 
 
 # ---------------------------------------------------------------------------
+# quote_is_draft() unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_quote_is_draft_true_for_status_1_string():
+    assert quote_is_draft(_make_quote(status="1")) is True
+
+
+def test_quote_is_draft_true_for_status_1_int():
+    assert quote_is_draft(_make_quote(status=1)) is True
+
+
+def test_quote_is_draft_false_for_status_2():
+    assert quote_is_draft(_make_quote(status="2")) is False
+
+
+def test_quote_is_draft_false_for_status_3():
+    assert quote_is_draft(_make_quote(status="3")) is False
+
+
+def test_quote_is_draft_false_for_status_4():
+    assert quote_is_draft(_make_quote(status="4")) is False
+
+
+def test_quote_is_draft_false_for_status_5():
+    assert quote_is_draft(_make_quote(status="5")) is False
+
+
+def test_quote_is_draft_false_for_status_9():
+    assert quote_is_draft(_make_quote(status="9")) is False
+
+
+def test_quote_is_draft_true_from_raw_payload_status():
+    quote = _make_quote(status=None, raw_payload={"status": "1"})
+    assert quote_is_draft(quote) is True
+
+
+def test_quote_is_draft_true_from_raw_payload_Status_capitalized():
+    quote = _make_quote(status=None, raw_payload={"Status": 1})
+    assert quote_is_draft(quote) is True
+
+
+def test_quote_is_draft_true_from_raw_quote_status_id():
+    quote = _make_quote(status=None, raw_payload={"quote_status": {"id": 1}})
+    assert quote_is_draft(quote) is True
+
+
+def test_quote_is_draft_true_from_raw_quote_status_status():
+    quote = _make_quote(status=None, raw_payload={"quote_status": {"status": "1"}})
+    assert quote_is_draft(quote) is True
+
+
+def test_quote_is_draft_true_from_raw_quote_status_id_camel():
+    quote = _make_quote(status=None, raw_payload={"QuoteStatus": {"id": "1"}})
+    assert quote_is_draft(quote) is True
+
+
+def test_quote_is_draft_false_when_no_status_fields():
+    quote = _make_quote(status=None, status_name=None, raw_payload=None)
+    assert quote_is_draft(quote) is False
+
+
+def test_quote_is_draft_does_not_use_status_name():
+    """status_name alone does not determine draft status."""
+    quote = _make_quote(status=None, status_name="1")
+    assert quote_is_draft(quote) is False
+
+
+# ---------------------------------------------------------------------------
 # Classification unit tests
 # ---------------------------------------------------------------------------
 
@@ -135,14 +205,64 @@ def test_classify_status_one_as_new_quotes():
     assert classify_eworks_quote_bucket(quote) == "new_quotes"
 
 
-def test_classify_awaiting_supplier_tag():
-    quote = _make_quote(status="2", tags=[AWAITING_SUPPLIER_TAG])
+def test_classify_awaiting_supplier_tag_with_draft():
+    """Draft (status=1) + awaiting supplier tag → awaiting_supplier."""
+    quote = _make_quote(status="1", tags=[AWAITING_SUPPLIER_TAG])
     assert classify_eworks_quote_bucket(quote) == "awaiting_supplier"
 
 
-def test_classify_ready_to_send_tag():
-    quote = _make_quote(status="2", tags=[READY_TO_SEND_TAG])
+def test_classify_ready_to_send_tag_with_draft():
+    """Draft (status=1) + ready to send tag → ready_to_send."""
+    quote = _make_quote(status="1", tags=[READY_TO_SEND_TAG])
     assert classify_eworks_quote_bucket(quote) == "ready_to_send"
+
+
+def test_classify_awaiting_supplier_tag_non_draft_excluded():
+    """Non-draft (status=2) is excluded even with awaiting supplier tag."""
+    quote = _make_quote(status="2", tags=[AWAITING_SUPPLIER_TAG])
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_ready_to_send_tag_non_draft_excluded():
+    """Non-draft (status=2) is excluded even with ready to send tag."""
+    quote = _make_quote(status="2", tags=[READY_TO_SEND_TAG])
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_non_draft_no_tags_excluded():
+    """Non-draft (status=2) with no tags is excluded."""
+    quote = _make_quote(status="2")
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_non_draft_status3_awaiting_excluded():
+    """status=3 + awaiting tag → excluded."""
+    quote = _make_quote(status="3", tags=[AWAITING_SUPPLIER_TAG])
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_non_draft_status4_ready_excluded():
+    """status=4 + ready tag → excluded."""
+    quote = _make_quote(status="4", tags=[READY_TO_SEND_TAG])
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_non_draft_status5_ready_excluded():
+    """status=5 + ready tag → excluded."""
+    quote = _make_quote(status="5", tags=[READY_TO_SEND_TAG])
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_non_draft_status9_awaiting_excluded():
+    """status=9 + awaiting tag → excluded."""
+    quote = _make_quote(status="9", tags=[AWAITING_SUPPLIER_TAG])
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_draft_with_random_tag_only_returns_none():
+    """Draft (status=1) with only unrecognised tags is not shown."""
+    quote = _make_quote(status="1", tags=["BILLIE"])
+    assert classify_eworks_quote_bucket(quote) is None
 
 
 def test_classify_ready_to_send_flexible_quote_variant():
@@ -167,8 +287,9 @@ def test_classify_status_one_with_empty_tags():
 
 
 def test_classify_status_one_with_unrelated_tags_only():
+    """Draft with only unrecognised tags → not shown (None)."""
     quote = _make_quote(status="1", tags=["URGENT", "Electrical"])
-    assert classify_eworks_quote_bucket(quote) == "new_quotes"
+    assert classify_eworks_quote_bucket(quote) is None
 
 
 def test_classify_unrelated_tags_without_status_one_returns_none():
@@ -199,7 +320,7 @@ def test_normalize_tag_text_collapses_spaces():
 
 
 def test_classify_tag_case_insensitive():
-    quote = _make_quote(status="2", tags=[f"  {AWAITING_SUPPLIER_TAG.upper()}  "])
+    quote = _make_quote(status="1", tags=[f"  {AWAITING_SUPPLIER_TAG.upper()}  "])
     assert classify_eworks_quote_bucket(quote) == "awaiting_supplier"
 
 
@@ -210,9 +331,10 @@ def test_classify_status_string_one_same_as_int():
     assert classify_eworks_quote_bucket(quote_int) == "new_quotes"
 
 
-def test_classify_status_one_from_status_name():
+def test_classify_status_one_from_status_name_does_not_count():
+    """status_name alone is not used by quote_is_draft — returns None."""
     quote = _make_quote(status=None, status_name="1")
-    assert classify_eworks_quote_bucket(quote) == "new_quotes"
+    assert classify_eworks_quote_bucket(quote) is None
 
 
 def test_classify_status_one_from_raw_payload_when_column_missing():
@@ -251,7 +373,8 @@ def test_classify_priority_ready_over_status_one():
 
 
 def test_classify_priority_ready_over_awaiting():
-    quote = _make_quote(tags=[AWAITING_SUPPLIER_TAG, READY_TO_SEND_TAG])
+    """When both bucket tags present (and draft), ready_to_send wins."""
+    quote = _make_quote(status="1", tags=[AWAITING_SUPPLIER_TAG, READY_TO_SEND_TAG])
     assert classify_eworks_quote_bucket(quote) == "ready_to_send"
 
 
@@ -265,18 +388,39 @@ def test_classify_unrelated_quote_returns_none():
 # ---------------------------------------------------------------------------
 
 
-def test_classify_tag_from_raw_payload_labels():
+def test_classify_tag_from_raw_payload_labels_non_draft_excluded():
+    """Non-draft quote with ready_to_send label in raw_payload is excluded."""
     quote = _make_quote(
         status="5",
+        tags=None,
+        raw_payload={"labels": [READY_TO_SEND_TAG]},
+    )
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_tag_from_raw_payload_labels_draft_classified():
+    """Draft quote with ready_to_send label in raw_payload is classified."""
+    quote = _make_quote(
+        status="1",
         tags=None,
         raw_payload={"labels": [READY_TO_SEND_TAG]},
     )
     assert classify_eworks_quote_bucket(quote) == "ready_to_send"
 
 
-def test_classify_tag_from_json_string_tags_column():
+def test_classify_tag_from_json_string_tags_column_non_draft_excluded():
+    """Non-draft quote with awaiting tag as JSON string is excluded."""
     quote = _make_quote(
         status="5",
+        tags=f'["{AWAITING_SUPPLIER_TAG}"]',
+    )
+    assert classify_eworks_quote_bucket(quote) is None
+
+
+def test_classify_tag_from_json_string_tags_column_draft_classified():
+    """Draft quote with awaiting tag as JSON string is classified."""
+    quote = _make_quote(
+        status="1",
         tags=f'["{AWAITING_SUPPLIER_TAG}"]',
     )
     assert classify_eworks_quote_bucket(quote) == "awaiting_supplier"
@@ -335,7 +479,7 @@ def test_manager_dashboard_endpoint_returns_categories(mock_settings, api_client
                 eworks_quote_id=102,
                 quote_ref="Q-AWAIT",
                 customer_name="Await Co",
-                status="2",
+                status="1",
                 tags=[AWAITING_SUPPLIER_TAG],
                 quote_date="2026-06-02",
                 total=200.0,
@@ -345,7 +489,7 @@ def test_manager_dashboard_endpoint_returns_categories(mock_settings, api_client
                 eworks_quote_id=103,
                 quote_ref="Q-READY",
                 customer_name="Ready Co",
-                status="2",
+                status="1",
                 tags=[READY_TO_SEND_TAG],
                 quote_date="2026-06-03",
                 total=300.0,
@@ -394,6 +538,45 @@ def test_manager_dashboard_endpoint_returns_categories(mock_settings, api_client
                 "synced_at",
                 "matched_reason",
             }
+
+
+@patch("app.auth.dependencies.settings")
+def test_dashboard_includes_quotes_excluded_non_draft(mock_settings, api_client, db_session):
+    """API response includes quotes_excluded_non_draft count."""
+    _patch_dev_user(mock_settings, role="manager")
+    synced = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            EworksQuote(
+                eworks_quote_id=501,
+                quote_ref="Q-DRAFT",
+                status="1",
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=502,
+                quote_ref="Q-NON-DRAFT",
+                status="2",
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=503,
+                quote_ref="Q-CLOSED",
+                status="9",
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    resp = api_client.get("/api/v1/manager/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert "quotes_excluded_non_draft" in data
+    assert data["quotes_excluded_non_draft"] == 2
 
 
 @patch("app.auth.dependencies.settings")
@@ -462,7 +645,7 @@ def _seed_search_quotes(db_session):
                 eworks_quote_id=303,
                 quote_ref="Q-GAMMA",
                 customer_name="Gamma Ltd",
-                status="2",
+                status="1",
                 tags=[AWAITING_SUPPLIER_TAG, "URGENT"],
                 quote_date="2026-06-03",
                 synced_at=synced,
@@ -471,7 +654,7 @@ def _seed_search_quotes(db_session):
                 eworks_quote_id=304,
                 quote_ref="Q-DELTA",
                 customer_name="Delta Group",
-                status="2",
+                status="1",
                 tags=[READY_TO_SEND_TAG],
                 quote_date="2026-06-04",
                 synced_at=synced,
@@ -559,3 +742,39 @@ def test_search_does_not_expose_raw_payload(mock_settings, api_client, db_sessio
     assert resp.status_code == 200
     assert "raw_payload" not in resp.text
     assert "secret" not in resp.text
+
+
+@patch("app.auth.dependencies.settings")
+def test_dashboard_search_excludes_non_draft_quotes(mock_settings, api_client, db_session):
+    """Non-draft quotes do not appear in search results even if they match the query."""
+    _patch_dev_user(mock_settings, role="manager")
+    synced = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            EworksQuote(
+                eworks_quote_id=601,
+                quote_ref="Q-DRAFT-MATCH",
+                customer_name="Match Corp",
+                status="1",
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+            EworksQuote(
+                eworks_quote_id=602,
+                quote_ref="Q-NONDRAFT-MATCH",
+                customer_name="Match Corp",
+                status="2",
+                quote_date="2026-06-01",
+                synced_at=synced,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    resp = api_client.get("/api/v1/manager/dashboard", params={"search": "match corp"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    # Only the draft quote should appear
+    assert data["categories"]["new_quotes"]["filtered_count"] == 1
+    assert data["categories"]["new_quotes"]["quotes"][0]["quote_ref"] == "Q-DRAFT-MATCH"
+    assert data["quotes_excluded_non_draft"] == 1

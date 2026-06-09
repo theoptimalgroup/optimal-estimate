@@ -179,7 +179,7 @@ export default function AdminDashboardPage() {
               count: dashboard.categories.awaiting_supplier.count,
               filteredCount: dashboard.categories.awaiting_supplier.filtered_count,
               quotes: dashboard.categories.awaiting_supplier.quotes,
-              viewAllHref: buildAdminQuotesFilterUrl({ tab: "quotes", tag: AWAITING_SUPPLIER_TAG }),
+              viewAllHref: buildAdminQuotesFilterUrl({ tab: "quotes", status: "1", tag: AWAITING_SUPPLIER_TAG }),
               testId: "category-awaiting-supplier",
               viewAllTestId: "view-all-awaiting_supplier",
             }}
@@ -188,7 +188,7 @@ export default function AdminDashboardPage() {
               count: dashboard.categories.ready_to_send.count,
               filteredCount: dashboard.categories.ready_to_send.filtered_count,
               quotes: dashboard.categories.ready_to_send.quotes,
-              viewAllHref: buildAdminQuotesFilterUrl({ tab: "quotes", tag: READY_TO_SEND_TAG }),
+              viewAllHref: buildAdminQuotesFilterUrl({ tab: "quotes", status: "1", tag: READY_TO_SEND_TAG }),
               testId: "category-ready-to-send",
               viewAllTestId: "view-all-ready_to_send",
             }}

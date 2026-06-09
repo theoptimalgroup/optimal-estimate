@@ -15,7 +15,7 @@ AWAITING_SUPPLIER_TAG = "Awaiting Supplier Info (Quotes)"
 READY_TO_SEND_TAG = "Quotes Ready to send (Quotes)"
 
 QuoteBucket = Literal["new_quotes", "awaiting_supplier", "ready_to_send"]
-MatchReason = Literal["status_1", "tag_awaiting_supplier", "tag_ready_to_send"]
+MatchReason = Literal["draft_no_tags", "tag_awaiting_supplier", "tag_ready_to_send"]
 
 _FETCH_LIMIT = 2000
 
@@ -157,15 +157,23 @@ def classify_eworks_quote_bucket(quote: EworksQuote) -> QuoteBucket | None:
 def classify_eworks_quote_bucket_with_reason(
     quote: EworksQuote,
 ) -> tuple[QuoteBucket | None, MatchReason | None]:
+    from app.services.quote_search_service import quote_is_draft, quote_has_no_tags
+
+    if not quote_is_draft(quote):
+        return None, None  # non-draft: excluded entirely
+
     tags = extract_all_tags(quote)
 
     if any(is_ready_to_send_tag(tag) for tag in tags):
         return "ready_to_send", "tag_ready_to_send"
+
     if any(is_awaiting_supplier_tag(tag) for tag in tags):
         return "awaiting_supplier", "tag_awaiting_supplier"
-    if _quote_is_status_one(quote):
-        return "new_quotes", "status_1"
-    return None, None
+
+    if quote_has_no_tags(quote):
+        return "new_quotes", "draft_no_tags"
+
+    return None, None  # draft but has unrecognised tags: not shown
 
 
 def _serialize_dashboard_quote(row: EworksQuote, *, matched_reason: MatchReason | None = None) -> dict:
@@ -203,6 +211,7 @@ class ManagerDashboardData(TypedDict):
     categories: dict[QuoteBucket, DashboardCategory]
     last_synced_at: str | None
     totals: dict[str, int]
+    quotes_excluded_non_draft: int
 
 
 def _as_search_text(value: object | None) -> str:
@@ -304,13 +313,19 @@ def get_manager_dashboard(
         .all()
     )
 
+    from app.services.quote_search_service import quote_is_draft
+
     buckets: dict[QuoteBucket, list[tuple[EworksQuote, MatchReason | None]]] = {
         "new_quotes": [],
         "awaiting_supplier": [],
         "ready_to_send": [],
     }
 
+    quotes_excluded_non_draft = 0
     for row in rows:
+        if not quote_is_draft(row):
+            quotes_excluded_non_draft += 1
+            continue
         bucket, reason = classify_eworks_quote_bucket_with_reason(row)
         if bucket is not None:
             buckets[bucket].append((row, reason))
@@ -349,4 +364,5 @@ def get_manager_dashboard(
         "totals": {
             "all_open_quotes": sum(len(b) for b in buckets.values()),
         },
+        "quotes_excluded_non_draft": quotes_excluded_non_draft,
     }
