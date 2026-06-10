@@ -193,6 +193,15 @@ class EworksBackgroundSyncConfigRead(BaseModel):
     quotes_timeout_seconds: int = 120
     attachments_during_quote_sync: bool = False
     quote_appointments_during_quote_sync: bool = False
+    dashboard_quote_refresh_enabled: bool = False
+    dashboard_quote_refresh_interval_minutes: int = 5
+    dashboard_quote_refresh_limit: int = 100
+    dashboard_quote_refresh_timeout_seconds: int = 120
+    quote_detail_reconcile_enabled: bool = False
+    quote_detail_reconcile_interval_minutes: int = 60
+    quote_detail_reconcile_limit: int = 150
+    quote_detail_reconcile_timeout_seconds: int = 180
+    background_worker_deployed: bool = False
 
 
 class EworksSyncLockRead(BaseModel):
@@ -449,6 +458,18 @@ class EworksAttachmentDetailRead(EworksAttachmentSafeRead):
     local_storage_path: str | None = None
     downloaded_at: str | None = None
     raw_payload: dict | None = None
+
+
+class EworksDashboardQuoteRefreshRead(BaseModel):
+    quotes_scanned: int = 0
+    quotes_selected: int = 0
+    details_fetched: int = 0
+    quotes_updated: int = 0
+    failed: int = 0
+    skipped: int = 0
+    rate_limited_count: int = 0
+    elapsed_seconds: float = 0.0
+    stopped_reason: str = "completed"
 
 
 class EworksLinkedJobSyncRead(BaseModel):

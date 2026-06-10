@@ -28,6 +28,7 @@ from app.schemas.eworks_sync_api import (
     EworksBackgroundSyncLastRunRead,
     EworksCustomerRead,
     EworksJobRead,
+    EworksDashboardQuoteRefreshRead,
     EworksJobAppointmentBackfillRead,
     EworksLinkedJobSyncRead,
     EworksJobSafeDetailRead,
@@ -379,6 +380,43 @@ def sync_linked_jobs_for_quote(
         fetch_detail=fetch_detail,
     )
     return success_response(EworksLinkedJobSyncRead.model_validate(summary.__dict__).model_dump())
+
+
+@router.post("/quotes/dashboard-refresh")
+def trigger_dashboard_quote_refresh(
+    db: DbSession,
+    actor: AdminOnly,
+    limit: int | None = Query(default=None, ge=1, le=5000),
+    timeout_seconds: float | None = Query(default=None, ge=1, le=3600),
+):
+    """Refresh eWorks quote details for dashboard candidate quotes (admin only)."""
+    from app.core.config import settings as cfg
+    from app.services.eworks_quote_detail_sync_service import refresh_dashboard_quote_details
+    from app.services.eworks_sync_lock_service import release_sync_lock, try_acquire_sync_lock
+
+    if not cfg.eworks_api_enabled:
+        raise HTTPException(status_code=503, detail="eWorks API is disabled")
+
+    lock = try_acquire_sync_lock(db, "dashboard_refresh")
+    if lock is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Dashboard quote refresh is already running.",
+        )
+
+    lock_status = "failed"
+    try:
+        summary = refresh_dashboard_quote_details(
+            db,
+            limit=limit,
+            timeout_seconds=timeout_seconds,
+        )
+        lock_status = "success" if summary.failed == 0 else "failed"
+        return success_response(
+            EworksDashboardQuoteRefreshRead.model_validate(summary.__dict__).model_dump()
+        )
+    finally:
+        release_sync_lock(db, "dashboard_refresh", status=lock_status)
 
 
 @router.post("/quotes/backfill-sales-appointments")

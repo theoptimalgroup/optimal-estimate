@@ -94,6 +94,20 @@ class Settings(BaseSettings):
     eworks_jobs_sync_interval_minutes: int = 60
     eworks_products_sync_interval_minutes: int = 1440
     run_background_worker: bool = False
+    # API-only containers set this true so /eworks-sync/status reports the external worker.
+    eworks_background_worker_deployed: bool = False
+
+    # Dashboard quote detail refresh (worker scheduler + manual endpoint)
+    eworks_dashboard_quote_refresh_enabled: bool = False
+    eworks_dashboard_quote_refresh_interval_minutes: int = 5
+    eworks_dashboard_quote_refresh_limit: int = 100
+    eworks_dashboard_quote_refresh_timeout_seconds: int = 120
+
+    # Historical quote detail reconcile (worker scheduler)
+    eworks_quote_detail_reconcile_enabled: bool = False
+    eworks_quote_detail_reconcile_interval_minutes: int = 60
+    eworks_quote_detail_reconcile_limit: int = 150
+    eworks_quote_detail_reconcile_timeout_seconds: int = 180
 
     # eWorks acceptance sync (client quote acceptance → eWorks custom field)
     eworks_acceptance_sync_enabled: bool = False

@@ -152,6 +152,73 @@ def test_build_background_sync_config_has_no_secrets():
     assert "password" not in dumped
 
 
+def test_build_background_sync_config_reports_external_worker():
+    with patch("app.services.background_sync_scheduler.settings") as mock_settings:
+        mock_settings.eworks_background_worker_deployed = True
+        mock_settings.eworks_background_sync_enabled = False
+        mock_settings.run_background_worker = False
+        mock_settings.eworks_background_customers_enabled = True
+        mock_settings.eworks_background_quotes_enabled = True
+        mock_settings.eworks_background_jobs_enabled = True
+        mock_settings.eworks_background_products_enabled = False
+        mock_settings.eworks_background_attachments_enabled = True
+        mock_settings.eworks_customers_sync_interval_minutes = 720
+        mock_settings.eworks_quotes_sync_interval_minutes = 1
+        mock_settings.eworks_jobs_sync_interval_minutes = 60
+        mock_settings.eworks_products_sync_interval_minutes = 1440
+        mock_settings.eworks_sync_lookback_days = 7
+        mock_settings.eworks_sync_running_timeout_minutes = 30
+        mock_settings.eworks_sync_lock_timeout_minutes = 30
+        mock_settings.eworks_sync_lock_heartbeat_seconds = 60
+        mock_settings.eworks_api_max_pages = 0
+        mock_settings.eworks_quotes_sync_mode = "incremental_recent"
+        mock_settings.eworks_quotes_sync_recent_window_minutes = 60
+        mock_settings.eworks_quotes_sync_timeout_seconds = 120
+        mock_settings.eworks_sync_attachments_during_quote_sync = False
+        mock_settings.eworks_sync_quote_appointments_during_quote_sync = False
+        mock_settings.eworks_dashboard_quote_refresh_enabled = True
+        mock_settings.eworks_dashboard_quote_refresh_interval_minutes = 5
+        mock_settings.eworks_dashboard_quote_refresh_limit = 100
+        mock_settings.eworks_dashboard_quote_refresh_timeout_seconds = 120
+        mock_settings.eworks_quote_detail_reconcile_enabled = True
+        mock_settings.eworks_quote_detail_reconcile_interval_minutes = 60
+        mock_settings.eworks_quote_detail_reconcile_limit = 150
+        mock_settings.eworks_quote_detail_reconcile_timeout_seconds = 180
+
+        config = build_background_sync_config()
+
+    assert config["enabled"] is True
+    assert config["worker_enabled"] is True
+    assert config["scheduler_active"] is True
+    assert config["background_worker_deployed"] is True
+    assert config["dashboard_quote_refresh_enabled"] is True
+    assert config["quote_detail_reconcile_enabled"] is True
+
+
+@patch("app.services.background_sync_scheduler.BackgroundScheduler")
+def test_scheduler_registers_dashboard_refresh_jobs(mock_scheduler_cls):
+    scheduler = MagicMock()
+    mock_scheduler_cls.return_value = scheduler
+
+    with patch("app.services.background_sync_scheduler.settings") as mock_settings:
+        mock_settings.eworks_background_sync_enabled = True
+        mock_settings.run_background_worker = True
+        mock_settings.eworks_background_quotes_enabled = True
+        mock_settings.eworks_background_jobs_enabled = False
+        mock_settings.eworks_background_products_enabled = False
+        mock_settings.eworks_quotes_sync_interval_minutes = 1
+        mock_settings.eworks_dashboard_quote_refresh_enabled = True
+        mock_settings.eworks_dashboard_quote_refresh_interval_minutes = 5
+        mock_settings.eworks_quote_detail_reconcile_enabled = True
+        mock_settings.eworks_quote_detail_reconcile_interval_minutes = 60
+
+        start_background_sync_scheduler()
+
+    job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
+    assert "eworks_background_dashboard_quote_refresh" in job_ids
+    assert "eworks_background_quote_detail_reconcile" in job_ids
+
+
 def test_resolve_sync_filters_uses_configured_lookback_days():
     with patch("app.services.eworks_sync_service.settings") as mock_settings:
         mock_settings.eworks_sync_lookback_days = 12

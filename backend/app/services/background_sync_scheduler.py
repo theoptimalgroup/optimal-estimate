@@ -38,12 +38,42 @@ def should_start_scheduler() -> bool:
     return bool(settings.eworks_background_sync_enabled and settings.run_background_worker)
 
 
+def _report_background_sync_enabled() -> bool:
+    if settings.eworks_background_worker_deployed:
+        return True
+    return bool(settings.eworks_background_sync_enabled)
+
+
+def _report_worker_enabled() -> bool:
+    if settings.eworks_background_worker_deployed:
+        return True
+    return bool(settings.run_background_worker)
+
+
+def _report_scheduler_active() -> bool:
+    if settings.eworks_background_worker_deployed:
+        return True
+    return should_start_scheduler() or is_scheduler_running()
+
+
+def _report_dashboard_quote_refresh_enabled() -> bool:
+    if settings.eworks_background_worker_deployed:
+        return True
+    return bool(settings.eworks_dashboard_quote_refresh_enabled)
+
+
+def _report_quote_detail_reconcile_enabled() -> bool:
+    if settings.eworks_background_worker_deployed:
+        return True
+    return bool(settings.eworks_quote_detail_reconcile_enabled)
+
+
 def build_background_sync_config() -> dict[str, Any]:
     """Safe, read-only background sync config for admin APIs."""
     return {
-        "enabled": settings.eworks_background_sync_enabled,
-        "worker_enabled": settings.run_background_worker,
-        "scheduler_active": should_start_scheduler(),
+        "enabled": _report_background_sync_enabled(),
+        "worker_enabled": _report_worker_enabled(),
+        "scheduler_active": _report_scheduler_active(),
         "customers_enabled": settings.eworks_background_customers_enabled,
         "quotes_enabled": settings.eworks_background_quotes_enabled,
         "jobs_enabled": settings.eworks_background_jobs_enabled,
@@ -64,6 +94,23 @@ def build_background_sync_config() -> dict[str, Any]:
         "quotes_timeout_seconds": max(30, int(settings.eworks_quotes_sync_timeout_seconds)),
         "attachments_during_quote_sync": settings.eworks_sync_attachments_during_quote_sync,
         "quote_appointments_during_quote_sync": settings.eworks_sync_quote_appointments_during_quote_sync,
+        "dashboard_quote_refresh_enabled": _report_dashboard_quote_refresh_enabled(),
+        "dashboard_quote_refresh_interval_minutes": max(
+            1, int(settings.eworks_dashboard_quote_refresh_interval_minutes)
+        ),
+        "dashboard_quote_refresh_limit": max(1, int(settings.eworks_dashboard_quote_refresh_limit)),
+        "dashboard_quote_refresh_timeout_seconds": max(
+            30, int(settings.eworks_dashboard_quote_refresh_timeout_seconds)
+        ),
+        "quote_detail_reconcile_enabled": _report_quote_detail_reconcile_enabled(),
+        "quote_detail_reconcile_interval_minutes": max(
+            1, int(settings.eworks_quote_detail_reconcile_interval_minutes)
+        ),
+        "quote_detail_reconcile_limit": max(1, int(settings.eworks_quote_detail_reconcile_limit)),
+        "quote_detail_reconcile_timeout_seconds": max(
+            30, int(settings.eworks_quote_detail_reconcile_timeout_seconds)
+        ),
+        "background_worker_deployed": settings.eworks_background_worker_deployed,
     }
 
 
@@ -174,6 +221,42 @@ def run_background_jobs_sync() -> None:
         logger.info("Skipped background jobs sync: eWorks API disabled")
         return
     _schedule_background_sync("jobs")
+
+
+def run_background_dashboard_quote_refresh() -> None:
+    if not settings.eworks_dashboard_quote_refresh_enabled:
+        return
+    if not settings.eworks_api_enabled:
+        logger.info("Skipped dashboard quote refresh: eWorks API disabled")
+        return
+
+    from app.services.eworks_quote_detail_sync_service import refresh_dashboard_quote_details
+
+    db = SessionLocal()
+    try:
+        refresh_dashboard_quote_details(db)
+    except Exception:
+        logger.exception("Background dashboard quote refresh failed unexpectedly")
+    finally:
+        db.close()
+
+
+def run_background_quote_detail_reconcile() -> None:
+    if not settings.eworks_quote_detail_reconcile_enabled:
+        return
+    if not settings.eworks_api_enabled:
+        logger.info("Skipped quote detail reconcile: eWorks API disabled")
+        return
+
+    from app.services.eworks_quote_detail_sync_service import reconcile_quote_details
+
+    db = SessionLocal()
+    try:
+        reconcile_quote_details(db)
+    except Exception:
+        logger.exception("Background quote detail reconcile failed unexpectedly")
+    finally:
+        db.close()
 
 
 def run_background_products_sync() -> None:
@@ -330,6 +413,30 @@ def start_background_sync_scheduler() -> None:
             run_background_products_sync,
             IntervalTrigger(minutes=max(1, int(settings.eworks_products_sync_interval_minutes))),
             id="eworks_background_products_sync",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+    if settings.eworks_dashboard_quote_refresh_enabled:
+        scheduler.add_job(
+            run_background_dashboard_quote_refresh,
+            IntervalTrigger(
+                minutes=max(1, int(settings.eworks_dashboard_quote_refresh_interval_minutes))
+            ),
+            id="eworks_background_dashboard_quote_refresh",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+    if settings.eworks_quote_detail_reconcile_enabled:
+        scheduler.add_job(
+            run_background_quote_detail_reconcile,
+            IntervalTrigger(
+                minutes=max(1, int(settings.eworks_quote_detail_reconcile_interval_minutes))
+            ),
+            id="eworks_background_quote_detail_reconcile",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
