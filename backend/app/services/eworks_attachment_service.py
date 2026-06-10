@@ -30,16 +30,36 @@ def _session_dir(session_id: uuid.UUID) -> Path:
     return path
 
 
-def _blob_name(session_id: uuid.UUID, stored_name: str) -> str:
+def _blob_name(session_id: uuid.UUID, stored_name: str, *, eworks_quote_id: int | None = None) -> str:
+    if eworks_quote_id is not None:
+        return f"eworks-attachments/quotes/{eworks_quote_id}/{stored_name}"
     return f"eworks-attachments/{session_id}/{stored_name}"
 
 
-async def _save_to_blob(session_id: uuid.UUID, stored_name: str, data: bytes, content_type: str) -> str:
+def _quote_dir(eworks_quote_id: int) -> Path:
+    root = Path(settings.eworks_attachment_path)
+    path = root / "quotes" / str(eworks_quote_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _stored_quote_path(eworks_quote_id: int, stored_name: str) -> Path:
+    return _quote_dir(eworks_quote_id) / stored_name
+
+
+async def _save_to_blob(
+    session_id: uuid.UUID,
+    stored_name: str,
+    data: bytes,
+    content_type: str,
+    *,
+    eworks_quote_id: int | None = None,
+) -> str:
     from azure.storage.blob import BlobServiceClient, ContentSettings
 
     conn_str = settings.azure_storage_connection_string
     container = settings.azure_storage_container_name
-    blob_name = _blob_name(session_id, stored_name)
+    blob_name = _blob_name(session_id, stored_name, eworks_quote_id=eworks_quote_id)
 
     client = BlobServiceClient.from_connection_string(conn_str)
     container_client = client.get_container_client(container)
@@ -62,21 +82,38 @@ def _uses_blob_storage() -> bool:
     return settings.storage_backend == "azure_blob" and bool(settings.azure_storage_connection_string)
 
 
-async def read_session_attachment(session_id: uuid.UUID, stored_name: str) -> tuple[bytes, str]:
+async def read_session_attachment(
+    session_id: uuid.UUID,
+    stored_name: str,
+    *,
+    eworks_quote_id: int | None = None,
+) -> tuple[bytes, str]:
     if _uses_blob_storage():
         from azure.storage.blob import BlobServiceClient
 
         conn_str = settings.azure_storage_connection_string
         container = settings.azure_storage_container_name
-        blob_name = _blob_name(session_id, stored_name)
         client = BlobServiceClient.from_connection_string(conn_str)
-        blob_client = client.get_blob_client(container=container, blob=blob_name)
-        if not blob_client.exists():
-            raise FileNotFoundError(stored_name)
-        downloader = blob_client.download_blob()
-        data = downloader.readall()
-        content_type = blob_client.get_blob_properties().content_settings.content_type or "application/octet-stream"
-        return data, content_type
+
+        candidates = []
+        if eworks_quote_id is not None:
+            candidates.append(_blob_name(session_id, stored_name, eworks_quote_id=eworks_quote_id))
+        candidates.append(_blob_name(session_id, stored_name))
+
+        for blob_name in candidates:
+            blob_client = client.get_blob_client(container=container, blob=blob_name)
+            if not blob_client.exists():
+                continue
+            downloader = blob_client.download_blob()
+            data = downloader.readall()
+            content_type = blob_client.get_blob_properties().content_settings.content_type or "application/octet-stream"
+            return data, content_type
+        raise FileNotFoundError(stored_name)
+
+    if eworks_quote_id is not None:
+        quote_target = _stored_quote_path(eworks_quote_id, stored_name)
+        if quote_target.is_file():
+            return quote_target.read_bytes(), "application/octet-stream"
 
     target = _stored_path(session_id, stored_name)
     if not target.is_file():
@@ -84,25 +121,46 @@ async def read_session_attachment(session_id: uuid.UUID, stored_name: str) -> tu
     return target.read_bytes(), "application/octet-stream"
 
 
-async def delete_stored_attachment(session_id: uuid.UUID, stored_name: str) -> None:
+async def delete_stored_attachment(
+    session_id: uuid.UUID,
+    stored_name: str,
+    *,
+    eworks_quote_id: int | None = None,
+) -> None:
     if _uses_blob_storage():
         from azure.storage.blob import BlobServiceClient
 
         conn_str = settings.azure_storage_connection_string
         container = settings.azure_storage_container_name
-        blob_name = _blob_name(session_id, stored_name)
         client = BlobServiceClient.from_connection_string(conn_str)
-        blob_client = client.get_blob_client(container=container, blob=blob_name)
-        if blob_client.exists():
-            blob_client.delete_blob()
+
+        candidates = []
+        if eworks_quote_id is not None:
+            candidates.append(_blob_name(session_id, stored_name, eworks_quote_id=eworks_quote_id))
+        candidates.append(_blob_name(session_id, stored_name))
+
+        for blob_name in candidates:
+            blob_client = client.get_blob_client(container=container, blob=blob_name)
+            if blob_client.exists():
+                blob_client.delete_blob()
         return
+
+    if eworks_quote_id is not None:
+        quote_target = _stored_quote_path(eworks_quote_id, stored_name)
+        if quote_target.is_file():
+            quote_target.unlink()
 
     target = _stored_path(session_id, stored_name)
     if target.is_file():
         target.unlink()
 
 
-async def save_session_attachment(session_id: uuid.UUID, upload: UploadFile) -> SessionAttachmentMeta:
+async def save_session_attachment(
+    session_id: uuid.UUID,
+    upload: UploadFile,
+    *,
+    eworks_quote_id: int | None = None,
+) -> SessionAttachmentMeta:
     content_type = upload.content_type or "application/octet-stream"
     if content_type not in ALLOWED_IMAGE_TYPES | ALLOWED_VIDEO_TYPES:
         raise ValueError("Only photo and video files are supported")
@@ -116,7 +174,9 @@ async def save_session_attachment(session_id: uuid.UUID, upload: UploadFile) -> 
     stored_name = f"{attachment_id}_{safe_name}"
 
     if _uses_blob_storage():
-        await _save_to_blob(session_id, stored_name, data, content_type)
+        await _save_to_blob(session_id, stored_name, data, content_type, eworks_quote_id=eworks_quote_id)
+    elif eworks_quote_id is not None:
+        _stored_quote_path(eworks_quote_id, stored_name).write_bytes(data)
     else:
         _stored_path(session_id, stored_name).write_bytes(data)
 

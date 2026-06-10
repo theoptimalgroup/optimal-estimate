@@ -18,6 +18,7 @@ from app.models.trade import Trade
 from app.models.user import User
 from app.schemas.eworks_link import Step2Snapshot, WorkBlockSnapshot
 from app.services.calculation_session_service import _build_dashboard_work_item, _resolve_work_product_fields, _validate_work_block
+from app.services.quote_work_snapshot_service import normalize_shared_work_blocks
 from app.services.eworks_pdf_context_service import _work_form_page
 from app.utils.work_label import format_work_label
 
@@ -98,6 +99,21 @@ def test_validate_work_block_product_flow_unchanged():
     _validate_work_block(step2, 0)
 
 
+def test_validate_work_block_accepts_product_name_without_selected_id():
+    step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                product_name="Shared dishwasher",
+                scope="Supply and fit dishwasher",
+                engineers_required=True,
+                engineers_needed=1,
+                engineer_time_value=Decimal("1.5"),
+            )
+        ]
+    )
+    _validate_work_block(step2, 0)
+
+
 def test_validate_work_block_requires_product_or_custom_scope():
     step2 = Step2Snapshot(
         works=[
@@ -112,6 +128,85 @@ def test_validate_work_block_requires_product_or_custom_scope():
     with pytest.raises(AppError) as error:
         _validate_work_block(step2, 0)
     assert error.value.code == "PRODUCT_OR_CUSTOM_REQUIRED"
+
+
+def test_normalize_shared_scope_only_to_custom_scope():
+    step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                scope="Repair leaking roof hatch and replace flashing",
+                engineers_required=True,
+                engineers_needed=1,
+                engineer_time_value=Decimal("1.5"),
+            )
+        ]
+    )
+    normalized = normalize_shared_work_blocks(step2)
+    block = normalized.works[0]
+    assert block.is_custom_scope is True
+    assert block.custom_title == "Repair leaking roof hatch and replace flashing"
+    assert block.product_name == "Repair leaking roof hatch and replace flashing"
+    assert block.selected_product_id is None
+    _validate_work_block(normalized, 0)
+
+
+def test_normalize_shared_does_not_overwrite_real_product():
+    step2 = Step2Snapshot(works=[_dishwasher_like_block()])
+    normalized = normalize_shared_work_blocks(step2)
+    block = normalized.works[0]
+    assert block.is_custom_scope is False
+    assert block.selected_product_id == 42
+    assert block.product_name == "Dishwasher"
+
+
+def test_normalize_shared_preserves_manual_custom_scope():
+    step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                is_custom_scope=True,
+                custom_title="One-off roof hatch",
+                scope="Detailed bespoke scope text.",
+                engineers_required=True,
+                engineers_needed=1,
+                engineer_time_value=Decimal("1.5"),
+            )
+        ]
+    )
+    normalized = normalize_shared_work_blocks(step2)
+    block = normalized.works[0]
+    assert block.is_custom_scope is True
+    assert block.custom_title == "One-off roof hatch"
+    assert block.scope == "Detailed bespoke scope text."
+
+
+def test_normalize_shared_empty_block_still_fails_validation():
+    step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                engineers_required=True,
+                engineers_needed=1,
+                engineer_time_value=Decimal("1.5"),
+            )
+        ]
+    )
+    normalized = normalize_shared_work_blocks(step2)
+    with pytest.raises(AppError) as error:
+        _validate_work_block(normalized, 0)
+    assert error.value.code == "PRODUCT_OR_CUSTOM_REQUIRED"
+
+
+def _dishwasher_like_block(**overrides) -> WorkBlockSnapshot:
+    block = WorkBlockSnapshot(
+        scope="Repair dishwasher",
+        selected_product_id=42,
+        product_name="Dishwasher",
+        product_code="DW-001",
+        is_custom_scope=False,
+        engineers_required=True,
+        engineers_needed=1,
+        engineer_time_value=Decimal("1.5"),
+    )
+    return block.model_copy(update=overrides)
 
 
 def test_format_work_label_prefers_custom_title():

@@ -107,6 +107,7 @@ export type WorkBlockSnapshot = {
 
 export type Step2Snapshot = {
   works?: WorkBlockSnapshot[];
+  unmatched_attachments?: AttachmentMeta[];
   scope?: string | null;
   materials_to_order?: MaterialSupplier[];
   shelf_materials_rows?: MaterialOrderRow[];
@@ -164,11 +165,19 @@ export type SessionUiState = {
   last_result?: CalculateResponse | null;
 };
 
+export type SharedStep2Meta = {
+  updated_by_name?: string | null;
+  updated_by_email?: string | null;
+  updated_at?: string | null;
+  version?: number;
+};
+
 export type FromLinkResponse = {
   session_id: string;
   session_token: string;
   step1: Step1Snapshot;
   step2?: Step2Snapshot | null;
+  shared_step2?: SharedStep2Meta | null;
   resolved: ResolvedRuleInfo;
   expires_at: string;
   ui_state?: SessionUiState | null;
@@ -184,6 +193,7 @@ type CalculationSessionRead = {
   session_id: string;
   step1: Step1Snapshot;
   step2?: Step2Snapshot | null;
+  shared_step2?: SharedStep2Meta | null;
   resolved: ResolvedRuleInfo;
   expires_at: string;
   ui_state?: SessionUiState | null;
@@ -347,6 +357,7 @@ export async function fetchSession(sessionId: string, sessionToken: string): Pro
     session_token: sessionToken,
     step1: data.step1,
     step2: data.step2,
+    shared_step2: data.shared_step2,
     resolved: data.resolved,
     expires_at: data.expires_at,
     ui_state: data.ui_state,

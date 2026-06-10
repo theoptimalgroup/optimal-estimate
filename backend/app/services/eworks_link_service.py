@@ -317,18 +317,22 @@ def _session_ui_state(session: CalculationSession) -> SessionUiState | None:
 
 
 def _build_session_response(
+    db: Session,
     session: CalculationSession,
     *,
-    step1: Step1Snapshot,
-    step2: Step2Snapshot | None,
     resolved: ResolvedRuleInfo,
     resumed: bool,
 ) -> CalculationSessionFromLinkResponse:
+    from app.services.quote_work_snapshot_service import resolve_shared_step2_for_session
+
+    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+    step2, shared_step2 = resolve_shared_step2_for_session(db, session)
     return CalculationSessionFromLinkResponse(
         session_id=session.id,
         session_token=session.session_token,
         step1=step1,
         step2=step2,
+        shared_step2=shared_step2,
         resolved=resolved,
         expires_at=session.expires_at,
         ui_state=_session_ui_state(session),
@@ -386,7 +390,6 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
         existing.rate_rule_id = rule.id if rule else None
         existing.eworks_customer_snapshot = eworks_snapshot_dict
         db.flush()
-        step2 = Step2Snapshot.model_validate(existing.step2_snapshot) if existing.step2_snapshot else None
         resolved = build_resolved_rule_info(
             client,
             trade,
@@ -394,7 +397,7 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
             link_client_name=link_client_name,
             eworks_client_fee_pct=eworks_fee_pct if _uses_fallback_xlsx_fee(matched) else None,
         )
-        response = _build_session_response(existing, step1=step1, step2=step2, resolved=resolved, resumed=True)
+        response = _build_session_response(db, existing, resolved=resolved, resumed=True)
         store_idempotency(
             db,
             key=idempotency_key,
@@ -424,9 +427,8 @@ def create_session_from_link(db: Session, *, payload_b64: str, sig: str | None) 
     db.flush()
 
     response = _build_session_response(
+        db,
         session,
-        step1=step1,
-        step2=initial_step2,
         resolved=resolved,
         resumed=False,
     )

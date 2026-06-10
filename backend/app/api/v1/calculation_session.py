@@ -35,9 +35,9 @@ from app.services.calculation_session_pdf_service import render_session_quote_pd
 from app.services.calculation_session_revision_service import start_estimate_revision
 from app.services.calculation_session_service import (
     add_session_attachment,
+    build_calculation_session_read,
     calculate_session,
     delete_session_attachment,
-    get_session_attachment_meta,
     submit_session,
     update_session_step2,
 )
@@ -56,23 +56,7 @@ OptionalStaffUser = Annotated[AuthenticatedUser | None, Depends(try_get_optional
 
 
 def _session_read(db: Session, session) -> CalculationSessionRead:
-    from app.services.calculation_session_service import _resolved_from_session
-
-    step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else None
-    ui_state = SessionUiState.model_validate(session.ui_state) if session.ui_state else None
-    return CalculationSessionRead(
-        session_id=session.id,
-        step1=Step1Snapshot.model_validate(session.step1_snapshot),
-        step2=step2,
-        resolved=_resolved_from_session(db, session),
-        expires_at=session.expires_at,
-        ui_state=ui_state,
-        status=session.status,
-        locked=session.locked,
-        revision_in_progress=session.revision_in_progress,
-        active_revision_reason=session.active_revision_reason,
-        current_version_number=session.current_version_number,
-    )
+    return build_calculation_session_read(db, session)
 
 
 def _require_session_token(
@@ -178,6 +162,7 @@ async def upload_attachment(
     session=Depends(_require_session_token),
     file: UploadFile = File(...),
     work_index: int = Query(default=0, ge=0),
+    actor: OptionalStaffUser = None,
 ):
     try:
         result = await add_session_attachment(
@@ -186,6 +171,7 @@ async def upload_attachment(
             session_token=session.session_token,
             upload=file,
             work_index=work_index,
+            actor=actor,
         )
         db.commit()
     except AppError as exc:
@@ -202,14 +188,37 @@ async def get_attachment(
     db: DbSession,
     x_session_token: str | None = Header(default=None, alias="X-Session-Token"),
     token: str | None = Query(default=None),
+    actor: OptionalStaffUser = None,
 ):
     session_token = x_session_token or token
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Missing session token")
+    session = None
+    if session_token:
+        try:
+            session = get_session_by_token(db, session_id, session_token)
+        except AppError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    from app.services.quote_work_attachment_service import (
+        resolve_attachment_meta,
+        user_can_view_quote_attachment,
+    )
+
     try:
-        get_session_by_token(db, session_id, session_token)
-        meta = get_session_attachment_meta(db, session_id, attachment_id)
-        data, _ = await read_session_attachment(session_id, meta.stored_name)
+        meta, row, resolved_session = resolve_attachment_meta(db, session_id, attachment_id)
+        if row is not None:
+            view_session = session or resolved_session
+            if not user_can_view_quote_attachment(db, user=actor, attachment=row, session=view_session):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+            storage_session_id = row.storage_session_id or row.source_session_id or session_id
+            data, _ = await read_session_attachment(
+                storage_session_id,
+                meta.stored_name,
+                eworks_quote_id=row.eworks_quote_id,
+            )
+        elif session is None:
+            raise HTTPException(status_code=401, detail="Missing session token")
+        else:
+            data, _ = await read_session_attachment(session_id, meta.stored_name)
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except FileNotFoundError as exc:
@@ -227,6 +236,7 @@ async def remove_attachment(
     attachment_id: str,
     db: DbSession,
     session=Depends(_require_session_token),
+    actor: OptionalStaffUser = None,
 ):
     try:
         await delete_session_attachment(
@@ -234,6 +244,7 @@ async def remove_attachment(
             session_id=session_id,
             session_token=session.session_token,
             attachment_id=attachment_id,
+            actor=actor,
         )
         db.commit()
     except AppError as exc:

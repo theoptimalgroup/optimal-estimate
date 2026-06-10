@@ -113,6 +113,16 @@ class SessionAttachmentMeta(BaseModel):
     size: int
     media_type: str
     stored_name: str
+    uploaded_by_name: str | None = None
+    uploaded_by_email: str | None = None
+    uploaded_at: datetime | None = None
+    work_index: int | None = None
+    product_id: int | None = None
+    product_name: str | None = None
+    is_custom_scope: bool | None = None
+    custom_scope_title: str | None = None
+    scope_snapshot: str | None = None
+    work_block_label: str | None = None
 
 
 class FromLinkRequest(BaseModel):
@@ -251,6 +261,7 @@ class WorkBlockSnapshot(BaseModel):
 
 class Step2Snapshot(BaseModel):
     works: list[WorkBlockSnapshot] = Field(default_factory=list)
+    unmatched_attachments: list[SessionAttachmentMeta] = Field(default_factory=list)
     findings: str | None = None
     scope: str | None = None
     materials_to_order: list[MaterialSupplier] = Field(default_factory=default_material_suppliers)
@@ -365,11 +376,19 @@ class SessionUiState(BaseModel):
     last_result: dict | None = None
 
 
+class SharedStep2Meta(BaseModel):
+    updated_by_name: str | None = None
+    updated_by_email: str | None = None
+    updated_at: datetime | None = None
+    version: int = 1
+
+
 class CalculationSessionFromLinkResponse(BaseModel):
     session_id: UUID
     session_token: str
     step1: Step1Snapshot
     step2: Step2Snapshot | None = None
+    shared_step2: SharedStep2Meta | None = None
     resolved: ResolvedRuleInfo
     expires_at: datetime
     ui_state: SessionUiState | None = None
@@ -407,6 +426,7 @@ class CalculationSessionRead(BaseModel):
     session_id: UUID
     step1: Step1Snapshot
     step2: Step2Snapshot | None = None
+    shared_step2: SharedStep2Meta | None = None
     resolved: ResolvedRuleInfo
     expires_at: datetime
     ui_state: SessionUiState | None = None

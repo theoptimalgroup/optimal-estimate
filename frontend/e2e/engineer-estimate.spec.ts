@@ -80,7 +80,9 @@ async function mockQuestionnaireSessionRoutes(
   options: {
     uiStep?: number;
     step2?: Record<string, unknown> | null;
+    sharedStep2?: Record<string, unknown> | null;
     onPatch?: (body: Record<string, unknown>) => void;
+    onSubmit?: (body: Record<string, unknown>) => void;
   } = {},
 ) {
   let savedStep2: Record<string, unknown> | null = options.step2 ?? null;
@@ -99,6 +101,17 @@ async function mockQuestionnaireSessionRoutes(
 
   await page.route(`**/api/v1/calculation-session/${sessionId}**`, async (route) => {
     const method = route.request().method();
+    const url = route.request().url();
+    if (method === "POST" && url.endsWith("/submit")) {
+      const submitBody = route.request().postDataJSON() as Record<string, unknown>;
+      options.onSubmit?.(submitBody);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: { submitted: true } }),
+      });
+      return;
+    }
     if (method === "PATCH") {
       const patchBody = route.request().postDataJSON() as Record<string, unknown>;
       if (patchBody.step2) {
@@ -137,6 +150,7 @@ async function mockQuestionnaireSessionRoutes(
             travel: 0,
           },
           step2: savedStep2,
+          shared_step2: options.sharedStep2 ?? null,
           resolved: {
             client_id: "client-1",
             trade_id: "trade-1",
@@ -165,6 +179,10 @@ async function openStep2(page: import("@playwright/test").Page, sessionId: strin
   await expect(page.getByText("Step 2 of 3: Estimating Questionnaire")).toBeVisible({ timeout: 15000 });
 }
 
+function workBlock(page: import("@playwright/test").Page, workIndex: number) {
+  return page.getByTestId(`work-block-${workIndex}`);
+}
+
 async function expandWorkBlock(page: import("@playwright/test").Page, workIndex = 0) {
   const toggle = page.getByTestId(`work-block-toggle-${workIndex}`);
   if ((await toggle.getAttribute("aria-expanded")) !== "true") {
@@ -174,12 +192,12 @@ async function expandWorkBlock(page: import("@playwright/test").Page, workIndex 
 
 async function openProductCombobox(page: import("@playwright/test").Page, workIndex = 0) {
   await expandWorkBlock(page, workIndex);
-  const block = page.getByTestId(`work-block-${workIndex}`);
+  const block = workBlock(page, workIndex);
   const changeProduct = block.getByTestId(`change-product-${workIndex}`);
   if (await changeProduct.isVisible().catch(() => false)) {
     await changeProduct.click();
   }
-  const combobox = block.getByRole("combobox").first();
+  const combobox = block.getByTestId("product-combobox");
   await combobox.click();
   return combobox;
 }
@@ -187,17 +205,17 @@ async function openProductCombobox(page: import("@playwright/test").Page, workIn
 async function selectProduct(page: import("@playwright/test").Page, productLabel: string, workIndex = 0) {
   const combobox = await openProductCombobox(page, workIndex);
   await combobox.fill(productLabel.split(" · ")[0]);
-  await page.getByRole("option", { name: productLabel }).click();
+  await workBlock(page, workIndex).getByTestId("product-option-existing").filter({ hasText: productLabel }).click();
 }
 
 async function startCustomScopeDraft(page: import("@playwright/test").Page, workIndex = 0) {
-  const combobox = await openProductCombobox(page, workIndex);
-  await page.getByTestId("product-add-custom-scope").click();
+  await openProductCombobox(page, workIndex);
+  await workBlock(page, workIndex).getByTestId("product-option-custom-scope").click();
   const dialog = page.getByTestId("work-mode-switch-dialog");
   if (await dialog.isVisible().catch(() => false)) {
     await page.getByTestId("work-mode-switch-dialog-confirm").click();
   }
-  await expect(page.getByTestId(`custom-scope-draft-${workIndex}`)).toBeVisible();
+  await expect(workBlock(page, workIndex).getByTestId(`custom-scope-draft-${workIndex}`)).toBeVisible();
 }
 
 test.describe("engineer estimate questionnaire — custom scope", () => {
@@ -209,6 +227,9 @@ test.describe("engineer estimate questionnaire — custom scope", () => {
     await openStep2(page, sessionId, sessionToken);
 
     await selectProduct(page, "Plant Room · PR-0011", 0);
+    const block = workBlock(page, 0);
+    await expect(block.getByTestId("tab-product")).toBeVisible();
+    await expect(block.getByTestId("tab-scope")).toBeVisible();
     await expect(page.getByTestId("work-tab-product-0")).toHaveAttribute("aria-selected", "false");
     await expect(page.getByTestId("work-tab-scope-0")).toHaveAttribute("aria-selected", "true");
     await expect(page.getByTestId("work-scope-0")).toBeVisible();
@@ -237,8 +258,9 @@ test.describe("engineer estimate questionnaire — custom scope", () => {
     await openStep2(page, sessionId, sessionToken);
 
     await startCustomScopeDraft(page, 0);
-    await expect(page.getByTestId("custom-scope-title-0")).toBeVisible();
-    await expect(page.getByTestId("custom-scope-description-0")).toBeVisible();
+    const block = workBlock(page, 0);
+    await expect(block.getByTestId("custom-scope-title-input")).toBeVisible();
+    await expect(block.getByTestId("custom-scope-description-input")).toBeVisible();
   });
 
   test("Continue to Scope is disabled until title entered", async ({ page }) => {
@@ -249,9 +271,10 @@ test.describe("engineer estimate questionnaire — custom scope", () => {
     await openStep2(page, sessionId, sessionToken);
 
     await startCustomScopeDraft(page, 0);
-    const continueButton = page.getByTestId("custom-scope-continue-0");
+    const block = workBlock(page, 0);
+    const continueButton = block.getByTestId("custom-scope-continue-button");
     await expect(continueButton).toBeDisabled();
-    await page.getByTestId("custom-scope-title-0").fill("Bespoke cladding repair");
+    await block.getByTestId("custom-scope-title-input").fill("Bespoke cladding repair");
     await expect(continueButton).toBeEnabled();
   });
 
@@ -263,9 +286,10 @@ test.describe("engineer estimate questionnaire — custom scope", () => {
     await openStep2(page, sessionId, sessionToken);
 
     await startCustomScopeDraft(page, 0);
-    await page.getByTestId("custom-scope-title-0").fill("Bespoke cladding repair");
-    await page.getByTestId("custom-scope-description-0").fill("Repair damaged cladding on north elevation.");
-    await page.getByTestId("custom-scope-continue-0").click();
+    const block = workBlock(page, 0);
+    await block.getByTestId("custom-scope-title-input").fill("Bespoke cladding repair");
+    await block.getByTestId("custom-scope-description-input").fill("Repair damaged cladding on north elevation.");
+    await block.getByTestId("custom-scope-continue-button").click();
 
     await expect(page.getByTestId("work-tab-scope-0")).toHaveAttribute("aria-selected", "true");
     await expect(page.getByTestId("work-scope-0")).toBeVisible();
@@ -284,8 +308,9 @@ test.describe("engineer estimate questionnaire — custom scope", () => {
     await openStep2(page, sessionId, sessionToken);
 
     await startCustomScopeDraft(page, 0);
-    await page.getByTestId("custom-scope-title-0").fill("One-off roof hatch");
-    await page.getByTestId("custom-scope-continue-0").click();
+    const block = workBlock(page, 0);
+    await block.getByTestId("custom-scope-title-input").fill("One-off roof hatch");
+    await block.getByTestId("custom-scope-continue-button").click();
     await page.getByTestId("work-scope-0").fill("Supply and fit custom roof hatch.");
 
     await expect
@@ -312,8 +337,9 @@ test.describe("engineer estimate questionnaire — custom scope", () => {
     await openStep2(page, sessionId, sessionToken);
 
     await startCustomScopeDraft(page, 0);
-    await page.getByTestId("custom-scope-title-0").fill("Temporary scaffold access");
-    await page.getByTestId("custom-scope-continue-0").click();
+    const block = workBlock(page, 0);
+    await block.getByTestId("custom-scope-title-input").fill("Temporary scaffold access");
+    await block.getByTestId("custom-scope-continue-button").click();
     await page.getByTestId("work-scope-0").fill("Provide temporary scaffold access.");
 
     expect(productsApi.getProductPostCount()).toBe(0);
@@ -327,13 +353,14 @@ test.describe("engineer estimate questionnaire — custom scope", () => {
     await openStep2(page, sessionId, sessionToken);
 
     await startCustomScopeDraft(page, 0);
-    await page.getByTestId("custom-scope-title-0").fill("Should not persist");
-    await page.getByTestId("custom-scope-cancel-0").click();
+    const block = workBlock(page, 0);
+    await block.getByTestId("custom-scope-title-input").fill("Should not persist");
+    await block.getByTestId("custom-scope-cancel-button").click();
 
-    await expect(page.getByTestId("custom-scope-draft-0")).toHaveCount(0);
-    const combobox = page.getByTestId("work-block-0").getByRole("combobox").first();
+    await expect(block.getByTestId(`custom-scope-draft-0`)).toHaveCount(0);
+    const combobox = block.getByTestId("product-combobox");
     await expect(combobox).toHaveValue("");
-    await expect(page.getByTestId("work-block-0")).toContainText("Select product");
+    await expect(block).toContainText("Select product");
   });
 
   test("existing work block values are not wiped when adding custom scope", async ({ page }) => {
@@ -344,19 +371,251 @@ test.describe("engineer estimate questionnaire — custom scope", () => {
     await openStep2(page, sessionId, sessionToken);
 
     await expandWorkBlock(page, 0);
+    const block = workBlock(page, 0);
     await page.getByTestId("work-tab-scope-0").click();
     await page.getByTestId("work-scope-0").fill("Existing scope text should remain.");
     await page.getByTestId("work-tab-product-0").click();
 
-    const combobox = page.getByTestId("work-block-0").getByRole("combobox").first();
-    await combobox.click();
-    await page.getByTestId("product-add-custom-scope").click();
+    await block.getByTestId("product-combobox").click();
+    await block.getByTestId("product-option-custom-scope").click();
     await page.getByTestId("work-mode-switch-dialog-confirm").click();
-    await expect(page.getByTestId("custom-scope-draft-0")).toBeVisible();
+    await expect(block.getByTestId("custom-scope-draft-0")).toBeVisible();
 
-    await page.getByTestId("custom-scope-title-0").fill("Custom retained scope");
-    await page.getByTestId("custom-scope-continue-0").click();
+    await block.getByTestId("custom-scope-title-input").fill("Custom retained scope");
+    await block.getByTestId("custom-scope-continue-button").click();
 
     await expect(page.getByTestId("work-scope-0")).toHaveValue("Existing scope text should remain.");
+  });
+});
+
+function defaultMaterialsBlock() {
+  return [
+    {
+      supplier_name: "Supplier 1",
+      links: [{ link: "", quantity: 0, cost: 0 }],
+    },
+  ];
+}
+
+function workBlockWithAttachment(
+  work: Record<string, unknown>,
+  attachment: Record<string, unknown>,
+) {
+  return {
+    works: [
+      {
+        scope: "",
+        selected_product_id: null,
+        is_custom_scope: false,
+        custom_title: "",
+        eworks_item_id: null,
+        product_name: "",
+        product_code: "",
+        product_quantity: 1,
+        product_unit_price: 0,
+        product_total_price: 0,
+        scope_from_product: false,
+        materials_to_order: defaultMaterialsBlock(),
+        skill_required: "Carpenter",
+        engineers_required: false,
+        engineers_needed: 0,
+        engineer_time_unit: "hours",
+        engineer_time_value: 1.5,
+        labour_required: false,
+        labour_needed: 0,
+        labour_time_value: 1,
+        attachments: [attachment],
+        markup_value: 20,
+        ...work,
+      },
+    ],
+  };
+}
+
+test.describe("engineer estimate questionnaire — attachment context", () => {
+  test("Photos & Videos shows product name and truncated scope labels", async ({ page }) => {
+    const sessionId = "e2e-attachment-context-product";
+    const sessionToken = "e2e-attachment-context-product-token";
+    const longScope = `Repair ${"damaged cladding ".repeat(30)}`.trim();
+    await mockProductsApi(page);
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, {
+      uiStep: 1,
+      step2: workBlockWithAttachment(
+        {
+          scope: longScope,
+          selected_product_id: 1,
+          eworks_item_id: 1403,
+          product_name: "74 MOANOR ROAD",
+          product_code: "PR-0011",
+          product_quantity: 1,
+          product_unit_price: 100,
+          product_total_price: 100,
+        },
+        {
+          id: "att-e2e-product-scope",
+          file_name: "site-photo.jpg",
+          size: 2048,
+          media_type: "photo",
+          stored_name: "stored.jpg",
+          product_name: "74 MOANOR ROAD",
+          is_custom_scope: false,
+          scope_snapshot: longScope,
+          work_block_label: "74 MOANOR ROAD · PR-0011",
+        },
+      ),
+    });
+    await openStep2(page, sessionId, sessionToken);
+    await expandWorkBlock(page, 0);
+    await page.getByTestId("work-tab-scope-0").click();
+
+    const productContext = page.getByTestId("attachment-product-context-0");
+    const scopeContext = page.getByTestId("attachment-scope-context-0");
+    await expect(productContext).toHaveText("Product: 74 MOANOR ROAD");
+    await expect(scopeContext).not.toContainText(longScope);
+    expect((await scopeContext.textContent())?.length ?? 0).toBeLessThan(120);
+    await expect(page.getByTestId("work-scope-0")).toHaveValue(longScope);
+    await expect(page.getByText("site-photo.jpg")).toBeVisible();
+  });
+
+  test("Photos & Videos shows custom scope title without full scope snapshot", async ({ page }) => {
+    const sessionId = "e2e-attachment-context-custom";
+    const sessionToken = "e2e-attachment-context-custom-token";
+    const longScope = "Investigate leak and repair membrane. ".repeat(12).trim();
+    await mockProductsApi(page);
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, {
+      uiStep: 1,
+      step2: workBlockWithAttachment(
+        {
+          scope: longScope,
+          selected_product_id: null,
+          is_custom_scope: true,
+          custom_title: "Roof hatch",
+          product_name: "Roof hatch",
+        },
+        {
+          id: "att-e2e-custom-scope",
+          file_name: "hatch-photo.jpg",
+          size: 2048,
+          media_type: "photo",
+          stored_name: "stored.jpg",
+          is_custom_scope: true,
+          custom_scope_title: "Roof hatch",
+          product_name: "Roof hatch",
+          scope_snapshot: longScope,
+          work_block_label: "Roof hatch",
+        },
+      ),
+    });
+    await openStep2(page, sessionId, sessionToken);
+    await expandWorkBlock(page, 0);
+    await page.getByTestId("work-tab-scope-0").click();
+
+    const productContext = page.getByTestId("attachment-product-context-0");
+    const scopeContext = page.getByTestId("attachment-scope-context-0");
+    await expect(productContext).toHaveText("Custom: Roof hatch");
+    await expect(scopeContext).toHaveText("Scope: Roof hatch");
+    await expect(scopeContext).not.toContainText("Investigate leak");
+    await expect(page.getByTestId("work-scope-0")).toHaveValue(longScope);
+  });
+
+  test("engineer B submits with shared product without reselecting product", async ({ page }) => {
+    const sessionId = "e2e-shared-product-submit";
+    const sessionToken = "e2e-shared-product-submit-token";
+    const sharedWorkBlock = {
+      scope: "Shared dishwasher scope from engineer A",
+      selected_product_id: 1,
+      product_name: "Plant Room",
+      product_code: "PR-0011",
+      product_quantity: 1,
+      product_unit_price: 100,
+      product_total_price: 100,
+      time_frame: "1.5 hours",
+      engineers_required: true,
+      engineers_needed: 1,
+      materials_to_order: defaultMaterialsBlock(),
+      markup_value: 20,
+      attachments: [],
+    };
+    let submitBody: Record<string, unknown> | null = null;
+
+    await mockProductsApi(page);
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, {
+      step2: { works: [sharedWorkBlock] },
+      sharedStep2: {
+        updated_by_name: "Engineer A",
+        updated_at: "2026-06-10T10:00:00Z",
+      },
+      onSubmit: (body) => {
+        submitBody = body;
+      },
+    });
+
+    await openStep2(page, sessionId, sessionToken);
+    await expandWorkBlock(page, 0);
+
+    await expect(page.getByText("Plant Room")).toBeVisible();
+    await expect(page.getByTestId("product-combobox")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Submit", exact: true }).click();
+
+    await expect(page.getByText("Step 3 of 3: Submitted")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Select a product or add custom scope")).toHaveCount(0);
+    expect(submitBody).not.toBeNull();
+    const submittedWorks = ((submitBody as { step2?: { works?: Array<Record<string, unknown>> } }).step2?.works ??
+      []) as Array<Record<string, unknown>>;
+    expect(submittedWorks[0]?.selected_product_id).toBe(1);
+    expect(submittedWorks[0]?.product_name).toBe("Plant Room");
+    expect(submittedWorks[0]?.scope).toBe("Shared dishwasher scope from engineer A");
+  });
+
+  test("engineer B submits with shared scope-only work without selecting product", async ({ page }) => {
+    const sessionId = "e2e-shared-scope-only-submit";
+    const sessionToken = "e2e-shared-scope-only-submit-token";
+    const sharedScope = "Replace damaged kitchen tap and check pipework";
+    const sharedWorkBlock = {
+      scope: sharedScope,
+      selected_product_id: null,
+      is_custom_scope: false,
+      custom_title: "",
+      product_name: "",
+      time_frame: "1.5 hours",
+      engineers_required: true,
+      engineers_needed: 1,
+      materials_to_order: defaultMaterialsBlock(),
+      markup_value: 20,
+      attachments: [],
+    };
+    let submitBody: Record<string, unknown> | null = null;
+
+    await mockProductsApi(page);
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, {
+      step2: { works: [sharedWorkBlock] },
+      sharedStep2: {
+        updated_by_name: "Engineer A",
+        updated_at: "2026-06-10T10:00:00Z",
+      },
+      onSubmit: (body) => {
+        submitBody = body;
+      },
+    });
+
+    await openStep2(page, sessionId, sessionToken);
+    await expandWorkBlock(page, 0);
+
+    await expect(page.getByTestId("work-block-0")).toContainText(sharedScope);
+    await page.getByTestId("work-tab-product-0").click();
+    await expect(page.getByTestId("custom-scope-summary-0")).toContainText(`Custom: ${sharedScope}`);
+    await expect(page.getByTestId("product-combobox")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Submit", exact: true }).click();
+
+    await expect(page.getByText("Step 3 of 3: Submitted")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Select a product or add custom scope")).toHaveCount(0);
+    expect(submitBody).not.toBeNull();
+    const submittedWorks = ((submitBody as { step2?: { works?: Array<Record<string, unknown>> } }).step2?.works ??
+      []) as Array<Record<string, unknown>>;
+    expect(submittedWorks[0]?.is_custom_scope).toBe(true);
+    expect(submittedWorks[0]?.custom_title).toBe(sharedScope);
+    expect(submittedWorks[0]?.scope).toBe(sharedScope);
   });
 });

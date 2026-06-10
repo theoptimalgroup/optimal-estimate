@@ -89,6 +89,27 @@ from app.services.quote_acceptance_helpers import staff_acceptance_from_session
 from app.engines.rules_engine import resolve_calculation_rule
 
 
+def build_calculation_session_read(db: Session, session: CalculationSession) -> CalculationSessionRead:
+    from app.services.quote_work_snapshot_service import resolve_shared_step2_for_session
+
+    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+    step2, shared_step2 = resolve_shared_step2_for_session(db, session)
+    return CalculationSessionRead(
+        session_id=session.id,
+        step1=step1,
+        step2=step2,
+        shared_step2=shared_step2,
+        resolved=_resolved_from_session(db, session),
+        expires_at=session.expires_at,
+        ui_state=_session_ui_state(session),
+        status=session.status,
+        locked=session.locked,
+        revision_in_progress=session.revision_in_progress,
+        active_revision_reason=session.active_revision_reason,
+        current_version_number=session.current_version_number,
+    )
+
+
 def _eworks_preview_request(
     db: Session,
     *,
@@ -138,6 +159,57 @@ def _resolved_from_session(db: Session, session: CalculationSession) -> Resolved
     )
 
 
+def _work_block_has_product_context(block: WorkBlockSnapshot) -> bool:
+    if block.is_custom_scope:
+        return bool((block.custom_title or "").strip())
+    return (
+        block.selected_product_id is not None
+        or block.eworks_item_id is not None
+        or bool((block.product_name or "").strip())
+    )
+
+
+def _merge_incoming_work_block_with_shared(
+    incoming: WorkBlockSnapshot,
+    shared: WorkBlockSnapshot | None,
+) -> WorkBlockSnapshot:
+    if shared is None or _work_block_has_product_context(incoming) or not _work_block_has_product_context(shared):
+        return incoming
+    updates: dict = {
+        "selected_product_id": shared.selected_product_id,
+        "is_custom_scope": shared.is_custom_scope,
+        "custom_title": shared.custom_title,
+        "eworks_item_id": shared.eworks_item_id,
+        "product_name": shared.product_name,
+        "product_code": shared.product_code,
+        "product_quantity": shared.product_quantity,
+        "product_unit_price": shared.product_unit_price,
+        "product_total_price": shared.product_total_price,
+        "scope_from_product": shared.scope_from_product,
+    }
+    if not (incoming.scope or "").strip():
+        updates["scope"] = shared.scope
+    return incoming.model_copy(update=updates)
+
+
+def _merge_incoming_step2_with_shared(
+    incoming: Step2Snapshot,
+    shared: Step2Snapshot | None,
+) -> Step2Snapshot:
+    if shared is None or not shared.works:
+        return incoming
+    if not incoming.works:
+        return incoming
+    merged_works = [
+        _merge_incoming_work_block_with_shared(
+            block,
+            shared.works[index] if index < len(shared.works) else None,
+        )
+        for index, block in enumerate(incoming.works)
+    ]
+    return incoming.model_copy(update={"works": merged_works})
+
+
 def _validate_work_block(step2: Step2Snapshot, work_index: int) -> None:
     if not step2.works:
         raise AppError("WORKS_REQUIRED", "At least one work block is required", 400)
@@ -145,7 +217,7 @@ def _validate_work_block(step2: Step2Snapshot, work_index: int) -> None:
         raise AppError("WORK_INDEX_INVALID", "Invalid work index", 400)
     block = step2.works[work_index]
     work_step2 = work_block_to_step2_snapshot(block, trade_name="")
-    has_product = block.selected_product_id is not None and not block.is_custom_scope
+    has_product = _work_block_has_product_context(block) and not block.is_custom_scope
     if block.is_custom_scope:
         if not (block.custom_title and block.custom_title.strip()):
             raise AppError(
@@ -235,6 +307,12 @@ def update_session_step2(
     payload: UpdateCalculationSessionRequest,
     idempotency_key: str | None = None,
 ) -> CalculationSessionRead:
+    from app.services.quote_work_snapshot_service import (
+        normalize_shared_work_blocks,
+        save_shared_step2,
+        sync_session_step2_from_shared,
+    )
+
     request_body = payload.model_dump(mode="json", exclude_none=True)
     if idempotency_key:
         replay = check_idempotency(db, key=idempotency_key, request_hash=hash_payload(request_body))
@@ -244,7 +322,14 @@ def update_session_step2(
     session = get_session_by_token(db, session_id, session_token)
     assert_session_editable(session)
     if payload.step2 is not None:
-        session.step2_snapshot = payload.step2.model_dump(mode="json")
+        from app.services.quote_work_snapshot_service import resolve_shared_step2_for_session
+
+        shared_step2, _ = resolve_shared_step2_for_session(db, session)
+        merged_step2 = normalize_shared_work_blocks(
+            _merge_incoming_step2_with_shared(payload.step2, shared_step2)
+        )
+        save_shared_step2(db, session, merged_step2)
+        sync_session_step2_from_shared(db, session, merged_step2)
     if payload.findings_report is not None:
         current_step1 = dict(session.step1_snapshot or {})
         current_step1["findings_report"] = payload.findings_report
@@ -258,16 +343,7 @@ def update_session_step2(
     if payload.step2 is None and payload.ui_state is None and payload.findings_report is None:
         raise AppError("EMPTY_UPDATE", "Nothing to update", 400)
     db.flush()
-    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
-    step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else None
-    result = CalculationSessionRead(
-        session_id=session.id,
-        step1=step1,
-        step2=step2,
-        resolved=_resolved_from_session(db, session),
-        expires_at=session.expires_at,
-        ui_state=_session_ui_state(session),
-    )
+    result = build_calculation_session_read(db, session)
     if idempotency_key:
         store_idempotency(
             db,
@@ -286,21 +362,32 @@ async def add_session_attachment(
     session_token: str,
     upload,
     work_index: int = 0,
+    actor=None,
 ):
-    from app.schemas.eworks_link import SessionAttachmentMeta, Step2Snapshot
-    from app.services.eworks_attachment_service import save_session_attachment
+    from app.schemas.eworks_link import Step2Snapshot
+    from app.services.quote_work_attachment_service import save_quote_work_attachment
 
     session = get_session_by_token(db, session_id, session_token)
     assert_session_editable(session)
-    attachment = await save_session_attachment(session_id, upload)
+    attachment = await save_quote_work_attachment(
+        db,
+        session=session,
+        upload=upload,
+        work_index=work_index,
+        actor=actor,
+    )
+    from app.services.quote_work_snapshot_service import normalize_shared_work_blocks
+
     step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else Step2Snapshot()
     if not step2.works:
         step2 = Step2Snapshot.model_validate({"scope": step2.scope, **step2.model_dump()})
+    step2 = normalize_shared_work_blocks(step2)
     _validate_work_block(step2, work_index)
     block = step2.works[work_index]
-    block.attachments = [*block.attachments, attachment]
-    step2.works[work_index] = block
-    session.step2_snapshot = step2.model_dump(mode="json")
+    if not any(item.id == attachment.id for item in block.attachments):
+        block.attachments = [*block.attachments, attachment]
+        step2.works[work_index] = block
+        session.step2_snapshot = step2.model_dump(mode="json")
     db.flush()
     return attachment
 
@@ -319,16 +406,10 @@ def _find_attachment_in_step2(step2: Step2Snapshot, attachment_id: str):
 
 
 def get_session_attachment_meta(db: Session, session_id: UUID, attachment_id: str):
-    from app.schemas.eworks_link import SessionAttachmentMeta, Step2Snapshot
+    from app.services.quote_work_attachment_service import resolve_attachment_meta
 
-    session = db.get(CalculationSession, session_id)
-    if not session or not session.step2_snapshot:
-        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
-    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
-    _, attachment = _find_attachment_in_step2(step2, attachment_id)
-    if attachment is None:
-        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
-    return SessionAttachmentMeta.model_validate(attachment)
+    meta, _, _ = resolve_attachment_meta(db, session_id, attachment_id)
+    return meta
 
 
 async def delete_session_attachment(
@@ -337,30 +418,50 @@ async def delete_session_attachment(
     session_id: UUID,
     session_token: str,
     attachment_id: str,
+    actor=None,
 ) -> None:
     from app.schemas.eworks_link import Step2Snapshot
-    from app.services.eworks_attachment_service import delete_stored_attachment
+    from app.services.quote_work_attachment_service import delete_quote_work_attachment, get_quote_attachment_row
 
     session = get_session_by_token(db, session_id, session_token)
     assert_session_editable(session)
-    if not session.step2_snapshot:
-        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
 
-    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
-    work_index, attachment = _find_attachment_in_step2(step2, attachment_id)
-    if attachment is None:
-        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
+    row = get_quote_attachment_row(db, attachment_id)
+    if row is not None:
+        await delete_quote_work_attachment(db, attachment_id=attachment_id, session=session, actor=actor)
+    elif session.step2_snapshot:
+        step2 = Step2Snapshot.model_validate(session.step2_snapshot)
+        work_index, attachment = _find_attachment_in_step2(step2, attachment_id)
+        if attachment is None:
+            raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
+        from app.services.eworks_attachment_service import delete_stored_attachment
 
-    await delete_stored_attachment(session_id, attachment.stored_name)
-
-    if work_index is not None:
-        block = step2.works[work_index]
-        block.attachments = [item for item in block.attachments if item.id != attachment_id]
-        step2.works[work_index] = block
+        await delete_stored_attachment(session_id, attachment.stored_name)
+        if work_index is not None:
+            block = step2.works[work_index]
+            block.attachments = [item for item in block.attachments if item.id != attachment_id]
+            step2.works[work_index] = block
+        else:
+            step2.attachments = [item for item in step2.attachments if item.id != attachment_id]
+        session.step2_snapshot = step2.model_dump(mode="json")
     else:
-        step2.attachments = [item for item in step2.attachments if item.id != attachment_id]
+        raise AppError("ATTACHMENT_NOT_FOUND", "Attachment not found", 404)
 
-    session.step2_snapshot = step2.model_dump(mode="json")
+    if session.step2_snapshot:
+        step2 = Step2Snapshot.model_validate(session.step2_snapshot)
+        changed = False
+        for index, block in enumerate(step2.works):
+            filtered = [item for item in block.attachments if item.id != attachment_id]
+            if len(filtered) != len(block.attachments):
+                step2.works[index] = block.model_copy(update={"attachments": filtered})
+                changed = True
+        if step2.attachments:
+            filtered_root = [item for item in step2.attachments if item.id != attachment_id]
+            if len(filtered_root) != len(step2.attachments):
+                step2.attachments = filtered_root
+                changed = True
+        if changed:
+            session.step2_snapshot = step2.model_dump(mode="json")
     db.flush()
 
 
@@ -449,6 +550,13 @@ def calculate_session(
     step2: Step2Snapshot | None = None,
     idempotency_key: str | None = None,
 ) -> CalculateSessionResponse:
+    from app.services.quote_work_snapshot_service import (
+        normalize_shared_work_blocks,
+        resolve_shared_step2_for_session,
+        save_shared_step2,
+        sync_session_step2_from_shared,
+    )
+
     request_body = {"step2": step2.model_dump(mode="json") if step2 else None}
     if idempotency_key:
         replay = check_idempotency(db, key=idempotency_key, request_hash=hash_payload(request_body))
@@ -458,14 +566,20 @@ def calculate_session(
     session = get_session_by_token(db, session_id, session_token)
     assert_session_editable(session)
     if step2 is not None:
-        session.step2_snapshot = step2.model_dump(mode="json")
-    if not session.step2_snapshot:
+        shared_step2, _ = resolve_shared_step2_for_session(db, session)
+        step2_data = normalize_shared_work_blocks(_merge_incoming_step2_with_shared(step2, shared_step2))
+        save_shared_step2(db, session, step2_data)
+    else:
+        step2_data, _ = resolve_shared_step2_for_session(db, session)
+    step2_data = _merge_shared_quote_attachments(db, session, step2_data)
+    if step2_data is not None:
+        step2_data = normalize_shared_work_blocks(step2_data)
+    if step2_data is None:
         raise AppError("STEP2_REQUIRED", "Estimator inputs are required before calculation", 400)
-
+    sync_session_step2_from_shared(db, session, step2_data)
     step1 = Step1Snapshot.model_validate(session.step1_snapshot)
-    step2_data = Step2Snapshot.model_validate(session.step2_snapshot)
     if not step2_data.works:
-        step2_data = Step2Snapshot.model_validate(session.step2_snapshot)
+        step2_data = Step2Snapshot.model_validate(step2_data.model_dump(mode="json"))
 
     for index in range(len(step2_data.works)):
         block = step2_data.works[index]
@@ -632,7 +746,18 @@ def _merge_step2_attachments(existing: Step2Snapshot | None, incoming: Step2Snap
         if index < len(existing.works) and existing.works[index].attachments and not block.attachments:
             block = block.model_copy(update={"attachments": existing.works[index].attachments})
         merged_works.append(block)
-    return incoming.model_copy(update={"works": merged_works})
+    merged = incoming.model_copy(update={"works": merged_works})
+    if existing.attachments and not incoming.attachments:
+        merged = merged.model_copy(update={"attachments": existing.attachments})
+    return merged
+
+
+def _merge_shared_quote_attachments(db: Session, session: CalculationSession, step2: Step2Snapshot | None) -> Step2Snapshot | None:
+    if step2 is None:
+        return None
+    from app.services.quote_work_attachment_service import merge_shared_attachments_into_step2
+
+    return merge_shared_attachments_into_step2(db, session, step2)
 
 
 def submit_session(
@@ -643,9 +768,18 @@ def submit_session(
     step2: Step2Snapshot | None = None,
     idempotency_key: str | None = None,
 ) -> None:
+    from app.services.quote_work_snapshot_service import resolve_shared_step2_for_session, save_shared_step2
+
     session = get_session_by_token(db, session_id, session_token)
     existing_step2 = Step2Snapshot.model_validate(session.step2_snapshot) if session.step2_snapshot else None
-    merged_step2 = _merge_step2_attachments(existing_step2, step2) if step2 is not None else step2
+    if step2 is not None:
+        shared_step2, _ = resolve_shared_step2_for_session(db, session)
+        merged_step2 = _merge_incoming_step2_with_shared(step2, shared_step2)
+        save_shared_step2(db, session, merged_step2)
+    else:
+        merged_step2, _ = resolve_shared_step2_for_session(db, session)
+    merged_step2 = _merge_step2_attachments(existing_step2, merged_step2) if merged_step2 is not None else merged_step2
+    merged_step2 = _merge_shared_quote_attachments(db, session, merged_step2)
     calculate_session(
         db,
         session_id=session_id,

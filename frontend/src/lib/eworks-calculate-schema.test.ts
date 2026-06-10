@@ -8,11 +8,15 @@ import {
   formatCurrency,
   formatSupplierDisplayName,
   grandTotalMaterials,
+  mergeQuestionnaireWithSessionStep2,
   migrateLegacyMaterialRows,
+  normalizeSharedWorkBlocks,
   questionnaireToStep2,
   shelfMaterialsTotal,
+  step2ToQuestionnaire,
   supplierMaterialsSubtotal,
   supplierMaterialsTotal,
+  workBlockHasProductContext,
   workBlockToSnapshot,
 } from "@/lib/eworks-calculate-schema";
 
@@ -35,6 +39,150 @@ describe("quote charges", () => {
     expect(step2.waste_disposal_amount).toBe(0);
     expect(step2.congestion_required).toBe(true);
     expect(step2.congestion_amount).toBe(18);
+  });
+});
+
+describe("shared work block product context", () => {
+  it("accepts product_name without selected_product_id", () => {
+    expect(
+      workBlockHasProductContext({
+        selected_product_id: null,
+        product_name: "Dishwasher",
+      }),
+    ).toBe(true);
+  });
+
+  it("maps shared snapshot without engineer_time_unit into questionnaire values", () => {
+    const questionnaire = step2ToQuestionnaire(
+      {
+        works: [
+          {
+            scope: "Shared product scope",
+            selected_product_id: 42,
+            product_name: "Dishwasher",
+            product_code: "DW-001",
+            time_frame: "1.5 hours",
+            engineers_required: true,
+            engineers_needed: 1,
+          },
+        ],
+      },
+      "Carpenter",
+    );
+
+    expect(questionnaire.works[0].selected_product_id).toBe(42);
+    expect(questionnaire.works[0].product_name).toBe("Dishwasher");
+    expect(questionnaire.works[0].scope).toBe("Shared product scope");
+  });
+
+  it("merges shared product context into local draft before submit", () => {
+    const local = defaultWorkBlockValues("Carpenter");
+    local.scope = "";
+    local.selected_product_id = null;
+    local.product_name = "";
+
+    const merged = mergeQuestionnaireWithSessionStep2(
+      { ...defaultQuestionnaireValues, works: [local] },
+      {
+        works: [
+          {
+            scope: "Shared product scope",
+            selected_product_id: 42,
+            product_name: "Dishwasher",
+            product_code: "DW-001",
+            time_frame: "1.5 hours",
+            engineers_required: true,
+            engineers_needed: 1,
+          },
+        ],
+      },
+      "Carpenter",
+    );
+
+    expect(merged.works[0].selected_product_id).toBe(42);
+    expect(merged.works[0].product_name).toBe("Dishwasher");
+    expect(merged.works[0].scope).toBe("Shared product scope");
+  });
+
+  it("normalizes shared scope-only work block to custom scope", () => {
+    const normalized = normalizeSharedWorkBlocks({
+      works: [
+        {
+          scope: "Repair leaking roof hatch and replace flashing",
+          engineers_required: true,
+          engineers_needed: 1,
+          engineer_time_value: 1.5,
+        },
+      ],
+    });
+
+    expect(normalized.works?.[0]?.is_custom_scope).toBe(true);
+    expect(normalized.works?.[0]?.custom_title).toBe("Repair leaking roof hatch and replace flashing");
+    expect(workBlockHasProductContext(normalized.works![0])).toBe(true);
+  });
+
+  it("maps shared scope-only snapshot into questionnaire custom scope display", () => {
+    const questionnaire = step2ToQuestionnaire(
+      {
+        works: [
+          {
+            scope: "Shared quote description scope",
+            engineers_required: true,
+            engineers_needed: 1,
+            engineer_time_value: 1.5,
+          },
+        ],
+      },
+      "Carpenter",
+    );
+
+    expect(questionnaire.works[0].is_custom_scope).toBe(true);
+    expect(questionnaire.works[0].custom_title).toBe("Shared quote description scope");
+    expect(questionnaire.works[0].product_name).toBe("Shared quote description scope");
+  });
+
+  it("merges shared scope-only context before submit validation", () => {
+    const local = defaultWorkBlockValues("Carpenter");
+    local.scope = "";
+    local.selected_product_id = null;
+    local.product_name = "";
+
+    const merged = mergeQuestionnaireWithSessionStep2(
+      { ...defaultQuestionnaireValues, works: [local] },
+      {
+        works: [
+          {
+            scope: "Shared scope from quote description",
+            engineers_required: true,
+            engineers_needed: 1,
+            engineer_time_value: 1.5,
+          },
+        ],
+      },
+      "Carpenter",
+    );
+
+    expect(merged.works[0].is_custom_scope).toBe(true);
+    expect(merged.works[0].custom_title).toBe("Shared scope from quote description");
+    expect(merged.works[0].scope).toBe("Shared scope from quote description");
+  });
+
+  it("does not overwrite real shared product during normalization", () => {
+    const normalized = normalizeSharedWorkBlocks({
+      works: [
+        {
+          scope: "Shared product scope",
+          selected_product_id: 42,
+          product_name: "Dishwasher",
+          engineers_required: true,
+          engineers_needed: 1,
+        },
+      ],
+    });
+
+    expect(normalized.works?.[0]?.is_custom_scope).toBeFalsy();
+    expect(normalized.works?.[0]?.selected_product_id).toBe(42);
+    expect(normalized.works?.[0]?.product_name).toBe("Dishwasher");
   });
 });
 

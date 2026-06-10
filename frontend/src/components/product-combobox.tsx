@@ -38,7 +38,7 @@ export function ProductCombobox({
   const customLabel = customScopeLabel?.trim() ? `Custom: ${customScopeLabel.trim()}` : "";
   const selectedLabel =
     customLabel ||
-    (selectedProductId != null && productName
+    (productName?.trim()
       ? formatProductLabel({
           product_name: stripHtmlFromLabel(productName),
           product_code: productCode ?? null,
@@ -92,6 +92,7 @@ export function ProductCombobox({
         aria-controls={listboxId}
         aria-autocomplete="list"
         placeholder="Select product…"
+        data-testid="product-combobox"
         disabled={disabled}
         value={displayValue}
         onFocus={() => {
@@ -139,7 +140,7 @@ export function ProductCombobox({
                 setQuery("");
                 setOpen(false);
               }}
-              data-testid="product-add-custom-scope"
+              data-testid="product-option-custom-scope"
             >
               Product not listed? Add custom scope
             </button>
@@ -152,6 +153,7 @@ export function ProductCombobox({
                 type="button"
                 role="option"
                 aria-selected={product.id === selectedProductId}
+                data-testid="product-option-existing"
                 className={cn(
                   "block w-full px-3 py-2 text-left text-sm hover:bg-slate-50",
                   product.id === selectedProductId && "border border-blue-200 bg-blue-50 font-medium text-blue-700",

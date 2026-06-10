@@ -35,6 +35,16 @@ export const attachmentMetaSchema = z.object({
   size: z.number(),
   media_type: z.string(),
   stored_name: z.string(),
+  uploaded_by_name: z.string().nullable().optional(),
+  uploaded_by_email: z.string().nullable().optional(),
+  uploaded_at: z.string().nullable().optional(),
+  work_index: z.number().nullable().optional(),
+  product_id: z.number().nullable().optional(),
+  product_name: z.string().nullable().optional(),
+  is_custom_scope: z.boolean().nullable().optional(),
+  custom_scope_title: z.string().nullable().optional(),
+  scope_snapshot: z.string().nullable().optional(),
+  work_block_label: z.string().nullable().optional(),
 });
 
 export type TimeUnit = "hours" | "days";
@@ -244,10 +254,10 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
 
 function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.RefinementCtx, pathPrefix = "") {
   const path = (field: string) => (pathPrefix ? `${pathPrefix}.${field}` : field);
-  const hasProduct = data.selected_product_id != null;
+  const hasProduct = workBlockHasProductContext(data);
   const isCustomScope = Boolean(data.is_custom_scope);
 
-  if (!hasProduct && !isCustomScope) {
+  if (!hasProduct) {
     ctx.addIssue({
       code: "custom",
       message: "Select a product or add custom scope",
@@ -270,7 +280,7 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
         path: [path("scope")],
       });
     }
-  } else if (hasProduct && !data.scope?.trim()) {
+  } else if (hasProduct && !isCustomScope && !data.scope?.trim()) {
     ctx.addIssue({
       code: "custom",
       message: "Scope of works is required",
@@ -693,6 +703,122 @@ export function computeProductTotalPrice(quantity: number, unitPrice: number): n
   return Math.round(quantity * unitPrice * 100) / 100;
 }
 
+type WorkBlockProductContext = {
+  selected_product_id?: number | null;
+  is_custom_scope?: boolean;
+  custom_title?: string | null;
+  eworks_item_id?: number | null;
+  product_name?: string | null;
+  scope?: string | null;
+};
+
+const CUSTOM_SCOPE_TITLE_MAX = 80;
+
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function workBlockMeaningfulScopeText(work: WorkBlockProductContext): string | null {
+  for (const candidate of [work.scope, work.custom_title, work.product_name]) {
+    const text = stripHtmlFromLabel(candidate ?? "").trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+function deriveCustomScopeTitle(scope: string): string {
+  const collapsed = collapseWhitespace(scope);
+  if (collapsed.length > CUSTOM_SCOPE_TITLE_MAX) {
+    return `${collapsed.slice(0, CUSTOM_SCOPE_TITLE_MAX)}…`;
+  }
+  return collapsed;
+}
+
+function normalizeWorkBlockScopeToCustom<T extends WorkBlockProductContext>(work: T): T {
+  if (workBlockHasProductContext(work) || !workBlockMeaningfulScopeText(work)) {
+    return work;
+  }
+  const title = deriveCustomScopeTitle(workBlockMeaningfulScopeText(work) ?? "");
+  return {
+    ...work,
+    is_custom_scope: true,
+    custom_title: title,
+    product_name: title,
+    selected_product_id: null,
+    eworks_item_id: null,
+  };
+}
+
+export function normalizeSharedWorkBlocks(step2: Step2Snapshot | null | undefined): Step2Snapshot {
+  if (!step2) {
+    return { works: [] };
+  }
+  let works = step2.works ?? [];
+  if (works.length === 0 && step2.scope?.trim()) {
+    works = [{ scope: step2.scope } as WorkBlockSnapshot];
+  }
+  if (works.length === 0) {
+    return step2;
+  }
+  return {
+    ...step2,
+    works: works.map((block) => normalizeWorkBlockScopeToCustom(block)),
+  };
+}
+
+export function workBlockHasProductContext(work: WorkBlockProductContext): boolean {
+  if (work.is_custom_scope) {
+    return Boolean(work.custom_title?.trim());
+  }
+  return (
+    work.selected_product_id != null ||
+    work.eworks_item_id != null ||
+    Boolean(work.product_name?.trim())
+  );
+}
+
+export function mergeWorkBlockWithSharedContext(
+  local: WorkBlockFormValues,
+  shared: WorkBlockSnapshot,
+  tradeName: string,
+): WorkBlockFormValues {
+  if (workBlockHasProductContext(local) || !workBlockHasProductContext(shared)) {
+    return local;
+  }
+  const sharedForm = blockFromSnapshot(shared, tradeName);
+  return {
+    ...local,
+    scope: local.scope?.trim() ? local.scope : sharedForm.scope,
+    selected_product_id: sharedForm.selected_product_id,
+    is_custom_scope: sharedForm.is_custom_scope,
+    custom_title: sharedForm.custom_title,
+    eworks_item_id: sharedForm.eworks_item_id,
+    product_name: sharedForm.product_name,
+    product_code: sharedForm.product_code,
+    product_quantity: sharedForm.product_quantity,
+    product_unit_price: sharedForm.product_unit_price,
+    product_total_price: sharedForm.product_total_price,
+    scope_from_product: sharedForm.scope_from_product,
+  };
+}
+
+export function mergeQuestionnaireWithSessionStep2(
+  values: QuestionnaireFormValues,
+  sessionStep2: Step2Snapshot | null | undefined,
+  tradeName: string,
+): QuestionnaireFormValues {
+  const shared = normalizeSharedWorkBlocks(sessionStep2);
+  if (!shared.works?.length) {
+    return values;
+  }
+  return {
+    ...values,
+    works: values.works.map((work, index) =>
+      mergeWorkBlockWithSharedContext(work, shared.works![index] ?? {}, tradeName),
+    ),
+  };
+}
+
 export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapshot {
   const labourActive = work.labour_required && work.engineers_required && work.engineer_time_unit === "days";
   const primaryUnit = work.engineers_required ? work.engineer_time_unit : "days";
@@ -848,58 +974,62 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
 }
 
 function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlockFormValues {
-  if (block.engineer_time_unit) {
-    return {
-      scope: cleanEditableScope(block.scope),
-      selected_product_id:
-        block.is_custom_scope || block.selected_product_id == null ? null : Number(block.selected_product_id),
-      is_custom_scope: Boolean(block.is_custom_scope),
-      custom_title: block.is_custom_scope ? cleanProductName(block.custom_title ?? block.product_name) : "",
-      eworks_item_id:
-        block.is_custom_scope || block.eworks_item_id == null ? null : Number(block.eworks_item_id),
-      product_name: block.is_custom_scope
-        ? cleanProductName(block.custom_title ?? block.product_name)
-        : cleanProductName(block.product_name),
-      product_code: block.product_code ?? "",
-      product_quantity: Number(block.product_quantity ?? 1),
-      product_unit_price: Number(block.product_unit_price ?? 0),
-      product_total_price: Number(
-        block.product_total_price ??
-          computeProductTotalPrice(Number(block.product_quantity ?? 1), Number(block.product_unit_price ?? 0)),
-      ),
-      scope_from_product: Boolean(block.scope_from_product ?? false),
-      materials_to_order:
-        block.materials_to_order && block.materials_to_order.length > 0
-          ? migrateLegacyMaterialRows(block.materials_to_order)
-          : defaultWorkBlockValues(tradeName).materials_to_order,
-      shelf_materials_rows: shelfRowsFromLegacy(
-        block.shelf_materials_rows,
-        block.shelf_materials,
-        block.shelf_materials_cost,
-      ),
-      skill_required: block.skill_required?.trim() || tradeName,
-      best_engineer: block.best_engineer ?? "",
-      subcontractors: block.subcontractors ?? "",
-      engineers_required: Boolean(block.engineers_required ?? (block.engineers_needed ?? 0) > 0),
-      engineers_needed:
-        (block.engineers_required ?? (block.engineers_needed ?? 0) > 0)
-          ? Math.max(1, Number(block.engineers_needed ?? block.engineers ?? 1))
-          : 0,
-      engineer_time_unit: (block.engineer_time_unit as TimeUnit) ?? "hours",
-      engineer_time_value: Number(block.engineer_time_value ?? 1.5),
-      labour_required: Boolean(block.labour_required ?? (block.labourers ?? 0) > 0),
-      labour_needed:
-        (block.labour_required ?? (block.labourers ?? 0) > 0)
-          ? Math.max(1, Number(block.labour_needed ?? block.labourers ?? 1))
-          : 0,
-      labour_time_value: Number(block.labour_time_value ?? 1),
-      other_notes: block.other_notes ?? "",
-      findings: block.findings ?? "",
-      attachments: block.attachments ?? [],
-      markup_value: Number(block.markup_value ?? 20),
-    };
-  }
-  return legacyBlockFromStep2(block as Step2Snapshot, tradeName);
+  const parsedEngineerTime = block.engineer_time_unit
+    ? {
+        time_unit: (block.engineer_time_unit === "days" ? "days" : "hours") as TimeUnit,
+        time_value: Number(block.engineer_time_value ?? 1.5),
+      }
+    : parseTimeFrame(block.time_frame);
+  const engineersRequired = Boolean(block.engineers_required ?? (block.engineers_needed ?? block.engineers ?? 0) > 0);
+  const hasLabour = Boolean(block.labour_required ?? (block.labourers ?? 0) > 0);
+  const labourerDays = Number(block.labourer_days ?? 0);
+  return {
+    scope: cleanEditableScope(block.scope),
+    selected_product_id:
+      block.is_custom_scope || block.selected_product_id == null ? null : Number(block.selected_product_id),
+    is_custom_scope: Boolean(block.is_custom_scope),
+    custom_title: block.is_custom_scope ? cleanProductName(block.custom_title ?? block.product_name) : "",
+    eworks_item_id:
+      block.is_custom_scope || block.eworks_item_id == null ? null : Number(block.eworks_item_id),
+    product_name: block.is_custom_scope
+      ? cleanProductName(block.custom_title ?? block.product_name)
+      : cleanProductName(block.product_name),
+    product_code: block.product_code ?? "",
+    product_quantity: Number(block.product_quantity ?? 1),
+    product_unit_price: Number(block.product_unit_price ?? 0),
+    product_total_price: Number(
+      block.product_total_price ??
+        computeProductTotalPrice(Number(block.product_quantity ?? 1), Number(block.product_unit_price ?? 0)),
+    ),
+    scope_from_product: Boolean(block.scope_from_product ?? false),
+    materials_to_order:
+      block.materials_to_order && block.materials_to_order.length > 0
+        ? migrateLegacyMaterialRows(block.materials_to_order)
+        : defaultWorkBlockValues(tradeName).materials_to_order,
+    shelf_materials_rows: shelfRowsFromLegacy(
+      block.shelf_materials_rows,
+      block.shelf_materials,
+      block.shelf_materials_cost,
+    ),
+    skill_required: block.skill_required?.trim() || tradeName,
+    best_engineer: block.best_engineer ?? "",
+    subcontractors: block.subcontractors ?? "",
+    engineers_required: engineersRequired,
+    engineers_needed: engineersRequired ? Math.max(1, Number(block.engineers_needed ?? block.engineers ?? 1)) : 0,
+    engineer_time_unit: parsedEngineerTime.time_unit,
+    engineer_time_value: parsedEngineerTime.time_value,
+    labour_required: hasLabour,
+    labour_needed: hasLabour ? Math.max(1, Number(block.labour_needed ?? block.labourers ?? 1)) : 0,
+    labour_time_value: hasLabour
+      ? Number(block.labour_time_value ?? 1)
+      : labourerDays > 0
+        ? labourerDays
+        : defaultWorkBlockValues(tradeName).labour_time_value,
+    other_notes: block.other_notes ?? "",
+    findings: block.findings ?? "",
+    attachments: block.attachments ?? [],
+    markup_value: Number(block.markup_value ?? 20),
+  };
 }
 
 export function step2ToQuestionnaire(
@@ -914,14 +1044,15 @@ export function step2ToQuestionnaire(
       ...quoteChargesFromStep2(null, step1),
     };
   }
+  const normalizedStep2 = normalizeSharedWorkBlocks(step2);
   const works =
-    step2?.works && step2.works.length > 0
-      ? step2.works.map((block) => normalizeWorkBlockValues(blockFromSnapshot(block, tradeName)))
-      : [normalizeWorkBlockValues(legacyBlockFromStep2(step2 ?? {}, tradeName))];
+    normalizedStep2.works && normalizedStep2.works.length > 0
+      ? normalizedStep2.works.map((block) => normalizeWorkBlockValues(blockFromSnapshot(block, tradeName)))
+      : [normalizeWorkBlockValues(legacyBlockFromStep2(normalizedStep2 ?? {}, tradeName))];
 
   return {
     works,
-    ...quoteChargesFromStep2(step2, step1),
+    ...quoteChargesFromStep2(normalizedStep2, step1),
     ...overrides,
   };
 }

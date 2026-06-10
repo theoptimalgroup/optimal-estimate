@@ -36,6 +36,7 @@ import {
   defaultQuestionnaireValues,
   EWORKS_STEPS,
   CHARGES_FIELDS,
+  mergeQuestionnaireWithSessionStep2,
   questionnaireToStep2,
   step2ToQuestionnaire,
   type QuestionnaireFormValues,
@@ -402,7 +403,15 @@ function EworksCalculateContent() {
           uploaded.push(await uploadSessionAttachment(session.session_id, session.session_token, file, workIndex));
         }
         const current = values.works[workIndex]?.attachments ?? [];
-        setValue(`works.${workIndex}.attachments`, [...current, ...uploaded], { shouldValidate: true });
+        const existingIds = new Set(current.map((item) => item.id));
+        const merged = [...current];
+        for (const item of uploaded) {
+          if (!existingIds.has(item.id)) {
+            merged.push(item);
+            existingIds.add(item.id);
+          }
+        }
+        setValue(`works.${workIndex}.attachments`, merged, { shouldValidate: true });
       } catch (error) {
         setCalcError(error instanceof Error ? error.message : "Upload failed");
       } finally {
@@ -510,6 +519,12 @@ function EworksCalculateContent() {
     if (!session) return;
     setValidationError(null);
     setFocusWorkIndex(null);
+    const mergedValues = mergeQuestionnaireWithSessionStep2(
+      getValues(),
+      session.step2,
+      session.step1.trade_name,
+    );
+    reset(mergedValues);
     const valid = await trigger();
     if (!valid) {
       const currentErrors = form.formState.errors;
@@ -517,7 +532,7 @@ function EworksCalculateContent() {
       setStep(1);
       setFocusWorkIndex(workIndex);
       setValidationError(
-        questionnaireValidationMessage(currentErrors, getValues().works) ??
+        questionnaireValidationMessage(currentErrors, mergedValues.works) ??
           "Please complete all required fields before submitting.",
       );
       return;
@@ -538,8 +553,7 @@ function EworksCalculateContent() {
         window.requestAnimationFrame(() => resolve());
       });
 
-      const latestValues = getValues();
-      const step2 = questionnaireToStep2(latestValues);
+      const step2 = questionnaireToStep2(mergedValues);
 
       await patchSession(session.session_id, session.session_token, {
         step2,
@@ -701,25 +715,45 @@ function EworksCalculateContent() {
         )}
 
         {step === 1 && (
-          <EworksQuestionnaireStep
-            control={control}
-            register={register}
-            watch={watch}
-            setValue={setValue}
-            errors={errors}
-            tradeName={step1.trade_name}
-            skillOptions={skillOptions}
-            sessionId={session.session_id}
-            sessionToken={session.session_token}
-            onUploadFiles={handleUploadFiles}
-            onDeleteAttachment={handleDeleteAttachment}
-            uploading={uploading}
-            deletingAttachmentId={deletingAttachmentId}
-            focusWorkIndex={focusWorkIndex}
-            onActionsReady={(actions) => {
-              questionnaireActionsRef.current = actions;
-            }}
-          />
+          <>
+            <EworksQuestionnaireStep
+              control={control}
+              register={register}
+              watch={watch}
+              setValue={setValue}
+              errors={errors}
+              tradeName={step1.trade_name}
+              skillOptions={skillOptions}
+              sessionId={session.session_id}
+              sessionToken={session.session_token}
+              onUploadFiles={handleUploadFiles}
+              onDeleteAttachment={handleDeleteAttachment}
+              uploading={uploading}
+              deletingAttachmentId={deletingAttachmentId}
+              focusWorkIndex={focusWorkIndex}
+              sharedStep2={session.shared_step2}
+              onActionsReady={(actions) => {
+                questionnaireActionsRef.current = actions;
+              }}
+            />
+            {isDev && (session.step2?.unmatched_attachments?.length ?? 0) > 0 && (
+              <div
+                className="mt-6 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4"
+                data-testid="unmatched-media-debug"
+              >
+                <p className="text-sm font-semibold text-amber-900">Unmatched media (debug)</p>
+                <ul className="space-y-1 text-xs text-amber-900">
+                  {session.step2?.unmatched_attachments?.map((item) => (
+                    <li key={item.id}>
+                      {item.file_name}
+                      {item.work_index != null ? ` · work ${item.work_index}` : ""}
+                      {item.product_name ? ` · ${item.product_name}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
         )}
 
         {step === 2 && isLockedSubmitted && (

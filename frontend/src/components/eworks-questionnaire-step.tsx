@@ -14,6 +14,7 @@ import {
   type ProductOption,
   type QuestionnaireFormValues,
 } from "@/lib/eworks-calculate-schema";
+import type { SharedStep2Meta } from "@/lib/eworks-session";
 import { stripHtmlFromLabel } from "@/lib/html-text";
 import { canAutoFillScope, productScopeText, shouldPromptScopeReplace } from "@/lib/product-scope";
 import { formatWorkCardTitle } from "@/lib/work-label";
@@ -38,6 +39,7 @@ type Props = {
   deletingAttachmentId: string | null;
   focusWorkIndex?: number | null;
   onActionsReady?: (actions: QuestionnaireStepActions) => void;
+  sharedStep2?: SharedStep2Meta | null;
 };
 
 type PendingScopeReplace = {
@@ -67,6 +69,7 @@ export function EworksQuestionnaireStep({
   deletingAttachmentId,
   focusWorkIndex,
   onActionsReady,
+  sharedStep2,
 }: Props) {
   const { fields, append, remove } = useFieldArray({ name: "works", control });
   const values = watch();
@@ -276,6 +279,28 @@ export function EworksQuestionnaireStep({
 
   return (
     <div className="space-y-3">
+      {sharedStep2?.updated_by_name || sharedStep2?.updated_at ? (
+        <div
+          className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"
+          data-testid="shared-quote-work-plan"
+        >
+          <p className="font-semibold">Shared quote work plan</p>
+          {sharedStep2.updated_by_name || sharedStep2.updated_at ? (
+            <p className="mt-1 text-xs text-blue-800">
+              Last updated by {sharedStep2.updated_by_name ?? "a colleague"}
+              {sharedStep2.updated_at
+                ? ` · ${new Date(sharedStep2.updated_at).toLocaleString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : ""}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <WorkModeSwitchDialog
         open={modeSwitchPrompt !== null}
         title={

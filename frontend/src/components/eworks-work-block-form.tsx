@@ -18,9 +18,14 @@ import {
 } from "@/components/eworks-ui";
 import { ProductCombobox } from "@/components/product-combobox";
 import { fetchProduct } from "@/lib/products-api";
+import {
+  attachmentMediaContext,
+  formatAttachmentProductLine,
+  formatAttachmentScopeLine,
+} from "@/lib/attachment-context";
 import { cleanRichTextForTextarea } from "@/lib/html-text";
 import type { AttachmentMeta, MaterialSupplierFormValues, ProductOption, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
-import { defaultMaterialSuppliers, formatCurrency, formatSupplierDisplayName, grandTotalMaterials, computeProductTotalPrice, shelfMaterialsTotal, supplierMaterialsSubtotal, supplierMaterialsTotal } from "@/lib/eworks-calculate-schema";
+import { defaultMaterialSuppliers, formatCurrency, formatSupplierDisplayName, grandTotalMaterials, computeProductTotalPrice, shelfMaterialsTotal, supplierMaterialsSubtotal, supplierMaterialsTotal, workBlockHasProductContext } from "@/lib/eworks-calculate-schema";
 import { getAttachmentUrl, rewordScope } from "@/lib/eworks-session";
 import { withRegisterChange } from "@/lib/form-register";
 
@@ -103,12 +108,35 @@ type Props = {
 const WORK_TABS = ["Product", "Scope", "Materials", "Labour"] as const;
 type WorkTabId = (typeof WORK_TABS)[number];
 
+function formatAttachmentUploadedBy(file: AttachmentMeta): string | null {
+  const name = file.uploaded_by_name?.trim();
+  const when = file.uploaded_at
+    ? new Date(file.uploaded_at).toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : null;
+  if (name && when) return `Uploaded by ${name} · ${when}`;
+  if (name) return `Uploaded by ${name}`;
+  if (when) return `Uploaded ${when}`;
+  return null;
+}
+
+
+function workPanelTestId(tab: WorkTabId, workIndex: number) {
+  return `work-panel-${tab.toLowerCase()}-${workIndex}`;
+}
+
 function workTabTestId(tab: WorkTabId, workIndex: number) {
   return `work-tab-${tab.toLowerCase()}-${workIndex}`;
 }
 
-function workPanelTestId(tab: WorkTabId, workIndex: number) {
-  return `work-panel-${tab.toLowerCase()}-${workIndex}`;
+function tabTestId(tab: WorkTabId) {
+  return `tab-${tab.toLowerCase()}`;
 }
 
 function fieldPath<T extends keyof WorkBlockFormValues>(workIndex: number, field: T) {
@@ -146,7 +174,9 @@ function WorkTabBar({
           )}
           onClick={() => onChange(tab)}
         >
-          {tab}
+          <span data-testid={tabTestId(tab)} className="contents">
+            {tab}
+          </span>
         </button>
       ))}
     </div>
@@ -603,9 +633,9 @@ export function EworksWorkBlockForm({
   const [resetScopeError, setResetScopeError] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
-  const hasConfirmedCustomScope = Boolean(values.is_custom_scope && values.custom_title?.trim());
+  const hasProductContext = workBlockHasProductContext(values);
   const [activeTab, setActiveTab] = useState<WorkTabId>(() =>
-    values.selected_product_id != null || hasConfirmedCustomScope ? "Scope" : "Product",
+    hasProductContext ? "Scope" : "Product",
   );
   const [expandedMaterialsSections, setExpandedMaterialsSections] = useState<Set<MaterialsSubsectionId>>(
     () => new Set(),
@@ -629,11 +659,13 @@ export function EworksWorkBlockForm({
 
   const hasSelectedProduct = values.selected_product_id != null;
   const isCustomScope = Boolean(values.is_custom_scope);
+  const hasSharedProductName = !isCustomScope && Boolean(values.product_name?.trim());
   const customScopeTitle = values.custom_title?.trim() ?? "";
   const showProductCombobox =
-    changingProduct || customScopeDraft || (!hasSelectedProduct && !isCustomScope);
+    changingProduct || customScopeDraft || (!hasProductContext && !isCustomScope);
   const showConfirmedCustom = isCustomScope && !changingProduct && !customScopeDraft;
-  const showConfirmedProduct = hasSelectedProduct && !changingProduct && !customScopeDraft;
+  const showConfirmedProduct =
+    (hasSelectedProduct || hasSharedProductName) && !isCustomScope && !changingProduct && !customScopeDraft;
   const scopeText = values.scope?.trim() ?? "";
   const engineerNotes = values.other_notes?.trim() ?? "";
   const engineerFindings = values.findings?.trim() ?? "";
@@ -884,7 +916,7 @@ export function EworksWorkBlockForm({
                     <EworksInput
                       value={draftTitle}
                       onChange={(event) => setDraftTitle(event.target.value)}
-                      data-testid={`custom-scope-title-${workIndex}`}
+                      data-testid="custom-scope-title-input"
                     />
                   </EworksLabel>
                   <EworksLabel>
@@ -893,7 +925,7 @@ export function EworksWorkBlockForm({
                       rows={3}
                       value={draftDescription}
                       onChange={(event) => setDraftDescription(event.target.value)}
-                      data-testid={`custom-scope-description-${workIndex}`}
+                      data-testid="custom-scope-description-input"
                     />
                   </EworksLabel>
                   <div className="flex flex-wrap gap-2">
@@ -902,7 +934,7 @@ export function EworksWorkBlockForm({
                       variant="secondary"
                       className="min-h-[40px]"
                       onClick={handleCancelCustomScopeDraft}
-                      data-testid={`custom-scope-cancel-${workIndex}`}
+                      data-testid="custom-scope-cancel-button"
                     >
                       Cancel
                     </EworksButton>
@@ -911,7 +943,7 @@ export function EworksWorkBlockForm({
                       className="min-h-[40px]"
                       disabled={!draftTitle.trim()}
                       onClick={handleContinueCustomScope}
-                      data-testid={`custom-scope-continue-${workIndex}`}
+                      data-testid="custom-scope-continue-button"
                     >
                       Continue to Scope
                     </EworksButton>
@@ -990,7 +1022,24 @@ export function EworksWorkBlockForm({
             <EworksTextarea rows={3} {...register(fieldPath(workIndex, "other_notes"))} />
           </EworksLabel>
           <div className="space-y-3">
-            <p className="text-sm font-medium text-slate-900">Photos / Videos</p>
+            <p className="text-sm font-medium text-slate-900">Photos &amp; Videos</p>
+            {attachments.length > 0 && (() => {
+              const firstContext = attachmentMediaContext(attachments[0], values);
+              return (
+                <>
+                  {firstContext.productLine ? (
+                    <p className="text-xs text-slate-600" data-testid={`attachment-product-context-${workIndex}`}>
+                      {firstContext.productLine}
+                    </p>
+                  ) : null}
+                  {firstContext.scopeLine ? (
+                    <p className="text-xs text-slate-600" data-testid={`attachment-scope-context-${workIndex}`}>
+                      {firstContext.scopeLine}
+                    </p>
+                  ) : null}
+                </>
+              );
+            })()}
             <input ref={photoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleAttachmentChange} disabled={uploading} />
             <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={handleAttachmentChange} disabled={uploading} />
             <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleAttachmentChange} disabled={uploading} />
@@ -1012,6 +1061,11 @@ export function EworksWorkBlockForm({
                   const viewUrl = getAttachmentUrl(sessionId, sessionToken, file.id);
                   const isPhoto = file.media_type === "photo";
                   const isDeleting = deletingAttachmentId === file.id;
+                  const mediaContext = attachmentMediaContext(file, values);
+                  const showPerFileContext =
+                    attachments.length > 1 &&
+                    (mediaContext.productLine !== formatAttachmentProductLine(attachments[0], values) ||
+                      mediaContext.scopeLine !== formatAttachmentScopeLine(attachments[0]));
                   return (
                     <li key={file.id} className="flex min-h-[44px] items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
                       <a href={viewUrl} target="_blank" rel="noopener noreferrer" className="flex min-w-0 flex-1 items-center gap-3 active:opacity-80">
@@ -1022,10 +1076,19 @@ export function EworksWorkBlockForm({
                           <span className="flex size-12 shrink-0 items-center justify-center rounded-md border border-black/10 bg-white text-lg text-slate-900">▶</span>
                         )}
                         <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium text-slate-900">
-                            {isPhoto ? "Photo" : file.media_type === "video" ? "Video" : "File"}
-                          </span>
-                          <span className="block truncate text-xs text-slate-600">{file.file_name}</span>
+                          <span className="block truncate text-sm font-medium text-slate-900">{file.file_name}</span>
+                          {showPerFileContext && mediaContext.productLine ? (
+                            <span className="block truncate text-xs text-slate-600">{mediaContext.productLine}</span>
+                          ) : null}
+                          {showPerFileContext && mediaContext.scopeLine ? (
+                            <span className="block truncate text-xs text-slate-600">{mediaContext.scopeLine}</span>
+                          ) : null}
+                          {(() => {
+                            const uploadedBy = formatAttachmentUploadedBy(file);
+                            return uploadedBy ? (
+                              <span className="block truncate text-xs text-slate-500">{uploadedBy}</span>
+                            ) : null;
+                          })()}
                         </span>
                       </a>
                       <button type="button" className="min-h-[44px] shrink-0 px-1 text-xs font-semibold text-red-500 active:opacity-70 disabled:opacity-50" disabled={isDeleting} onClick={() => void onDeleteAttachment(workIndex, file.id)}>
