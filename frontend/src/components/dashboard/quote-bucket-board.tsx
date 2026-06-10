@@ -186,7 +186,7 @@ export function QuoteBucketColumn({
         </Link>
       </div>
 
-      <div className="flex flex-1 flex-col gap-4 p-4" data-testid={`${testId}-cards`}>
+      <div className="flex flex-1 flex-col gap-4 p-4 max-h-[calc(100vh-300px)] overflow-y-auto" data-testid={`${testId}-cards`}>
         {quotes.length === 0 ? (
           <div
             className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600"
@@ -237,34 +237,34 @@ export function QuoteBucketBoard({
 }) {
   const columns: Array<BucketColumnData & { accent: BucketAccent }> = [
     { ...newQuotes, accent: "blue" },
-    { ...awaitingSupplier, accent: "amber" },
-    { ...readyToSend, accent: "emerald" },
-    { ...booked, accent: "violet" },
     { ...mustAttend, accent: "rose" },
+    { ...booked, accent: "violet" },
     { ...awaitingDesktopInfo, accent: "teal" },
     { ...awaitingInternalInfo, accent: "orange" },
+    { ...awaitingSupplier, accent: "amber" },
+    { ...readyToSend, accent: "emerald" },
   ];
 
   return (
-    <div
-      className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-      data-testid="quote-bucket-board"
-    >
-      {columns.map((col) => (
-        <QuoteBucketColumn
-          key={col.testId}
-          title={col.title}
-          accent={col.accent}
-          count={col.count}
-          filteredCount={col.filteredCount}
-          searchActive={searchActive}
-          quotes={col.quotes}
-          viewAllHref={col.viewAllHref}
-          testId={col.testId}
-          viewAllTestId={col.viewAllTestId}
-          onQuoteClick={onQuoteClick}
-        />
-      ))}
+    <div className="overflow-x-auto pb-4" data-testid="quote-bucket-board">
+      <div className="flex gap-4 items-start min-w-max">
+        {columns.map((col) => (
+          <div key={col.testId} className="w-[300px] flex-shrink-0">
+            <QuoteBucketColumn
+              title={col.title}
+              accent={col.accent}
+              count={col.count}
+              filteredCount={col.filteredCount}
+              searchActive={searchActive}
+              quotes={col.quotes}
+              viewAllHref={col.viewAllHref}
+              testId={col.testId}
+              viewAllTestId={col.viewAllTestId}
+              onQuoteClick={onQuoteClick}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

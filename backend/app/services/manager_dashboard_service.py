@@ -356,12 +356,12 @@ def get_manager_dashboard(
 
     buckets: dict[QuoteBucket, list[tuple[EworksQuote, MatchReason | None]]] = {
         "new_quotes": [],
-        "awaiting_supplier": [],
-        "ready_to_send": [],
-        "booked": [],
         "must_attend": [],
+        "booked": [],
         "awaiting_desktop_info": [],
         "awaiting_internal_info": [],
+        "awaiting_supplier": [],
+        "ready_to_send": [],
     }
 
     quotes_excluded_non_draft = 0
@@ -401,11 +401,14 @@ def get_manager_dashboard(
             ],
         }
 
+    total_draft_quotes = sum(len(b) for b in buckets.values())
+
     return {
         "categories": categories,
         "last_synced_at": str(last_sync) if last_sync else None,
         "totals": {
-            "all_open_quotes": sum(len(b) for b in buckets.values()),
+            "all_open_quotes": total_draft_quotes,
+            "total_draft_quotes": total_draft_quotes,
         },
         "quotes_excluded_non_draft": quotes_excluded_non_draft,
     }

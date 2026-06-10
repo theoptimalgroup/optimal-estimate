@@ -26,16 +26,17 @@ class ManagerDashboardCategory(BaseModel):
 
 class ManagerDashboardCategories(BaseModel):
     new_quotes: ManagerDashboardCategory
-    awaiting_supplier: ManagerDashboardCategory
-    ready_to_send: ManagerDashboardCategory
-    booked: ManagerDashboardCategory
     must_attend: ManagerDashboardCategory
+    booked: ManagerDashboardCategory
     awaiting_desktop_info: ManagerDashboardCategory
     awaiting_internal_info: ManagerDashboardCategory
+    awaiting_supplier: ManagerDashboardCategory
+    ready_to_send: ManagerDashboardCategory
 
 
 class ManagerDashboardTotals(BaseModel):
     all_open_quotes: int
+    total_draft_quotes: int = 0
 
 
 class ManagerDashboardRead(BaseModel):

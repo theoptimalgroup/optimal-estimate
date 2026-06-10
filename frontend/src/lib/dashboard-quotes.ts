@@ -28,15 +28,16 @@ export type DashboardCategory = {
 export type OperationalDashboardData = {
   categories: {
     new_quotes: DashboardCategory;
-    awaiting_supplier: DashboardCategory;
-    ready_to_send: DashboardCategory;
-    booked: DashboardCategory;
     must_attend: DashboardCategory;
+    booked: DashboardCategory;
     awaiting_desktop_info: DashboardCategory;
     awaiting_internal_info: DashboardCategory;
+    awaiting_supplier: DashboardCategory;
+    ready_to_send: DashboardCategory;
   };
   last_synced_at: string | null;
   totals: {
     all_open_quotes: number;
+    total_draft_quotes: number;
   };
 };

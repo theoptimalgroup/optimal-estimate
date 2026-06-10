@@ -139,18 +139,11 @@ export default function AdminDashboardPage() {
                 className="border-t-2 border-t-blue-500"
               />
             </div>
-            <div data-testid="kpi-awaiting-supplier">
+            <div data-testid="kpi-must-attend">
               <StatCard
-                label="Awaiting Supplier"
-                value={dashboard.categories.awaiting_supplier.count}
-                className="border-t-2 border-t-amber-500"
-              />
-            </div>
-            <div data-testid="kpi-ready-to-send">
-              <StatCard
-                label="Ready to Send"
-                value={dashboard.categories.ready_to_send.count}
-                className="border-t-2 border-t-emerald-500"
+                label="Must Attend"
+                value={dashboard.categories.must_attend.count}
+                className="border-t-2 border-t-rose-500"
               />
             </div>
             <div data-testid="kpi-booked">
@@ -158,13 +151,6 @@ export default function AdminDashboardPage() {
                 label="Booked"
                 value={dashboard.categories.booked.count}
                 className="border-t-2 border-t-violet-500"
-              />
-            </div>
-            <div data-testid="kpi-must-attend">
-              <StatCard
-                label="Must Attend"
-                value={dashboard.categories.must_attend.count}
-                className="border-t-2 border-t-rose-500"
               />
             </div>
             <div data-testid="kpi-awaiting-desktop-info">
@@ -179,6 +165,27 @@ export default function AdminDashboardPage() {
                 label="Awaiting Internal Info"
                 value={dashboard.categories.awaiting_internal_info.count}
                 className="border-t-2 border-t-orange-500"
+              />
+            </div>
+            <div data-testid="kpi-awaiting-supplier">
+              <StatCard
+                label="Awaiting Supplier"
+                value={dashboard.categories.awaiting_supplier.count}
+                className="border-t-2 border-t-amber-500"
+              />
+            </div>
+            <div data-testid="kpi-ready-to-send">
+              <StatCard
+                label="Ready to Send"
+                value={dashboard.categories.ready_to_send.count}
+                className="border-t-2 border-t-emerald-500"
+              />
+            </div>
+            <div data-testid="kpi-total-drafts">
+              <StatCard
+                label="Total Drafts"
+                value={dashboard.totals.total_draft_quotes ?? dashboard.totals.all_open_quotes}
+                className="border-t-2 border-t-slate-500"
               />
             </div>
             <div data-testid="kpi-last-sync">
