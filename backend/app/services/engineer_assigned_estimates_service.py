@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -18,6 +19,25 @@ from app.services.quote_assignment_service import (
     _serialize_appointment_assignment,
     _serialize_assignment,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _quote_qualifies_for_assigned_estimates(quote: EworksQuote | None) -> bool:
+    """True when the linked quote is Draft (eWorks status code 1)."""
+    from app.services.quote_search_service import quote_is_draft
+
+    if quote is None:
+        return False
+    if quote_is_draft(quote):
+        return True
+    logger.debug(
+        "Skipping assigned estimate: quote_ref=%s eworks_quote_id=%s status=%s reason=not_draft",
+        quote.quote_ref,
+        quote.eworks_quote_id,
+        quote.status,
+    )
+    return False
 
 
 def _appointment_user_matches(
@@ -106,6 +126,7 @@ def _list_manual_engineer_assignments(db: Session, user: AuthenticatedUser) -> l
     return [
         _serialize_assignment(assignment, quote=quote, current_user=user, db=db)
         for assignment, quote in rows
+        if _quote_qualifies_for_assigned_estimates(quote)
     ]
 
 
@@ -127,7 +148,7 @@ def _list_appointment_estimate_assignments(db: Session, user: AuthenticatedUser)
         if not is_quote_linked_assignment(db, job, appointment):
             continue
         quote = _quote_for_job(db, job)
-        if quote is None:
+        if not _quote_qualifies_for_assigned_estimates(quote):
             continue
         key = (quote.id, appointment.appointment_id)
         if key in seen:
@@ -150,6 +171,8 @@ def _list_appointment_estimate_assignments(db: Session, user: AuthenticatedUser)
         if is_cancelled_appointment_status(appointment.status):
             continue
         if not _appointment_user_matches(db, appointment, user=user):
+            continue
+        if not _quote_qualifies_for_assigned_estimates(quote):
             continue
         key = (quote.id, appointment.appointment_id)
         if key in seen:

@@ -186,6 +186,7 @@ def _seed_vitor_quote_job(
         eworks_quote_id=eworks_quote_id,
         quote_ref=quote_ref,
         customer_name="Test Customer",
+        status="1",
         raw_payload={"site_address": "1 Test Street"},
     )
     job = EworksJob(
@@ -271,7 +272,7 @@ def test_different_engineer_cannot_start_vitor_appointment(db_session):
 
 
 def test_manual_assignment_start_still_works(db_session):
-    quote = EworksQuote(eworks_quote_id=29399, quote_ref="Q-MANUAL-START", customer_name="Manual Customer")
+    quote = EworksQuote(eworks_quote_id=29399, quote_ref="Q-MANUAL-START", customer_name="Manual Customer", status="1")
     db_session.add(quote)
     db_session.flush()
     engineer = db_session.query(User).filter(User.email == "vitor.santo@theoptimalgroup.co.uk").one()

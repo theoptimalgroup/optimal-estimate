@@ -173,12 +173,14 @@ def _seed_quote_with_job(
     user_email: str,
     status_text: str = "Awaiting",
     appointment_id: int | None = None,
+    quote_status: str = "1",
 ) -> tuple[EworksQuote, EworksJob]:
     appt_id = appointment_id if appointment_id is not None else eworks_job_id * 2
     quote = EworksQuote(
         eworks_quote_id=eworks_quote_id,
         quote_ref=quote_ref,
         customer_name="Customer",
+        status=quote_status,
     )
     job = EworksJob(
         eworks_job_id=eworks_job_id,

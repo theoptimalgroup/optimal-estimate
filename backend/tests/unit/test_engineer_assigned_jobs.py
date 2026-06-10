@@ -111,6 +111,7 @@ def _seed_job(
                 eworks_quote_id=eworks_quote_id,
                 quote_ref=quote_ref,
                 customer_name="Customer",
+                status="1",
             )
         )
         db_session.flush()

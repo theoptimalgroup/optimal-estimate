@@ -113,12 +113,14 @@ def _seed_quote_linked_job(
     job_ref: str,
     appointment_id: int,
     description: str | None = None,
+    status: str = "1",
 ) -> tuple[EworksQuote, EworksJob]:
     quote = EworksQuote(
         eworks_quote_id=eworks_quote_id,
         quote_ref=quote_ref,
         customer_name="Test Customer",
         description=description,
+        status=status,
         raw_payload={"site_address": "1 Test Street"},
     )
     job = EworksJob(
@@ -187,6 +189,7 @@ def test_quote_level_appointment_appears_in_assigned_estimates(db_session):
         eworks_quote_id=29303,
         quote_ref="Q-QUOTE-ONLY",
         customer_name="Quote Customer",
+        status="1",
         raw_payload={"site_address": "2 Quote Street"},
     )
     db_session.add(quote)
@@ -215,7 +218,12 @@ def test_quote_level_appointment_appears_in_assigned_estimates(db_session):
 
 
 def test_manual_engineer_assignment_appears_in_assigned_estimates(db_session):
-    quote = EworksQuote(eworks_quote_id=29304, quote_ref="Q-MANUAL", customer_name="Manual Customer")
+    quote = EworksQuote(
+        eworks_quote_id=29304,
+        quote_ref="Q-MANUAL",
+        customer_name="Manual Customer",
+        status="1",
+    )
     db_session.add(quote)
     db_session.flush()
     engineer = db_session.query(User).filter(User.email == "vitor.santo@theoptimalgroup.co.uk").one()
@@ -263,7 +271,7 @@ def test_description_html_is_sanitized_in_assigned_estimates(db_session):
     assert description == html_to_plain_text(EWORKS_ACCESS_HTML)
 
 
-def test_vitor_assigned_estimates_includes_q22143_and_q22132(db_session):
+def test_vitor_assigned_estimates_includes_q22143_and_q22132_when_draft(db_session):
     _seed_quote_linked_job(
         db_session,
         eworks_quote_id=29306,
@@ -271,6 +279,7 @@ def test_vitor_assigned_estimates_includes_q22143_and_q22132(db_session):
         eworks_job_id=34005,
         job_ref="JOB-34005",
         appointment_id=66054,
+        status="1",
     )
     _seed_quote_linked_job(
         db_session,
@@ -279,6 +288,7 @@ def test_vitor_assigned_estimates_includes_q22143_and_q22132(db_session):
         eworks_job_id=34008,
         job_ref="JOB-34008",
         appointment_id=66055,
+        status="1",
     )
     user = _engineer_user(db_session)
 
@@ -287,3 +297,112 @@ def test_vitor_assigned_estimates_includes_q22143_and_q22132(db_session):
 
     assert "Q22143" in quote_refs
     assert "Q22132" in quote_refs
+
+
+def test_vitor_assigned_estimates_excludes_q22143_and_q22132_when_not_draft(db_session):
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29306,
+        quote_ref="Q22143",
+        eworks_job_id=34005,
+        job_ref="JOB-34005",
+        appointment_id=66054,
+        status="4",
+    )
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29307,
+        quote_ref="Q22132",
+        eworks_job_id=34008,
+        job_ref="JOB-34008",
+        appointment_id=66055,
+        status="4",
+    )
+    user = _engineer_user(db_session)
+
+    items = list_assignments_for_user(db_session, user)
+    quote_refs = {item["quote_ref"] for item in items}
+
+    assert "Q22143" not in quote_refs
+    assert "Q22132" not in quote_refs
+
+
+@pytest.mark.parametrize("status", ["2", "4", "6", "7"])
+def test_processed_rejected_accepted_converted_quote_linked_appointment_excluded(
+    db_session, status: str
+):
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29400 + int(status),
+        quote_ref=f"Q-NON-DRAFT-{status}",
+        eworks_job_id=34100 + int(status),
+        job_ref=f"JOB-NON-DRAFT-{status}",
+        appointment_id=66100 + int(status),
+        status=status,
+    )
+    user = _engineer_user(db_session)
+
+    items = list_assigned_estimates_for_engineer(db_session, user)
+
+    assert items == []
+
+
+def test_manual_assignment_on_non_draft_hidden(db_session):
+    quote = EworksQuote(
+        eworks_quote_id=29310,
+        quote_ref="Q-MANUAL-NON-DRAFT",
+        customer_name="Manual Customer",
+        status="4",
+    )
+    db_session.add(quote)
+    db_session.flush()
+    engineer = db_session.query(User).filter(User.email == "vitor.santo@theoptimalgroup.co.uk").one()
+    db_session.add(
+        EworksQuoteAssignment(
+            synced_quote_id=quote.id,
+            eworks_quote_id=quote.eworks_quote_id,
+            quote_ref=quote.quote_ref,
+            assigned_user_id=engineer.id,
+            assigned_user_email=engineer.email,
+            assigned_user_name=engineer.full_name,
+            assignment_type="engineer",
+            assignee_kind="registered",
+            status="assigned",
+        )
+    )
+    db_session.commit()
+    user = _engineer_user(db_session)
+
+    items = list_assigned_estimates_for_engineer(db_session, user)
+
+    assert items == []
+
+
+def test_quote_level_appointment_on_non_draft_hidden(db_session):
+    quote = EworksQuote(
+        eworks_quote_id=29311,
+        quote_ref="Q-QUOTE-NON-DRAFT",
+        customer_name="Quote Customer",
+        status="4",
+    )
+    db_session.add(quote)
+    db_session.flush()
+    db_session.add(
+        EworksQuoteAppointment(
+            eworks_quote_id=quote.eworks_quote_id,
+            dedupe_key="id:66060",
+            appointment_id=66060,
+            user_name="Vitor Espirito Santo",
+            user_email="vitor.santo@theoptimalgroup.co.uk",
+            status="Awaiting",
+            is_sales_appointment=True,
+            start_at="2026-06-11T09:00:00.000Z",
+            end_at="2026-06-11T10:00:00.000Z",
+        )
+    )
+    db_session.commit()
+    user = _engineer_user(db_session)
+
+    items = list_assigned_estimates_for_engineer(db_session, user)
+
+    assert items == []
