@@ -163,6 +163,7 @@ export type DashboardQuoteGroupAssignmentSubmissionRow = {
   submitted_by_name?: string | null;
   submitted_by_email?: string | null;
   submitted_by_role?: string | null;
+  assignment_source?: string | null;
   final_total?: number | string | null;
   works_count?: number | null;
   is_latest?: boolean;

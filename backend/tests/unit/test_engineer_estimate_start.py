@@ -236,6 +236,12 @@ def test_appointment_start_creates_estimate_session(db_session):
     assert session.payload_snapshot["appointment_id"] == 66054
     assert session.payload_snapshot["eworks_quote_id"] == 29306
     assert session.payload_snapshot["engineer_email"] == user.email
+    assert session.submitted_by_name == "Vitor Espirito Santo"
+    assert session.submitted_by_email == "vitor.santo@theoptimalgroup.co.uk"
+    assert session.payload_snapshot["submitter_name"] == "Vitor Espirito Santo"
+    assert session.payload_snapshot["submitter_email"] == "vitor.santo@theoptimalgroup.co.uk"
+    assert session.payload_snapshot["assignment_source"] == "eworks_appointment"
+    assert session.payload_snapshot["assignment_type"] == "engineer"
 
 
 def test_second_start_resumes_existing_session(db_session):
@@ -248,6 +254,10 @@ def test_second_start_resumes_existing_session(db_session):
 
     assert first["session_id"] == second["session_id"]
     assert second["created"] is False
+    session = db_session.get(CalculationSession, UUID(first["session_id"]))
+    assert session is not None
+    assert session.submitted_by_name == "Vitor Espirito Santo"
+    assert session.submitted_by_email == "vitor.santo@theoptimalgroup.co.uk"
 
 
 def test_different_engineer_cannot_start_vitor_appointment(db_session):

@@ -1131,25 +1131,31 @@ def _derive_group_review_status(
 
 
 def _resolve_session_submitter(
-    session_id: UUID,
+    db: Session,
+    session: CalculationSession | None,
     *,
     assignments_by_session_id: dict[UUID, object],
     assignments_by_id: dict[int, object],
-    payload_assignment_id,
 ) -> tuple[UUID | None, str, str | None, str | None]:
-    assignment = assignments_by_session_id.get(session_id)
-    if assignment is None and payload_assignment_id is not None:
-        try:
-            assignment = assignments_by_id.get(int(payload_assignment_id))
-        except (TypeError, ValueError):
-            assignment = None
-
-    if assignment is None:
+    if session is None:
         return None, "Unknown submitter", None, None
 
-    name = (assignment.assigned_user_name or "").strip() or "Unknown submitter"
-    role = assignment.assignment_type if assignment.assignment_type in {"estimator", "engineer"} else None
-    return assignment.assigned_user_id, name, assignment.assigned_user_email, role
+    assignment = assignments_by_session_id.get(session.id)
+    if assignment is None:
+        payload = session.payload_snapshot if isinstance(session.payload_snapshot, dict) else {}
+        payload_assignment_id = payload.get("assignment_id")
+        if payload_assignment_id is not None:
+            try:
+                assignment = assignments_by_id.get(int(payload_assignment_id))
+            except (TypeError, ValueError):
+                assignment = None
+
+    from app.services.quote_assignment_service import resolve_session_submitter_identity
+
+    identity = resolve_session_submitter_identity(db, session, assignment=assignment)
+    name = identity["submitted_by_name"]
+    role = identity["submitted_by_role"]
+    return identity["submitted_by_user_id"], name, identity["submitted_by_email"], role
 
 
 def _assignee_display_name(
@@ -1299,23 +1305,49 @@ def _build_assignment_submission_rows(
     for session in detail_sessions:
         if session.session_id in linked_session_ids:
             continue
+        raw_session = raw_sessions_by_id.get(session.session_id)
+        from app.services.quote_assignment_service import (
+            _is_unknown_submitter_name,
+            resolve_session_submitter_identity,
+        )
+
+        identity = (
+            resolve_session_submitter_identity(db, raw_session)
+            if raw_session is not None
+            else {
+                "submitted_by_name": session.submitted_by_name,
+                "submitted_by_email": session.submitted_by_email,
+                "submitted_by_role": session.submitted_by_role,
+                "assignment_type": "unknown",
+                "assignee_kind": "unknown",
+                "assignment_source": None,
+            }
+        )
+
+        display_name = _assignee_display_name(
+            assigned_user_name=identity.get("submitted_by_name"),
+            assigned_user_email=identity.get("submitted_by_email"),
+        )
+        if display_name == "Unassigned" or _is_unknown_submitter_name(display_name):
+            display_name = "Unknown"
         rows.append(
             _enrich_assignment_submission_row(
                 db,
                 DashboardQuoteGroupAssignmentSubmissionRow(
                     assignment_id=None,
-                    assignment_type="unknown",
-                    assignee_kind="unknown",
-                    assignee_name="Unknown",
-                    assignee_email=None,
+                    assignment_type=identity.get("assignment_type") or "unknown",
+                    assignee_kind=identity.get("assignee_kind") or "unknown",
+                    assignee_name=display_name,
+                    assignee_email=identity.get("submitted_by_email") or session.submitted_by_email,
                     assignment_status="submitted",
                     assigned_at=None,
                     started_at=None,
                     submitted_at=session.submitted_at,
                     linked_session_id=session.session_id,
-                    submitted_by_name=session.submitted_by_name,
-                    submitted_by_email=session.submitted_by_email,
-                    submitted_by_role=session.submitted_by_role,
+                    submitted_by_name=identity.get("submitted_by_name") or session.submitted_by_name,
+                    submitted_by_email=identity.get("submitted_by_email") or session.submitted_by_email,
+                    submitted_by_role=identity.get("submitted_by_role") or session.submitted_by_role,
+                    assignment_source=identity.get("assignment_source"),
                     final_total=session.final_total,
                     works_count=session.works_count,
                     can_view_details=True,
@@ -1403,12 +1435,11 @@ def _build_quote_group_detail(
     detail_sessions: list[DashboardQuoteGroupSessionDetailItem] = []
     for item in group.sessions:
         session = sessions_by_id.get(item.session_id)
-        payload = session.payload_snapshot if session and isinstance(session.payload_snapshot, dict) else {}
         submitter_id, submitter_name, submitter_email, submitter_role = _resolve_session_submitter(
-            item.session_id,
+            db,
+            session,
             assignments_by_session_id=assignments_by_session_id,
             assignments_by_id=assignments_by_id,
-            payload_assignment_id=payload.get("assignment_id"),
         )
         detail_sessions.append(
             DashboardQuoteGroupSessionDetailItem(

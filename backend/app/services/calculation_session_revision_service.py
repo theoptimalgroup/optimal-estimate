@@ -107,10 +107,25 @@ def resolve_session_submitter(
     if session.submitted_by_user_id is not None:
         return session.submitted_by_user_id, session.submitted_by_name, session.submitted_by_email
 
+    name = (session.submitted_by_name or "").strip()
+    if name and name.lower() not in {"unknown", "unknown submitter"}:
+        return session.submitted_by_user_id, session.submitted_by_name, session.submitted_by_email
+
     assignment = _assignment_for_session(db, session.id)
-    if assignment is None:
-        return None, None, None
-    return assignment.assigned_user_id, assignment.assigned_user_name, assignment.assigned_user_email
+    if assignment is not None:
+        return assignment.assigned_user_id, assignment.assigned_user_name, assignment.assigned_user_email
+
+    from app.services.quote_assignment_service import resolve_session_submitter_identity
+
+    identity = resolve_session_submitter_identity(db, session)
+    resolved_name = identity.get("submitted_by_name")
+    if resolved_name and resolved_name != "Unknown submitter":
+        return (
+            identity.get("submitted_by_user_id"),
+            resolved_name,
+            identity.get("submitted_by_email"),
+        )
+    return None, None, None
 
 
 def apply_submitter_to_session(db: Session, session: CalculationSession) -> None:

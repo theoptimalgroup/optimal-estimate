@@ -10,6 +10,7 @@ type Props = {
   selectedProductId: number | null | undefined;
   productName?: string;
   productCode?: string;
+  customScopeLabel?: string | null;
   onSelect: (product: ProductOption | null) => void;
   onAddCustomScope?: () => void;
   disabled?: boolean;
@@ -20,6 +21,7 @@ export function ProductCombobox({
   selectedProductId,
   productName,
   productCode,
+  customScopeLabel,
   onSelect,
   onAddCustomScope,
   disabled = false,
@@ -33,13 +35,15 @@ export function ProductCombobox({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const customLabel = customScopeLabel?.trim() ? `Custom: ${customScopeLabel.trim()}` : "";
   const selectedLabel =
-    selectedProductId != null && productName
+    customLabel ||
+    (selectedProductId != null && productName
       ? formatProductLabel({
           product_name: stripHtmlFromLabel(productName),
           product_code: productCode ?? null,
         })
-      : "";
+      : "");
 
   const loadProducts = useCallback(async (search: string) => {
     setLoading(true);

@@ -76,6 +76,7 @@ export function EworksQuestionnaireStep({
   const scrollToNewRef = useRef<number | null>(null);
   const [scopeReplacePrompt, setScopeReplacePrompt] = useState<PendingScopeReplace | null>(null);
   const [modeSwitchPrompt, setModeSwitchPrompt] = useState<PendingModeSwitch | null>(null);
+  const [customScopeDraftIndex, setCustomScopeDraftIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (focusWorkIndex !== null && focusWorkIndex !== undefined && focusWorkIndex >= 0) {
@@ -118,23 +119,6 @@ export function EworksQuestionnaireStep({
     [setValue, values.works],
   );
 
-  const applyCustomScopeMode = useCallback(
-    (workIndex: number) => {
-      const base = `works.${workIndex}` as const;
-      setValue(`${base}.is_custom_scope`, true, { shouldValidate: true });
-      setValue(`${base}.selected_product_id`, null, { shouldValidate: true });
-      setValue(`${base}.eworks_item_id`, null, { shouldValidate: true });
-      setValue(`${base}.product_name`, "", { shouldValidate: true });
-      setValue(`${base}.product_code`, "", { shouldValidate: true });
-      setValue(`${base}.product_unit_price`, 0, { shouldValidate: true });
-      setValue(`${base}.product_total_price`, 0, { shouldValidate: true });
-      setValue(`${base}.product_quantity`, 1, { shouldValidate: true });
-      setValue(`${base}.scope_from_product`, false, { shouldValidate: true });
-      setChangingProductIndex(null);
-    },
-    [setValue],
-  );
-
   const clearProductSelection = useCallback(
     (workIndex: number) => {
       const base = `works.${workIndex}` as const;
@@ -151,8 +135,65 @@ export function EworksQuestionnaireStep({
     [setValue],
   );
 
+  const beginCustomScopeDraft = useCallback(
+    (workIndex: number) => {
+      const base = `works.${workIndex}` as const;
+      setValue(`${base}.is_custom_scope`, false, { shouldValidate: true });
+      setValue(`${base}.custom_title`, "", { shouldValidate: true });
+      setValue(`${base}.selected_product_id`, null, { shouldValidate: true });
+      setValue(`${base}.eworks_item_id`, null, { shouldValidate: true });
+      setValue(`${base}.product_name`, "", { shouldValidate: true });
+      setValue(`${base}.product_code`, "", { shouldValidate: true });
+      setValue(`${base}.product_unit_price`, 0, { shouldValidate: true });
+      setValue(`${base}.product_total_price`, 0, { shouldValidate: true });
+      setValue(`${base}.scope_from_product`, false, { shouldValidate: true });
+      setChangingProductIndex(null);
+      setCustomScopeDraftIndex(workIndex);
+    },
+    [setValue],
+  );
+
+  const confirmCustomScope = useCallback(
+    (workIndex: number, title: string, description?: string) => {
+      const trimmedTitle = title.trim();
+      if (!trimmedTitle) return;
+      const base = `works.${workIndex}` as const;
+      setValue(`${base}.is_custom_scope`, true, { shouldValidate: true });
+      setValue(`${base}.custom_title`, trimmedTitle, { shouldValidate: true });
+      setValue(`${base}.product_name`, trimmedTitle, { shouldValidate: true });
+      setValue(`${base}.selected_product_id`, null, { shouldValidate: true });
+      setValue(`${base}.eworks_item_id`, null, { shouldValidate: true });
+      setValue(`${base}.product_code`, "", { shouldValidate: true });
+      setValue(`${base}.product_unit_price`, 0, { shouldValidate: true });
+      setValue(`${base}.product_total_price`, 0, { shouldValidate: true });
+      setValue(`${base}.product_quantity`, 1, { shouldValidate: true });
+      setValue(`${base}.scope_from_product`, false, { shouldValidate: true });
+      const trimmedDescription = description?.trim();
+      if (trimmedDescription) {
+        setValue(`${base}.scope`, trimmedDescription, { shouldValidate: true });
+      }
+      setCustomScopeDraftIndex(null);
+      setChangingProductIndex(null);
+    },
+    [setValue],
+  );
+
+  const cancelCustomScopeDraft = useCallback(
+    (workIndex: number) => {
+      setCustomScopeDraftIndex(null);
+      const work = values.works[workIndex];
+      if (!work?.is_custom_scope) {
+        clearProductSelection(workIndex);
+      }
+    },
+    [clearProductSelection, values.works],
+  );
+
   const handleProductSelect = useCallback(
     (workIndex: number, product: ProductOption | null) => {
+      if (customScopeDraftIndex === workIndex) {
+        setCustomScopeDraftIndex(null);
+      }
       if (!product) {
         clearProductSelection(workIndex);
         return;
@@ -180,7 +221,7 @@ export function EworksQuestionnaireStep({
       applyProductSelection(workIndex, product, false);
       setChangingProductIndex(null);
     },
-    [applyProductSelection, clearProductSelection, values.works],
+    [applyProductSelection, clearProductSelection, customScopeDraftIndex, values.works],
   );
 
   const handleAddCustomScope = useCallback(
@@ -190,9 +231,9 @@ export function EworksQuestionnaireStep({
         setModeSwitchPrompt({ workIndex, mode: "to-custom" });
         return;
       }
-      applyCustomScopeMode(workIndex);
+      beginCustomScopeDraft(workIndex);
     },
-    [applyCustomScopeMode, values.works],
+    [beginCustomScopeDraft, values.works],
   );
 
   const handleChangeProductClick = useCallback(
@@ -250,7 +291,7 @@ export function EworksQuestionnaireStep({
         onConfirm={() => {
           if (!modeSwitchPrompt) return;
           if (modeSwitchPrompt.mode === "to-custom") {
-            applyCustomScopeMode(modeSwitchPrompt.workIndex);
+            beginCustomScopeDraft(modeSwitchPrompt.workIndex);
           } else {
             setChangingProductIndex(modeSwitchPrompt.workIndex);
             if (modeSwitchPrompt.product) {
@@ -386,6 +427,9 @@ export function EworksQuestionnaireStep({
                     deletingAttachmentId={deletingAttachmentId}
                     onProductSelect={(product) => handleProductSelect(index, product)}
                     onAddCustomScope={() => handleAddCustomScope(index)}
+                    customScopeDraft={customScopeDraftIndex === index}
+                    onConfirmCustomScope={(title, description) => confirmCustomScope(index, title, description)}
+                    onCancelCustomScopeDraft={() => cancelCustomScopeDraft(index)}
                     changingProduct={changingProductIndex === index}
                     onChangeProductClick={() => handleChangeProductClick(index)}
                   />

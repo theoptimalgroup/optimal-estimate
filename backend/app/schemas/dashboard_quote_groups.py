@@ -147,6 +147,7 @@ class DashboardQuoteGroupAssignmentSubmissionRow(BaseModel):
     submitted_by_name: str | None = None
     submitted_by_email: str | None = None
     submitted_by_role: str | None = None
+    assignment_source: str | None = None
     final_total: Decimal | None = None
     works_count: int | None = None
     is_latest: bool = False

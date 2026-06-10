@@ -231,6 +231,229 @@ def _find_appointment_assignment_session(
     return find_session_by_idempotency_key(db, key)
 
 
+def _is_unknown_submitter_name(name: str | None) -> bool:
+    normalized = (name or "").strip().lower()
+    return normalized in {"", "unknown", "unknown submitter"}
+
+
+def resolve_appointment_assignee_by_id(db: Session, appointment_id: int) -> dict[str, Any] | None:
+    """Resolve appointment assignee details for quote review and session identity backfill."""
+    from app.services.engineer_assigned_estimates_service import (
+        _build_assignee_from_job_appointment,
+        _build_assignee_from_quote_appointment,
+    )
+    from app.services.eworks_job_appointment_service import is_cancelled_appointment_status
+
+    job_row = (
+        db.query(EworksJob, EworksJobAppointment)
+        .join(EworksJobAppointment, EworksJob.active_appointment_id == EworksJobAppointment.id)
+        .filter(EworksJobAppointment.appointment_id == appointment_id)
+        .order_by(EworksJobAppointment.start_at.desc(), EworksJob.synced_at.desc())
+        .first()
+    )
+    if job_row is not None:
+        job, appointment = job_row
+        if is_cancelled_appointment_status(appointment.status):
+            return None
+        assignee = _build_assignee_from_job_appointment(db, job=job, appointment=appointment)
+        assignee["eworks_job_id"] = job.eworks_job_id
+        return assignee
+
+    quote_row = (
+        db.query(EworksQuoteAppointment, EworksQuote)
+        .join(EworksQuote, EworksQuote.eworks_quote_id == EworksQuoteAppointment.eworks_quote_id)
+        .filter(EworksQuoteAppointment.appointment_id == appointment_id)
+        .order_by(EworksQuoteAppointment.start_at.desc(), EworksQuoteAppointment.id.desc())
+        .first()
+    )
+    if quote_row is not None:
+        appointment, quote = quote_row
+        if is_cancelled_appointment_status(appointment.status):
+            return None
+        return _build_assignee_from_quote_appointment(db, quote=quote, appointment=appointment)
+    return None
+
+
+def _appointment_submitter_name(assignee: dict[str, Any], user: AuthenticatedUser) -> str:
+    name = (assignee.get("user_name") or user.name or "").strip()
+    return name or "Unknown"
+
+
+def _appointment_submitter_email(assignee: dict[str, Any], user: AuthenticatedUser) -> str | None:
+    email = (assignee.get("user_email") or user.email or "").strip()
+    return email or None
+
+
+def apply_appointment_session_identity(
+    session: CalculationSession,
+    *,
+    quote: EworksQuote,
+    assignee: dict[str, Any],
+    user: AuthenticatedUser,
+) -> None:
+    """Populate submitter and assignment identity on an appointment-derived calculation session."""
+    appointment_id = assignee.get("appointment_id")
+    submitter_name = _appointment_submitter_name(assignee, user)
+    submitter_email = _appointment_submitter_email(assignee, user)
+    engineer_user_id = assignee.get("registered_user_id") or (str(user.id) if user.id else None)
+
+    session.submitted_by_name = submitter_name
+    session.submitted_by_email = submitter_email
+    parsed_user_id = _as_uuid(engineer_user_id)
+    if parsed_user_id is not None:
+        session.submitted_by_user_id = parsed_user_id
+
+    payload = dict(session.payload_snapshot or {})
+    payload.update(
+        {
+            "submitter_name": submitter_name,
+            "submitter_email": submitter_email,
+            "assignment_source": "eworks_appointment",
+            "assignment_type": "engineer",
+            "appointment_id": appointment_id,
+            "eworks_job_id": assignee.get("eworks_job_id"),
+            "job_ref": assignee.get("job_ref"),
+            "quote_ref": quote.quote_ref,
+            "eworks_quote_id": quote.eworks_quote_id,
+            "engineer_user_id": engineer_user_id,
+            "engineer_email": submitter_email or user.email,
+            "source": "eworks_appointment",
+        }
+    )
+    session.payload_snapshot = payload
+
+
+def backfill_appointment_session_identity(
+    session: CalculationSession,
+    *,
+    quote: EworksQuote,
+    assignee: dict[str, Any],
+    user: AuthenticatedUser,
+) -> None:
+    """Backfill missing submitter fields when resuming an appointment-derived session."""
+    payload = session.payload_snapshot if isinstance(session.payload_snapshot, dict) else {}
+    needs_backfill = (
+        _is_unknown_submitter_name(session.submitted_by_name)
+        or not (session.submitted_by_email or "").strip()
+        or not payload.get("assignment_source")
+        or not payload.get("submitter_name")
+    )
+    if needs_backfill:
+        apply_appointment_session_identity(session, quote=quote, assignee=assignee, user=user)
+
+
+def resolve_session_submitter_identity(
+    db: Session,
+    session: CalculationSession,
+    *,
+    assignment: EworksQuoteAssignment | None = None,
+) -> dict[str, Any]:
+    """
+    Resolve submitter identity for quote review display.
+    Priority: session fields -> payload submitter -> manual assignment -> appointment lookup.
+    """
+    payload = session.payload_snapshot if isinstance(session.payload_snapshot, dict) else {}
+
+    def _build(
+        *,
+        user_id: UUID | None,
+        name: str,
+        email: str | None,
+        role: str | None,
+        source: str | None,
+        assignee_kind: str,
+    ) -> dict[str, Any]:
+        assignment_type = role if role in {"estimator", "engineer"} else "unknown"
+        return {
+            "submitted_by_user_id": user_id,
+            "submitted_by_name": name,
+            "submitted_by_email": email,
+            "submitted_by_role": role,
+            "assignment_source": source,
+            "assignee_kind": assignee_kind,
+            "assignment_type": assignment_type,
+        }
+
+    session_name = (session.submitted_by_name or "").strip()
+    session_email = (session.submitted_by_email or "").strip() or None
+    if not _is_unknown_submitter_name(session_name):
+        role = payload.get("assignment_type")
+        if role not in {"estimator", "engineer"}:
+            source = payload.get("assignment_source") or payload.get("source")
+            role = "engineer" if source == "eworks_appointment" else None
+        assignee_kind = payload.get("assignee_kind") or (
+            "registered" if session.submitted_by_user_id is not None else "external"
+        )
+        return _build(
+            user_id=session.submitted_by_user_id,
+            name=session_name,
+            email=session_email or payload.get("submitter_email"),
+            role=role,
+            source=payload.get("assignment_source") or payload.get("source"),
+            assignee_kind=assignee_kind,
+        )
+
+    payload_name = (payload.get("submitter_name") or "").strip()
+    payload_email = (payload.get("submitter_email") or "").strip() or None
+    if not _is_unknown_submitter_name(payload_name):
+        role = payload.get("assignment_type") or "engineer"
+        user_id = _as_uuid(payload.get("engineer_user_id"))
+        return _build(
+            user_id=user_id,
+            name=payload_name,
+            email=payload_email,
+            role=role if role in {"estimator", "engineer"} else "engineer",
+            source=payload.get("assignment_source") or payload.get("source"),
+            assignee_kind="registered" if user_id is not None else "external",
+        )
+
+    if assignment is None:
+        assignment = _find_assignment_for_session(db, session.id)
+    if assignment is not None:
+        assign_name = (assignment.assigned_user_name or "").strip() or "Unknown submitter"
+        return _build(
+            user_id=assignment.assigned_user_id,
+            name=assign_name,
+            email=assignment.assigned_user_email,
+            role=assignment.assignment_type if assignment.assignment_type in {"estimator", "engineer"} else None,
+            source="manual",
+            assignee_kind=assignment.assignee_kind,
+        )
+
+    appointment_id = payload.get("appointment_id")
+    source = payload.get("assignment_source") or payload.get("source")
+    if appointment_id is not None or source == "eworks_appointment":
+        try:
+            appt_id = int(appointment_id) if appointment_id is not None else None
+        except (TypeError, ValueError):
+            appt_id = None
+        if appt_id is not None:
+            assignee = resolve_appointment_assignee_by_id(db, appt_id)
+            if assignee is not None:
+                appt_name = (assignee.get("user_name") or "").strip()
+                appt_email = (assignee.get("user_email") or "").strip() or None
+                if appt_name or appt_email:
+                    user_id = _as_uuid(assignee.get("registered_user_id"))
+                    display_name = appt_name or appt_email or "Unknown submitter"
+                    return _build(
+                        user_id=user_id,
+                        name=display_name,
+                        email=appt_email,
+                        role="engineer",
+                        source="eworks_appointment",
+                        assignee_kind=assignee.get("assignee_kind") or "external",
+                    )
+
+    return _build(
+        user_id=None,
+        name="Unknown submitter",
+        email=None,
+        role=None,
+        source=None,
+        assignee_kind="unknown",
+    )
+
+
 def _serialize_appointment_assignment(
     assignee: dict[str, Any],
     *,
@@ -1262,6 +1485,7 @@ def _create_calculation_session_for_appointment(
         eworks_customer_snapshot=None,
         expires_at=_as_utc(payload.expires_at) or _now() + timedelta(days=DEFAULT_TOKEN_DAYS),
     )
+    apply_appointment_session_identity(session, quote=quote, assignee=assignee, user=user)
     db.add(session)
     db.flush()
     return session
@@ -1276,6 +1500,7 @@ def _ensure_appointment_calculation_session(
 ) -> tuple[CalculationSession, bool]:
     existing = _find_appointment_assignment_session(db, quote=quote, assignee=assignee, user=user)
     if existing is not None:
+        backfill_appointment_session_identity(existing, quote=quote, assignee=assignee, user=user)
         return existing, False
     existing = _create_calculation_session_for_appointment(
         db, quote=quote, assignee=assignee, user=user

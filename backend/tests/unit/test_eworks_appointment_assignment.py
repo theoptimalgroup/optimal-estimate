@@ -69,6 +69,7 @@ def db_session():
     for table in [
         User.__table__,
         CalculationSession.__table__,
+        EworksCustomer.__table__,
         EworksQuote.__table__,
         EworksCustomFieldDefinition.__table__,
         EworksJob.__table__,

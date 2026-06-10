@@ -75,6 +75,14 @@ function assignmentStatusLabel(status: string): string {
 }
 
 function formatAssigneeKindLine(row: DashboardQuoteGroupAssignmentSubmissionRow): string {
+  const role = formatRole(row.assignment_type === "unknown" ? null : row.assignment_type);
+  const email = row.submitted_by_email ?? row.assignee_email;
+  if (role !== "—" && email) {
+    return `${role} · ${email}`;
+  }
+  if (email) {
+    return email;
+  }
   const kind =
     row.assignee_kind === "unknown"
       ? "Unknown"
@@ -295,9 +303,9 @@ export function QuoteGroupAssignmentSubmissionsTable({
                     <div className="flex items-start justify-between gap-3">
                       <h3
                         className="text-sm font-semibold text-slate-900 sm:text-base"
-                        title={row.assignee_email ?? undefined}
+                        title={row.submitted_by_email ?? row.assignee_email ?? undefined}
                       >
-                        {row.assignee_name}
+                        {row.submitted_by_name ?? row.assignee_name}
                       </h3>
                       {isSubmitted ? (
                         <span
@@ -326,6 +334,11 @@ export function QuoteGroupAssignmentSubmissionsTable({
                           >
                             {assignmentStatusLabel(row.assignment_status)}
                           </StatusBadge>
+                          {row.assignment_source === "eworks_appointment" ? (
+                            <StatusBadge tone="info" data-testid={`submission-source-${sessionId ?? statusId}`}>
+                              eWorks Appointment
+                            </StatusBadge>
+                          ) : null}
                           {row.current_version_number && sessionId ? (
                             <StatusBadge tone="info" data-testid={`submission-version-${sessionId}`}>
                               v{row.current_version_number}
