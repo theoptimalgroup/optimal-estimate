@@ -20,6 +20,7 @@ from app.services.eworks_job_appointment_service import (
 )
 from app.services.eworks_linked_job_sync_service import maybe_auto_sync_linked_jobs_for_quote
 from app.services.eworks_quote_appointment_service import serialize_quote_appointments
+from app.services.eworks_quote_status import resolve_eworks_quote_status_label
 from app.services.eworks_sync_service import (
     _extract_tags_from_raw,
     extract_customer_contact_id_from_raw,
@@ -268,37 +269,16 @@ def _find_linked_estimate(db: Session, *, quote: EworksQuote | None = None, job:
     }
 
 
-_STATUS_ID_LABELS: dict[str, str] = {
-    "1": "New Quote",
-}
-
-
 def _resolve_display_customer_name(quote: EworksQuote, raw: dict[str, Any]) -> str | None:
     return _as_str(quote.customer_name) or extract_customer_name_from_raw(raw)
 
 
 def _resolve_display_status(quote: EworksQuote, raw: dict[str, Any]) -> str | None:
-    status_name = (
-        _as_str(quote.status_name)
-        or _as_str(_pick(raw, "status_name", "Status_Name"))
-        or _as_str(_pick_nested(raw, "quote_status.quote_status", "quote_status.name", "Status_Name"))
+    return resolve_eworks_quote_status_label(
+        status=_as_str(quote.status) or _as_str(_pick(raw, "status", "Status")),
+        status_name=quote.status_name,
+        raw_payload=raw,
     )
-    if status_name:
-        return status_name
-
-    status = _as_str(quote.status) or _as_str(_pick(raw, "status", "Status"))
-    if status in _STATUS_ID_LABELS:
-        return _STATUS_ID_LABELS[status]
-    if status:
-        return status
-
-    status_id = _pick_nested(raw, "quote_status.id")
-    if status_id is not None:
-        mapped = _STATUS_ID_LABELS.get(str(status_id).strip())
-        if mapped:
-            return mapped
-        return str(status_id).strip() or None
-    return None
 
 
 def _resolve_display_tags(quote: EworksQuote, raw: dict[str, Any]) -> list[str]:
@@ -382,8 +362,11 @@ def build_quote_safe_detail(
             "eworks_quote_id": quote.eworks_quote_id,
             "quote_ref": quote.quote_ref or _as_str(_pick(raw, "quote_ref", "Quote_Ref")),
             "status": quote.status or _as_str(_pick(raw, "status", "Status")),
-            "status_name": quote.status_name
-            or _as_str(_pick_nested(raw, "quote_status.quote_status", "Status_Name", "status_name")),
+            "status_name": resolve_eworks_quote_status_label(
+                status=quote.status or _as_str(_pick(raw, "status", "Status")),
+                status_name=quote.status_name,
+                raw_payload=raw,
+            ),
             "synced_at": str(quote.synced_at) if quote.synced_at else None,
         },
         "customer": {

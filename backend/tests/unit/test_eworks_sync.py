@@ -512,7 +512,7 @@ def test_quote_list_uses_raw_payload_status_fallback(mock_settings, api_client, 
 
 
 @patch("app.auth.dependencies.settings")
-def test_quote_list_maps_status_id_one_to_new_quote(mock_settings, api_client, db_session):
+def test_quote_list_maps_status_id_one_to_draft(mock_settings, api_client, db_session):
     _patch_dev_user(mock_settings, role="manager")
     db_session.add(
         EworksQuote(
@@ -525,8 +525,8 @@ def test_quote_list_maps_status_id_one_to_new_quote(mock_settings, api_client, d
     db_session.commit()
     resp = api_client.get("/api/v1/eworks-sync/quotes?search=Q-803")
     item = resp.json()["data"]["items"][0]
-    assert item["status_name"] == "New Quote"
-    assert item["display_status"] == "New Quote"
+    assert item["status_name"] == "Draft"
+    assert item["display_status"] == "Draft"
 
 
 @patch("app.auth.dependencies.settings")

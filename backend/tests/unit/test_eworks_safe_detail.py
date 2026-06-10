@@ -304,6 +304,21 @@ def test_sync_linked_for_quote_endpoint(mock_sync, mock_settings, api_client, db
     assert data["appointments_found"] == 1
 
 
+def test_safe_detail_resolves_status_id_to_label(db_session):
+    quote = EworksQuote(
+        eworks_quote_id=29280,
+        quote_ref="Q22163",
+        status="1",
+    )
+    db_session.add(quote)
+    db_session.commit()
+
+    detail = build_quote_safe_detail(db_session, quote, auto_sync_linked_jobs=False)
+
+    assert detail["identity"]["status"] == "1"
+    assert detail["identity"]["status_name"] == "Draft"
+
+
 @patch("app.core.config.settings.eworks_api_enabled", True)
 @patch("app.services.eworks_safe_detail_service.maybe_auto_sync_linked_jobs_for_quote")
 def test_safe_detail_triggers_auto_sync_when_no_local_job_appointments(mock_auto_sync, db_session):

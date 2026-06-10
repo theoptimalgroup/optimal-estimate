@@ -21,6 +21,7 @@ from app.schemas.eworks_sync_api import EworksSyncBucketSummary, EworksSyncSumma
 from app.services.eworks_attachment_sync_service import sync_parent_attachments
 from app.services.eworks_customers_api_service import fetch_all_customers
 from app.services.eworks_quotes_jobs_api_service import fetch_all_jobs, fetch_all_quotes, fetch_quote_page
+from app.services.eworks_quote_status import resolve_eworks_quote_status_label
 from app.services.eworks_sync_run_state import (
     _PROGRESS_COMMIT_EVERY,
     update_sync_run_progress,
@@ -606,6 +607,12 @@ def _extract_tags_from_raw(raw: dict[str, Any]) -> list[str]:
 def _extract_quote_fields(raw: dict[str, Any]) -> dict[str, Any]:
     """Map a raw eWorks Quote dict to local EworksQuote column values."""
     status_obj = raw.get("quote_status") or {}
+    if isinstance(status_obj, dict) and status_obj.get("id") is not None:
+        status_value = status_obj.get("id")
+        status_name_value = status_obj.get("quote_status")
+    else:
+        status_value = raw.get("status")
+        status_name_value = raw.get("status_name")
     fields = {
         "eworks_quote_id": _safe_int(raw.get("id")),
         "quote_ref": _safe_str(raw.get("quote_ref"), 100),
@@ -618,12 +625,8 @@ def _extract_quote_fields(raw: dict[str, Any]) -> dict[str, Any]:
         "quote_source_id": _safe_int(raw.get("quote_source_id")),
         "quote_date": _safe_str(raw.get("quote_date"), 30),
         "expiry_date": _safe_str(raw.get("expiry_date"), 30),
-        "status": _safe_str(
-            status_obj.get("id") if isinstance(status_obj, dict) else raw.get("status"), 100
-        ),
-        "status_name": _safe_str(
-            status_obj.get("quote_status") if isinstance(status_obj, dict) else raw.get("status_name"), 200
-        ),
+        "status": _safe_str(status_value, 100),
+        "status_name": _safe_str(status_name_value, 200),
         "description": _safe_str(raw.get("description")),
         "notes": _safe_str(raw.get("notes")),
         "customer_notes": _safe_str(raw.get("customer_notes")),
@@ -637,6 +640,13 @@ def _extract_quote_fields(raw: dict[str, Any]) -> dict[str, Any]:
         "tags": _extract_tags_from_raw(raw),
         "raw_payload": raw,
     }
+    resolved_status_name = resolve_eworks_quote_status_label(
+        status=fields.get("status"),
+        status_name=fields.get("status_name"),
+        raw_payload=raw,
+    )
+    if resolved_status_name:
+        fields["status_name"] = resolved_status_name
     log_unresolved_quote_customer(raw, fields)
     return fields
 
