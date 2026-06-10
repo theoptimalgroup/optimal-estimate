@@ -582,6 +582,32 @@ export type EworksQuoteSafeDetail = {
   linked_estimate: EworksLinkedEstimate;
   sales_appointments?: EworksQuoteAppointmentSafe[];
   appointment_assignee?: EworksAppointmentAssignee | null;
+  assignments?: QuoteAssignmentSafe[];
+};
+
+export type QuoteAssignmentSafe = {
+  id: number;
+  synced_quote_id: number;
+  eworks_quote_id: number;
+  quote_ref?: string | null;
+  assigned_user_id?: string | null;
+  assigned_user_email?: string | null;
+  assigned_user_name?: string | null;
+  assignment_type: "estimator" | "engineer";
+  assignee_kind?: "registered" | "external" | null;
+  status?: string | null;
+  assigned_at?: string | null;
+  notes?: string | null;
+  source?: "manual" | "eworks_appointment" | string | null;
+  is_derived?: boolean;
+  is_read_only?: boolean;
+  appointment_id?: number | null;
+  appointment_start_at?: string | null;
+  appointment_end_at?: string | null;
+  appointment_status?: string | null;
+  appointment_type?: string | null;
+  job_ref?: string | null;
+  assignment_link?: string | null;
 };
 
 export type EworksAppointmentAssignee = {

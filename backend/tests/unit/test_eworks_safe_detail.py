@@ -17,6 +17,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
 from app.models.eworks_sync import EworksCustomer, EworksJob, EworksJobAppointment, EworksQuote, EworksQuoteAppointment, EworksCustomFieldDefinition
+from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.user import User
 from app.services.eworks_job_appointment_service import (
     merge_quote_sales_appointments,
@@ -61,6 +62,7 @@ def db_session():
         EworksJob.__table__,
         EworksJobAppointment.__table__,
         EworksQuoteAppointment.__table__,
+        EworksQuoteAssignment.__table__,
     ]:
         table.create(engine, checkfirst=True)
 

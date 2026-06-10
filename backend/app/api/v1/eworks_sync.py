@@ -69,7 +69,7 @@ from app.services.eworks_safe_detail_service import (
     build_quote_safe_detail,
     serialize_quote_list_item,
 )
-from app.services.quote_assignment_service import create_assignment, list_assignments_for_quote
+from app.services.quote_assignment_service import create_assignment, list_assignments_for_quote, override_assignment
 
 logger = logging.getLogger(__name__)
 
@@ -1015,6 +1015,18 @@ def list_quote_assignments(db: DbSession, quote_id: int, actor: ManagerWrite):
 def create_quote_assignment(db: DbSession, quote_id: int, body: AssignmentCreate, actor: ManagerWrite):
     """Assign a synced quote to a registered or external estimator/engineer."""
     data = create_assignment(
+        db,
+        quote_id=quote_id,
+        payload=body.model_dump(mode="json"),
+        current_user=actor,
+    )
+    return success_response(AssignmentRead.model_validate(data).model_dump())
+
+
+@router.post("/quotes/{quote_id}/assignments/override")
+def override_quote_assignment(db: DbSession, quote_id: int, body: AssignmentCreate, actor: ManagerWrite):
+    """Explicitly replace active manual assignments of the same type (does not remove eWorks appointment)."""
+    data = override_assignment(
         db,
         quote_id=quote_id,
         payload=body.model_dump(mode="json"),

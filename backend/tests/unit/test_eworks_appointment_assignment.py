@@ -16,8 +16,9 @@ from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
-from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote, EworksQuoteAppointment
+from app.models.eworks_sync import EworksCustomer, EworksJob, EworksJobAppointment, EworksQuote, EworksQuoteAppointment, EworksCustomFieldDefinition
 from app.models.quote_assignment import EworksQuoteAssignment
+from app.models.support import AuditLog
 from app.models.user import User
 from app.schemas.eworks_link import EworksLinkPayload, Step1Snapshot
 from app.services.engineer_assigned_jobs_service import list_assigned_jobs_for_engineer
@@ -27,7 +28,34 @@ from app.services.eworks_job_appointment_service import (
     sync_job_appointments,
 )
 from app.services.eworks_safe_detail_service import build_quote_safe_detail
-from app.services.quote_assignment_service import list_assignments_for_quote
+from app.services.quote_assignment_service import (
+    build_unified_assignments_for_quote,
+    create_assignment,
+    list_assignments_for_quote,
+    override_assignment,
+)
+
+
+@pytest.fixture(autouse=True)
+def _skip_custom_field_definition_sync(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.eworks_safe_detail_service.ensure_custom_field_definitions",
+        lambda db, *, force=False: False,
+    )
+
+
+@pytest.fixture()
+def manager_user(db_session):
+    from app.auth.types import AuthenticatedUser
+
+    return AuthenticatedUser(
+        id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        email="manager@example.com",
+        name="Manager User",
+        role=UserRole.MANAGER,
+        is_active=True,
+        auth_provider="dev",
+    )
 
 
 @pytest.fixture()
@@ -41,10 +69,12 @@ def db_session():
         User.__table__,
         CalculationSession.__table__,
         EworksQuote.__table__,
+        EworksCustomFieldDefinition.__table__,
         EworksJob.__table__,
         EworksJobAppointment.__table__,
         EworksQuoteAppointment.__table__,
         EworksQuoteAssignment.__table__,
+        AuditLog.__table__,
     ]:
         table.create(engine, checkfirst=True)
 
@@ -722,3 +752,313 @@ def test_engineer_assigned_jobs_includes_matching_email(db_session):
     assert items[0]["job_ref"] == job.job_ref
     assert items[0]["quote_ref"] == quote.quote_ref
     assert items[0]["source"] == "eworks_appointment"
+
+
+def test_safe_detail_assignments_includes_eworks_appointment(db_session):
+    quote, _job = _seed_quote_with_job(
+        db_session,
+        eworks_quote_id=10020,
+        quote_ref="Q-ASSIGN-LIST",
+        eworks_job_id=20020,
+        job_ref="JOB-ASSIGN-LIST",
+        user_name="User Abc",
+        user_email="abc@example.com",
+    )
+
+    detail = build_quote_safe_detail(db_session, quote)
+
+    assert len(detail["assignments"]) == 1
+    assert detail["assignments"][0]["source"] == "eworks_appointment"
+    assert detail["assignments"][0]["is_read_only"] is True
+    assert detail["assignments"][0]["assigned_user_name"] == "User Abc"
+    assert detail["appointment_assignee"]["name"] == "User Abc"
+
+
+def test_adding_manual_engineer_keeps_eworks_appointment(db_session, manager_user):
+    quote, _job = _seed_quote_with_job(
+        db_session,
+        eworks_quote_id=10021,
+        quote_ref="Q-ADD-ENG",
+        eworks_job_id=20021,
+        job_ref="JOB-ADD-ENG",
+        user_name="User Abc",
+        user_email="abc@example.com",
+    )
+
+    create_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "other@example.com",
+            "assigned_user_name": "Other Engineer",
+        },
+        current_user=manager_user,
+    )
+
+    unified = build_unified_assignments_for_quote(db_session, quote.id)
+    manual = list_assignments_for_quote(db_session, quote.id)
+
+    assert len(manual) == 1
+    assert len(unified) == 2
+    assert unified[0]["source"] == "eworks_appointment"
+    assert unified[1]["source"] == "manual"
+    assert unified[1]["assigned_user_email"] == "other@example.com"
+
+
+def test_adding_manual_estimator_keeps_existing_engineer(db_session, manager_user):
+    quote, _job = _seed_quote_with_job(
+        db_session,
+        eworks_quote_id=10022,
+        quote_ref="Q-ADD-EST",
+        eworks_job_id=20022,
+        job_ref="JOB-ADD-EST",
+        user_name="User Abc",
+        user_email="abc@example.com",
+    )
+    create_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "manual-eng@example.com",
+            "assigned_user_name": "Manual Engineer",
+        },
+        current_user=manager_user,
+    )
+
+    create_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "estimator",
+            "assignee_kind": "external",
+            "assigned_user_email": "estimator@example.com",
+            "assigned_user_name": "Manual Estimator",
+        },
+        current_user=manager_user,
+    )
+
+    unified = build_unified_assignments_for_quote(db_session, quote.id)
+
+    assert len(unified) == 3
+    assert unified[0]["source"] == "eworks_appointment"
+    assert any(item["assignment_type"] == "estimator" and item["source"] == "manual" for item in unified)
+    assert any(
+        item["assignment_type"] == "engineer"
+        and item["source"] == "manual"
+        and item["assigned_user_email"] == "manual-eng@example.com"
+        for item in unified
+    )
+
+
+def test_multiple_manual_assignees_can_exist(db_session, manager_user):
+    quote = EworksQuote(eworks_quote_id=10023, quote_ref="Q-MULTI", customer_name="Customer")
+    db_session.add(quote)
+    db_session.commit()
+
+    create_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "estimator",
+            "assignee_kind": "external",
+            "assigned_user_email": "est1@example.com",
+            "assigned_user_name": "Estimator One",
+        },
+        current_user=manager_user,
+    )
+    create_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "eng1@example.com",
+            "assigned_user_name": "Engineer One",
+        },
+        current_user=manager_user,
+    )
+
+    manual = list_assignments_for_quote(db_session, quote.id)
+
+    assert len(manual) == 2
+
+
+def test_duplicate_email_type_updates_existing_manual(db_session, manager_user):
+    quote = EworksQuote(eworks_quote_id=10024, quote_ref="Q-DEDUP", customer_name="Customer")
+    db_session.add(quote)
+    db_session.commit()
+
+    first = create_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "dup@example.com",
+            "assigned_user_name": "Engineer One",
+            "notes": "First note",
+        },
+        current_user=manager_user,
+    )
+    second = create_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "dup@example.com",
+            "assigned_user_name": "Engineer One",
+            "notes": "Updated note",
+        },
+        current_user=manager_user,
+    )
+
+    manual = list_assignments_for_quote(db_session, quote.id)
+
+    assert len(manual) == 1
+    assert first["id"] == second["id"]
+    assert manual[0]["notes"] == "Updated note"
+
+
+def test_override_endpoint_replaces_manual_only(db_session, manager_user):
+    quote, _job = _seed_quote_with_job(
+        db_session,
+        eworks_quote_id=10025,
+        quote_ref="Q-OVERRIDE",
+        eworks_job_id=20025,
+        job_ref="JOB-OVERRIDE",
+        user_name="User Abc",
+        user_email="abc@example.com",
+    )
+    create_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "old@example.com",
+            "assigned_user_name": "Old Engineer",
+        },
+        current_user=manager_user,
+    )
+
+    override_assignment(
+        db_session,
+        quote_id=quote.id,
+        payload={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "new@example.com",
+            "assigned_user_name": "New Engineer",
+        },
+        current_user=manager_user,
+    )
+
+    manual = list_assignments_for_quote(db_session, quote.id)
+    unified = build_unified_assignments_for_quote(db_session, quote.id)
+
+    assert len(manual) == 2
+    cancelled = [item for item in manual if item["status"] == "cancelled"]
+    active = [item for item in manual if item["status"] != "cancelled"]
+    assert len(cancelled) == 1
+    assert len(active) == 1
+    assert active[0]["assigned_user_email"] == "new@example.com"
+    assert unified[0]["source"] == "eworks_appointment"
+    assert unified[0]["assigned_user_email"] == "abc@example.com"
+
+
+@patch("app.auth.dependencies.settings")
+def test_safe_detail_api_returns_assignments_list(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    quote, _job = _seed_quote_with_job(
+        db_session,
+        eworks_quote_id=10026,
+        quote_ref="Q-SAFE-LIST",
+        eworks_job_id=20026,
+        job_ref="JOB-SAFE-LIST",
+        user_name="User Abc",
+        user_email="abc@example.com",
+    )
+
+    resp = api_client.get(f"/api/v1/eworks-sync/quotes/{quote.id}/safe")
+
+    assert resp.status_code == 200
+    detail = resp.json()["data"]
+    assert len(detail["assignments"]) == 1
+    assert detail["assignments"][0]["source"] == "eworks_appointment"
+    assert detail["appointment_assignee"]["email"] == "abc@example.com"
+
+
+@patch("app.auth.dependencies.settings")
+def test_create_assignment_api_does_not_remove_appointment(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    quote, _job = _seed_quote_with_job(
+        db_session,
+        eworks_quote_id=10027,
+        quote_ref="Q-API-ADD",
+        eworks_job_id=20027,
+        job_ref="JOB-API-ADD",
+        user_name="User Abc",
+        user_email="abc@example.com",
+    )
+
+    create_resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "manual@example.com",
+            "assigned_user_name": "Manual Engineer",
+        },
+    )
+    safe_resp = api_client.get(f"/api/v1/eworks-sync/quotes/{quote.id}/safe")
+
+    assert create_resp.status_code == 200
+    detail = safe_resp.json()["data"]
+    assert len(detail["assignments"]) == 2
+    assert detail["assignments"][0]["source"] == "eworks_appointment"
+    assert detail["appointment_assignee"]["email"] == "abc@example.com"
+
+
+@patch("app.auth.dependencies.settings")
+def test_override_assignment_api(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    quote, _job = _seed_quote_with_job(
+        db_session,
+        eworks_quote_id=10028,
+        quote_ref="Q-API-OVERRIDE",
+        eworks_job_id=20028,
+        job_ref="JOB-API-OVERRIDE",
+        user_name="User Abc",
+        user_email="abc@example.com",
+    )
+    api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "old@example.com",
+            "assigned_user_name": "Old Engineer",
+        },
+    )
+
+    override_resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments/override",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "external",
+            "assigned_user_email": "new@example.com",
+            "assigned_user_name": "New Engineer",
+        },
+    )
+    list_resp = api_client.get(f"/api/v1/eworks-sync/quotes/{quote.id}/assignments")
+
+    assert override_resp.status_code == 200
+    assert override_resp.json()["data"]["assigned_user_email"] == "new@example.com"
+    active_manual = [item for item in list_resp.json()["data"]["items"] if item["status"] != "cancelled"]
+    assert len(active_manual) == 1
+    assert active_manual[0]["assigned_user_email"] == "new@example.com"

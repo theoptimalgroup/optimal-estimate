@@ -547,7 +547,7 @@ export function QuoteDetailModal({
           {quoteId ?? detail?.identity.id ? (
             <QuoteAssignmentSection
               quoteId={quoteId ?? detail?.identity.id ?? null}
-              appointmentAssignee={detail?.appointment_assignee}
+              initialAssignments={detail?.assignments}
             />
           ) : null}
         </div>

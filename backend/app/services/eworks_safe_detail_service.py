@@ -27,6 +27,7 @@ from app.services.eworks_custom_field_definition_service import (
 from app.services.eworks_linked_job_sync_service import maybe_auto_sync_linked_jobs_for_quote
 from app.services.eworks_quote_appointment_service import serialize_quote_appointments
 from app.services.eworks_quote_status import resolve_eworks_quote_status_label
+from app.services.quote_assignment_service import build_unified_assignments_for_quote
 from app.services.eworks_sync_service import (
     _extract_tags_from_raw,
     extract_customer_contact_id_from_raw,
@@ -627,6 +628,7 @@ def build_quote_safe_detail(
     )
     if assignee is not None:
         detail["appointment_assignee"] = serialize_appointment_assignee_safe_detail(assignee)
+    detail["assignments"] = build_unified_assignments_for_quote(db, quote.id)
     return redact_sensitive_data(detail)
 
 

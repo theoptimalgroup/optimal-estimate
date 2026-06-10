@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   DataTable,
@@ -15,6 +15,7 @@ import {
   SectionCard,
   StatusBadge,
 } from "@/components/ui";
+import type { QuoteAssignmentSafe } from "@/lib/eworks-sync";
 import {
   buildAssignmentLink,
   createQuoteAssignment,
@@ -25,24 +26,53 @@ import {
   type AssignmentCreatePayload,
   type QuoteAssignment,
 } from "@/lib/quote-assignments";
-import type { EworksAppointmentAssignee } from "@/lib/eworks-sync";
 
 function assignmentTypeLabel(type: QuoteAssignment["assignment_type"]): string {
   return type === "estimator" ? "Estimator" : "Engineer";
 }
 
-function isActiveAssignment(status: QuoteAssignment["status"]): boolean {
+function sourceLabel(source: string | null | undefined): string {
+  if (source === "eworks_appointment") return "eWorks appointment";
+  if (source === "manual") return "Manual";
+  return source ?? "—";
+}
+
+function isActiveAssignment(status: QuoteAssignment["status"] | string | null | undefined): boolean {
   return status !== "cancelled" && status !== "revoked";
+}
+
+function formatAppointmentTime(assignment: QuoteAssignmentSafe | QuoteAssignment): string {
+  const start = assignment.appointment_start_at ?? null;
+  const end = assignment.appointment_end_at ?? null;
+  if (start && end) return `${start} to ${end}`;
+  return start ?? end ?? "—";
+}
+
+function mergeAssignmentLists(
+  initialAssignments: QuoteAssignmentSafe[] | undefined,
+  manualAssignments: QuoteAssignment[],
+): Array<QuoteAssignmentSafe | QuoteAssignment> {
+  const appointmentRows =
+    initialAssignments?.filter(
+      (item) => item.is_derived === true || item.source === "eworks_appointment",
+    ) ?? [];
+  if (appointmentRows.length > 0) {
+    return [...appointmentRows, ...manualAssignments];
+  }
+  if (initialAssignments && initialAssignments.length > 0) {
+    return initialAssignments;
+  }
+  return manualAssignments;
 }
 
 export function QuoteAssignmentSection({
   quoteId,
-  appointmentAssignee,
+  initialAssignments,
 }: {
   quoteId: number | null;
-  appointmentAssignee?: EworksAppointmentAssignee | null;
+  initialAssignments?: QuoteAssignmentSafe[] | null;
 }) {
-  const [assignments, setAssignments] = useState<QuoteAssignment[]>([]);
+  const [manualAssignments, setManualAssignments] = useState<QuoteAssignment[]>([]);
   const [assignees, setAssignees] = useState<AssigneeUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +94,7 @@ export function QuoteAssignmentSection({
     setError(null);
     try {
       const [items, users] = await Promise.all([listQuoteAssignments(quoteId), listAssignees()]);
-      setAssignments(items);
+      setManualAssignments(items);
       setAssignees(users);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load assignments");
@@ -77,7 +107,16 @@ export function QuoteAssignmentSection({
     void load();
   }, [load]);
 
+  const assignments = useMemo(
+    () => mergeAssignmentLists(initialAssignments ?? undefined, manualAssignments),
+    [initialAssignments, manualAssignments],
+  );
+
   const filteredAssignees = assignees.filter((user) => user.role === assignmentType);
+
+  const activeAssignments = assignments.filter((item) => isActiveAssignment(item.status));
+  const cancelledAssignments = assignments.filter((item) => !isActiveAssignment(item.status));
+  const sortedAssignments = [...activeAssignments, ...cancelledAssignments];
 
   const handleAssign = async () => {
     if (!quoteId) return;
@@ -117,7 +156,7 @@ export function QuoteAssignmentSection({
     }
   };
 
-  const handleCopyLink = async (assignment: QuoteAssignment) => {
+  const handleCopyLink = async (assignment: QuoteAssignment | QuoteAssignmentSafe) => {
     const url = buildAssignmentLink(assignment.assignment_link);
     if (!url) return;
     await navigator.clipboard.writeText(url);
@@ -139,76 +178,45 @@ export function QuoteAssignmentSection({
 
   if (!quoteId) return null;
 
-  const activeManualAssignments = assignments.filter((item) => isActiveAssignment(item.status));
-  const cancelledManualAssignments = assignments.filter((item) => !isActiveAssignment(item.status));
-  const sortedManualAssignments = [...activeManualAssignments, ...cancelledManualAssignments];
-  const showAppointmentCard = Boolean(appointmentAssignee);
-  const assignButtonLabel = showAppointmentCard ? "Override manually" : "Assign";
-  const openFormLabel = showAppointmentCard ? "Assign manually" : "Assign";
-
   return (
-    <SectionCard title="Assign Estimator / Engineer" testId="quote-assignment-section">
-      {showAppointmentCard && appointmentAssignee ? (
-        <div
-          className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4"
-          data-testid="eworks-appointment-assignee-section"
-        >
-          <p className="text-sm font-medium text-slate-900">Assigned from eWorks appointment</p>
-          <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Assignee</dt>
-              <dd className="mt-1 text-sm text-slate-900">
-                {appointmentAssignee.name || appointmentAssignee.email || "—"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Email</dt>
-              <dd className="mt-1 text-sm text-slate-900">{appointmentAssignee.email || "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Appointment</dt>
-              <dd className="mt-1 text-sm text-slate-900">
-                {appointmentAssignee.start_at && appointmentAssignee.end_at
-                  ? `${appointmentAssignee.start_at} to ${appointmentAssignee.end_at}`
-                  : appointmentAssignee.start_at || appointmentAssignee.end_at || "—"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</dt>
-              <dd className="mt-1 text-sm text-slate-900">{appointmentAssignee.status || "—"}</dd>
-            </div>
-          </dl>
-          <div className="mt-3">
-            <StatusBadge tone={appointmentAssignee.assignee_kind === "registered" ? "success" : "info"}>
-              {appointmentAssignee.assignee_kind === "registered" ? "Registered user" : "External"}
-            </StatusBadge>
-          </div>
-        </div>
-      ) : null}
+    <SectionCard title="Assigned Estimators / Engineers" testId="quote-assignment-section">
       {loading ? (
         <LoadingState message="Loading assignments…" />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void load()} />
       ) : (
         <div className="space-y-4">
-          {sortedManualAssignments.length > 0 ? (
-            <>
-              <h3 className="text-sm font-medium text-slate-900" data-testid="manual-assignments-heading">
-                Manual assignments
-              </h3>
-              <DataTable testId="assignments-table">
-                <DataTableHead>
-                  <DataTableRow>
-                    <DataTableCell header>Type</DataTableCell>
-                    <DataTableCell header>Assignee</DataTableCell>
-                    <DataTableCell header>Status</DataTableCell>
-                    <DataTableCell header>Assigned At</DataTableCell>
-                    <DataTableCell header>Actions</DataTableCell>
-                  </DataTableRow>
-                </DataTableHead>
-                <DataTableBody>
-                  {sortedManualAssignments.map((assignment) => (
-                    <DataTableRow key={assignment.id} data-testid={`assignment-row-${assignment.id}`}>
+          {sortedAssignments.length > 0 ? (
+            <DataTable testId="assignments-table">
+              <DataTableHead>
+                <DataTableRow>
+                  <DataTableCell header>Source</DataTableCell>
+                  <DataTableCell header>Role</DataTableCell>
+                  <DataTableCell header>Name</DataTableCell>
+                  <DataTableCell header>Email</DataTableCell>
+                  <DataTableCell header>Appointment</DataTableCell>
+                  <DataTableCell header>Status</DataTableCell>
+                  <DataTableCell header>Actions</DataTableCell>
+                </DataTableRow>
+              </DataTableHead>
+              <DataTableBody>
+                {sortedAssignments.map((assignment) => {
+                  const isReadOnly =
+                    assignment.is_read_only === true ||
+                    assignment.source === "eworks_appointment" ||
+                    assignment.is_derived === true;
+                  const rowKey =
+                    assignment.source === "eworks_appointment"
+                      ? `appt-${assignment.appointment_id ?? assignment.id}`
+                      : `manual-${assignment.id}`;
+
+                  return (
+                    <DataTableRow key={rowKey} data-testid={`assignment-row-${assignment.id}`}>
+                      <DataTableCell>
+                        <StatusBadge tone={assignment.source === "eworks_appointment" ? "info" : "neutral"}>
+                          {sourceLabel(assignment.source)}
+                        </StatusBadge>
+                      </DataTableCell>
                       <DataTableCell>{assignmentTypeLabel(assignment.assignment_type)}</DataTableCell>
                       <DataTableCell>
                         {assignment.assigned_user_name || assignment.assigned_user_email || "—"}
@@ -218,14 +226,23 @@ export function QuoteAssignmentSection({
                           <StatusBadge tone="success">Registered user</StatusBadge>
                         ) : null}
                       </DataTableCell>
+                      <DataTableCell>{assignment.assigned_user_email || "—"}</DataTableCell>
+                      <DataTableCell>{formatAppointmentTime(assignment)}</DataTableCell>
                       <DataTableCell>
-                        <StatusBadge tone="neutral">{assignment.status}</StatusBadge>
+                        <StatusBadge tone="neutral">
+                          {assignment.source === "eworks_appointment"
+                            ? assignment.appointment_status ?? assignment.status ?? "—"
+                            : assignment.status ?? "—"}
+                        </StatusBadge>
                       </DataTableCell>
-                      <DataTableCell>{assignment.assigned_at ?? "—"}</DataTableCell>
                       <DataTableCell>
-                        <div className="flex flex-wrap gap-2">
-                          {assignment.assignee_kind === "external" && assignment.assignment_link ? (
-                            <div className="flex flex-col gap-1">
+                        {isReadOnly ? (
+                          <span className="text-sm text-slate-500" data-testid={`assignment-readonly-${assignment.id}`}>
+                            Locked
+                          </span>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {assignment.assignee_kind === "external" && assignment.assignment_link ? (
                               <button
                                 type="button"
                                 className="text-sm font-medium text-blue-600 hover:text-blue-800"
@@ -234,31 +251,31 @@ export function QuoteAssignmentSection({
                               >
                                 {copiedId === assignment.id ? "Copied" : "Copy link"}
                               </button>
-                            </div>
-                          ) : null}
-                          {assignment.status !== "cancelled" ? (
-                            <button
-                              type="button"
-                              className="text-sm font-medium text-red-600 hover:text-red-800"
-                              onClick={() => void handleRevoke(assignment.id)}
-                              disabled={submitting}
-                              data-testid={`revoke-assignment-${assignment.id}`}
-                            >
-                              Revoke
-                            </button>
-                          ) : null}
-                        </div>
+                            ) : null}
+                            {assignment.status !== "cancelled" ? (
+                              <button
+                                type="button"
+                                className="text-sm font-medium text-red-600 hover:text-red-800"
+                                onClick={() => void handleRevoke(assignment.id)}
+                                disabled={submitting}
+                                data-testid={`revoke-assignment-${assignment.id}`}
+                              >
+                                Remove
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
                       </DataTableCell>
                     </DataTableRow>
-                  ))}
-                </DataTableBody>
-              </DataTable>
-            </>
-          ) : !showAppointmentCard ? (
+                  );
+                })}
+              </DataTableBody>
+            </DataTable>
+          ) : (
             <p className="text-sm text-slate-600" data-testid="assignments-empty">
               No assignments yet.
             </p>
-          ) : null}
+          )}
 
           {showForm ? (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="assignment-form">
@@ -352,7 +369,7 @@ export function QuoteAssignmentSection({
                   disabled={submitting}
                   data-testid="submit-assignment-button"
                 >
-                  {assignButtonLabel}
+                  Add assignee
                 </PrimaryButton>
                 <SecondaryButton onClick={() => setShowForm(false)} disabled={submitting}>
                   Cancel
@@ -361,7 +378,7 @@ export function QuoteAssignmentSection({
             </div>
           ) : (
             <PrimaryButton onClick={() => setShowForm(true)} data-testid="open-assignment-form">
-              {openFormLabel}
+              Add assignee
             </PrimaryButton>
           )}
         </div>

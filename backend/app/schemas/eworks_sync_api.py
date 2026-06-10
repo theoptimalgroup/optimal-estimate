@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.quote_assignment import AssignmentRead
+
 
 # ---------------------------------------------------------------------------
 # eWorks API response schemas (shared pagination envelope)
@@ -378,6 +380,7 @@ class EworksQuoteSafeDetailRead(BaseModel):
     linked_estimate: EworksLinkedEstimate
     sales_appointments: list[EworksQuoteAppointmentSafeRead] = Field(default_factory=list)
     appointment_assignee: EworksAppointmentAssigneeSafeRead | None = None
+    assignments: list[AssignmentRead] = Field(default_factory=list)
 
 
 class EworksJobSafeIdentity(BaseModel):

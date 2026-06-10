@@ -81,6 +81,8 @@ class AssignmentRead(BaseModel):
     can_view_submission: bool = False
     source: str = "manual"
     is_derived: bool = False
+    is_read_only: bool = False
+    appointment_id: int | None = None
     appointment_start_at: str | None = None
     appointment_end_at: str | None = None
     appointment_status: str | None = None

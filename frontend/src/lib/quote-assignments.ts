@@ -58,6 +58,8 @@ export type QuoteAssignment = {
   can_view_submission?: boolean;
   source?: "manual" | "eworks_appointment" | string | null;
   is_derived?: boolean;
+  is_read_only?: boolean;
+  appointment_id?: number | null;
   appointment_start_at?: string | null;
   appointment_end_at?: string | null;
   appointment_status?: string | null;
@@ -120,6 +122,20 @@ export async function createQuoteAssignment(
 ): Promise<QuoteAssignment> {
   const resp = await apiFetch<QuoteAssignment>(
     `/api/v1/eworks-sync/quotes/${quoteId}/assignments`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+  return resp.data;
+}
+
+export async function overrideQuoteAssignment(
+  quoteId: number,
+  payload: AssignmentCreatePayload,
+): Promise<QuoteAssignment> {
+  const resp = await apiFetch<QuoteAssignment>(
+    `/api/v1/eworks-sync/quotes/${quoteId}/assignments/override`,
     {
       method: "POST",
       body: JSON.stringify(payload),

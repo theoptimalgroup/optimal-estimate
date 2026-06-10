@@ -23,7 +23,10 @@ from app.models.user import User
 from app.schemas.eworks_link import EworksLinkPayload, SessionUiState, Step2Snapshot
 from app.services.audit_helpers import record_audit
 from app.services.client_service import get_or_create_client_for_import
-from app.services.eworks_job_appointment_service import apply_appointment_engineer_name_to_step1
+from app.services.eworks_job_appointment_service import (
+    apply_appointment_engineer_name_to_step1,
+    get_active_job_appointment_assignee,
+)
 from app.services.eworks_link_service import payload_to_step1, try_resolve_rate_rule
 from app.services.eworks_questionnaire_service import apply_questionnaire_defaults
 from app.services.manager_dashboard_service import extract_all_tags
@@ -134,6 +137,57 @@ def mark_linked_assignment_submitted(db: Session, session_id: UUID) -> EworksQuo
     return assignment
 
 
+def _normalize_email(email: str | None) -> str | None:
+    if not email:
+        return None
+    normalized = email.strip().lower()
+    return normalized or None
+
+
+def _serialize_appointment_assignment(
+    assignee: dict[str, Any],
+    *,
+    quote: EworksQuote,
+) -> dict[str, Any]:
+    """Serialize an eWorks appointment assignee as a read-only assignment row."""
+    appointment_id = assignee.get("appointment_id")
+    synthetic_id = -(int(appointment_id)) if appointment_id is not None else -1
+    return {
+        "id": synthetic_id,
+        "synced_quote_id": quote.id,
+        "eworks_quote_id": quote.eworks_quote_id,
+        "quote_ref": quote.quote_ref,
+        "assigned_user_id": assignee.get("registered_user_id"),
+        "assigned_user_email": assignee.get("user_email"),
+        "assigned_user_name": assignee.get("user_name"),
+        "assignment_type": "engineer",
+        "assignee_kind": assignee.get("assignee_kind") or "external",
+        "status": "assigned",
+        "assignment_token": None,
+        "assignment_token_created_at": None,
+        "assignment_token_expires_at": None,
+        "assignment_token_revoked_at": None,
+        "assigned_by_user_id": None,
+        "assigned_by_email": None,
+        "assigned_at": assignee.get("start_at"),
+        "notes": None,
+        "source": "eworks_appointment",
+        "is_derived": True,
+        "is_read_only": True,
+        "appointment_id": appointment_id,
+        "appointment_start_at": assignee.get("start_at"),
+        "appointment_end_at": assignee.get("end_at"),
+        "appointment_status": assignee.get("status"),
+        "appointment_type": assignee.get("appointment_type"),
+        "job_ref": assignee.get("job_ref"),
+        "assignment_link": None,
+        "has_calculation_session": False,
+        "calculation_session_id": None,
+        "can_start_estimate": False,
+        "can_view_submission": False,
+    }
+
+
 def _serialize_assignment(
     row: EworksQuoteAssignment,
     *,
@@ -168,6 +222,7 @@ def _serialize_assignment(
         "notes": row.notes,
         "source": "manual",
         "is_derived": False,
+        "is_read_only": False,
     }
     if include_token:
         data["assignment_token"] = row.assignment_token
@@ -250,16 +305,99 @@ def list_assignable_users(db: Session) -> list[dict[str, Any]]:
     ]
 
 
-def list_assignments_for_quote(db: Session, quote_id: int) -> list[dict[str, Any]]:
-    """Return manual quote assignments only; appointment assignee comes from safe detail."""
-    quote = _get_quote_or_404(db, quote_id)
-    rows = (
+def _list_manual_assignments_for_quote(db: Session, quote: EworksQuote) -> list[EworksQuoteAssignment]:
+    return (
         db.query(EworksQuoteAssignment)
         .filter(EworksQuoteAssignment.synced_quote_id == quote.id)
         .order_by(EworksQuoteAssignment.assigned_at.desc(), EworksQuoteAssignment.id.desc())
         .all()
     )
+
+
+def _find_active_manual_duplicate(
+    db: Session,
+    *,
+    quote_id: int,
+    assignment_type: str,
+    email: str | None,
+) -> EworksQuoteAssignment | None:
+    normalized = _normalize_email(email)
+    if not normalized:
+        return None
+    rows = (
+        db.query(EworksQuoteAssignment)
+        .filter(
+            EworksQuoteAssignment.synced_quote_id == quote_id,
+            EworksQuoteAssignment.assignment_type == assignment_type,
+            EworksQuoteAssignment.status != "cancelled",
+        )
+        .all()
+    )
+    for row in rows:
+        if _normalize_email(row.assigned_user_email) == normalized:
+            return row
+    return None
+
+
+def build_unified_assignments_for_quote(db: Session, quote_id: int) -> list[dict[str, Any]]:
+    """Return appointment-derived and manual assignments for manager display."""
+    quote = _get_quote_or_404(db, quote_id)
+    manual_rows = _list_manual_assignments_for_quote(db, quote)
+    manual_items = [_serialize_assignment(row, quote=quote, include_token=True) for row in manual_rows]
+
+    assignee = get_active_job_appointment_assignee(
+        db,
+        quote_id=quote.id,
+        quote_ref=quote.quote_ref,
+        eworks_quote_id=quote.eworks_quote_id,
+    )
+    items: list[dict[str, Any]] = []
+    if assignee is not None:
+        items.append(_serialize_appointment_assignment(assignee, quote=quote))
+    items.extend(manual_items)
+    return items
+
+
+def list_assignments_for_quote(db: Session, quote_id: int) -> list[dict[str, Any]]:
+    """Return manual quote assignments only; appointment assignee comes from safe detail."""
+    quote = _get_quote_or_404(db, quote_id)
+    rows = _list_manual_assignments_for_quote(db, quote)
     return [_serialize_assignment(row, quote=quote, include_token=True) for row in rows]
+
+
+def _prepare_assignee_fields(
+    db: Session,
+    *,
+    assignment_type: str,
+    assignee_kind: str,
+    assigned_user_id: Any,
+    assigned_user_email: str | None,
+    assigned_user_name: str | None,
+    expires_at: datetime | None,
+) -> tuple[Any, str | None, str | None, str | None, datetime | None, datetime | None]:
+    token: str | None = None
+    token_created_at: datetime | None = None
+    token_expires_at: datetime | None = None
+
+    if assignee_kind == "registered":
+        user = _validate_assignee_user(db, assigned_user_id, assignment_type)
+        assigned_user_id = user.id
+        assigned_user_email = user.email
+        assigned_user_name = user.full_name
+    else:
+        assigned_user_id = None
+        token = secrets.token_urlsafe(32)
+        token_created_at = _now()
+        token_expires_at = expires_at or (token_created_at + timedelta(days=DEFAULT_TOKEN_DAYS))
+
+    return (
+        assigned_user_id,
+        assigned_user_email,
+        assigned_user_name,
+        token,
+        token_created_at,
+        token_expires_at,
+    )
 
 
 def create_assignment(
@@ -279,20 +417,56 @@ def create_assignment(
     notes = payload.get("notes")
     expires_at = payload.get("expires_at")
 
-    token: str | None = None
-    token_created_at: datetime | None = None
-    token_expires_at: datetime | None = None
-
     if assignee_kind == "registered":
         user = _validate_assignee_user(db, assigned_user_id, assignment_type)
-        assigned_user_id = user.id
         assigned_user_email = user.email
-        assigned_user_name = user.full_name
-    else:
-        assigned_user_id = None
-        token = secrets.token_urlsafe(32)
-        token_created_at = _now()
-        token_expires_at = expires_at or (token_created_at + timedelta(days=DEFAULT_TOKEN_DAYS))
+    resolved_email = assigned_user_email
+
+    existing = _find_active_manual_duplicate(
+        db,
+        quote_id=quote.id,
+        assignment_type=assignment_type,
+        email=resolved_email,
+    )
+    if existing is not None:
+        before = _serialize_assignment(existing, quote=quote)
+        if notes:
+            existing.notes = notes
+        existing.assigned_at = _now()
+        db.flush()
+        record_audit(
+            db,
+            actor=current_user,
+            action="quote_assignment_updated",
+            entity_type="quote_assignment",
+            entity_id=existing.id,
+            before=before,
+            after=_serialize_assignment(existing, quote=quote),
+            metadata={
+                "quote_ref": quote.quote_ref,
+                "reason": "duplicate_email_assignment_type",
+            },
+        )
+        db.commit()
+        db.refresh(existing)
+        return _serialize_assignment(existing, quote=quote, include_token=True)
+
+    (
+        assigned_user_id,
+        assigned_user_email,
+        assigned_user_name,
+        token,
+        token_created_at,
+        token_expires_at,
+    ) = _prepare_assignee_fields(
+        db,
+        assignment_type=assignment_type,
+        assignee_kind=assignee_kind,
+        assigned_user_id=assigned_user_id,
+        assigned_user_email=assigned_user_email,
+        assigned_user_name=assigned_user_name,
+        expires_at=expires_at,
+    )
 
     row = EworksQuoteAssignment(
         synced_quote_id=quote.id,
@@ -332,6 +506,113 @@ def create_assignment(
             "assignment_type": assignment_type,
             "assignee_kind": assignee_kind,
             "assigned_user_email": row.assigned_user_email,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _serialize_assignment(row, quote=quote, include_token=True)
+
+
+def override_assignment(
+    db: Session,
+    *,
+    quote_id: int,
+    payload: dict[str, Any],
+    current_user: AuthenticatedUser,
+) -> dict[str, Any]:
+    """Explicitly replace active manual assignments of the same type; does not remove eWorks appointment."""
+    quote = _get_quote_or_404(db, quote_id)
+    assignment_type = payload["assignment_type"]
+    assignee_kind = payload["assignee_kind"]
+    assigned_user_id = payload.get("assigned_user_id")
+    assigned_user_email = payload.get("assigned_user_email")
+    assigned_user_name = payload.get("assigned_user_name")
+    notes = payload.get("notes")
+    expires_at = payload.get("expires_at")
+
+    active_rows = (
+        db.query(EworksQuoteAssignment)
+        .filter(
+            EworksQuoteAssignment.synced_quote_id == quote.id,
+            EworksQuoteAssignment.assignment_type == assignment_type,
+            EworksQuoteAssignment.status != "cancelled",
+        )
+        .all()
+    )
+    for row in active_rows:
+        before = _serialize_assignment(row, quote=quote)
+        row.status = "cancelled"
+        row.assignment_token_revoked_at = _now()
+        record_audit(
+            db,
+            actor=current_user,
+            action="quote_assignment_revoked",
+            entity_type="quote_assignment",
+            entity_id=row.id,
+            before=before,
+            after=_serialize_assignment(row, quote=quote),
+            metadata={
+                "quote_ref": quote.quote_ref,
+                "reason": "override_replacement",
+            },
+        )
+
+    (
+        assigned_user_id,
+        assigned_user_email,
+        assigned_user_name,
+        token,
+        token_created_at,
+        token_expires_at,
+    ) = _prepare_assignee_fields(
+        db,
+        assignment_type=assignment_type,
+        assignee_kind=assignee_kind,
+        assigned_user_id=assigned_user_id,
+        assigned_user_email=assigned_user_email,
+        assigned_user_name=assigned_user_name,
+        expires_at=expires_at,
+    )
+
+    row = EworksQuoteAssignment(
+        synced_quote_id=quote.id,
+        eworks_quote_id=quote.eworks_quote_id,
+        quote_ref=quote.quote_ref,
+        assigned_user_id=assigned_user_id,
+        assigned_user_email=str(assigned_user_email) if assigned_user_email else None,
+        assigned_user_name=assigned_user_name,
+        assignment_type=assignment_type,
+        assignee_kind=assignee_kind,
+        status="assigned",
+        assignment_token=token,
+        assignment_token_created_at=token_created_at,
+        assignment_token_expires_at=token_expires_at,
+        assigned_by_user_id=_as_uuid(current_user.id),
+        assigned_by_email=current_user.email,
+        assigned_at=_now(),
+        notes=notes,
+    )
+    db.add(row)
+    db.flush()
+
+    audit_after = _serialize_assignment(row, quote=quote)
+    audit_after.pop("assignment_token", None)
+    audit_after.pop("assignment_link", None)
+
+    record_audit(
+        db,
+        actor=current_user,
+        action="quote_assignment_overridden",
+        entity_type="quote_assignment",
+        entity_id=row.id,
+        after=audit_after,
+        metadata={
+            "quote_ref": quote.quote_ref,
+            "eworks_quote_id": quote.eworks_quote_id,
+            "assignment_type": assignment_type,
+            "assignee_kind": assignee_kind,
+            "assigned_user_email": row.assigned_user_email,
+            "replaced_manual_count": len(active_rows),
         },
     )
     db.commit()
