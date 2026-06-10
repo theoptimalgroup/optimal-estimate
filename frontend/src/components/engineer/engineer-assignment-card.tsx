@@ -14,6 +14,7 @@ import {
   type QuoteAssignment,
 } from "@/lib/quote-assignments";
 import { formatEstimateTotal } from "@/lib/engineer-jobs";
+import { cleanHtmlToReadableText } from "@/lib/html-text";
 
 type EngineerAssignmentCardProps = {
   assignment: QuoteAssignment;
@@ -36,6 +37,15 @@ export function EngineerAssignmentCard({
   const customer = assignment.quote_summary?.customer_name ?? "Customer not available";
   const address = assignment.quote_summary?.site_address ?? "Address not available";
   const quoteLabel = assignment.quote_ref ?? String(assignment.eworks_quote_id);
+  const appointmentWindow =
+    assignment.appointment_start_at && assignment.appointment_end_at
+      ? `${formatAssignedAt(assignment.appointment_start_at)} – ${formatAssignedAt(assignment.appointment_end_at)}`
+      : assignment.appointment_start_at
+        ? formatAssignedAt(assignment.appointment_start_at)
+        : null;
+  const descriptionText = cleanHtmlToReadableText(
+    assignment.notes ?? assignment.quote_summary?.description ?? "",
+  );
 
   const openEstimate = async (mode: "view" | "continue") => {
     setLoadingAction(mode);
@@ -76,6 +86,30 @@ export function EngineerAssignmentCard({
             <p className="font-semibold text-slate-900">{quoteLabel}</p>
             <p className="text-sm text-slate-600">{customer}</p>
             <p className="text-sm text-slate-600">{address}</p>
+            {appointmentWindow ? (
+              <p
+                className="text-sm text-slate-600"
+                data-testid={`${testIdPrefix}-appointment-${assignment.id}`}
+              >
+                Appointment: {appointmentWindow}
+              </p>
+            ) : null}
+            {assignment.assigned_user_name ? (
+              <p
+                className="text-sm text-slate-600"
+                data-testid={`${testIdPrefix}-assignee-${assignment.id}`}
+              >
+                Assigned to: {assignment.assigned_user_name}
+              </p>
+            ) : null}
+            {descriptionText ? (
+              <p
+                className="whitespace-pre-line text-sm text-slate-600"
+                data-testid={`${testIdPrefix}-description-${assignment.id}`}
+              >
+                {descriptionText}
+              </p>
+            ) : null}
             {variant === "active" ? (
               <p className="text-xs text-slate-500" data-testid={`${testIdPrefix}-date-${assignment.id}`}>
                 Assigned {formatAssignedAt(assignment.assigned_at)}
@@ -122,9 +156,9 @@ export function EngineerAssignmentCard({
           >
             {loadingAction
               ? "Opening…"
-              : assignment.status === "assigned"
-                ? "Start Estimate"
-                : "Continue Estimate"}
+              : assignment.has_calculation_session
+                ? "Resume Estimate"
+                : "Start Estimate"}
           </PrimaryButton>
         ) : (
           <div className="mt-4 flex flex-wrap gap-2">

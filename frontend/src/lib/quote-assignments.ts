@@ -65,6 +65,9 @@ export type QuoteAssignment = {
   appointment_status?: string | null;
   appointment_type?: string | null;
   job_ref?: string | null;
+  eworks_job_id?: number | null;
+  customer_name?: string | null;
+  site_address?: string | null;
 };
 
 export type AssignmentStartEstimateResult = {

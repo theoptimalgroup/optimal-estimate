@@ -124,7 +124,54 @@ async function mockAssignedJobs(page: Page, items: unknown[]) {
   });
 }
 
+const MOCK_APPOINTMENT_ASSIGNMENT = {
+  id: -66054,
+  synced_quote_id: 1,
+  eworks_quote_id: 29306,
+  quote_ref: "Q22143",
+  assigned_user_id: "dev-engineer-id",
+  assigned_user_email: "vitor.santo@theoptimalgroup.co.uk",
+  assigned_user_name: "Vitor Espirito Santo",
+  assignment_type: "engineer",
+  assignee_kind: "registered",
+  status: "assigned",
+  assigned_at: "2026-06-10T10:00:00.000Z",
+  source: "eworks_appointment",
+  is_derived: true,
+  is_read_only: true,
+  appointment_id: 66054,
+  appointment_start_at: "2026-06-10T10:00:00.000Z",
+  appointment_end_at: "2026-06-10T11:30:00.000Z",
+  job_ref: "JOB-34005",
+  eworks_job_id: 34005,
+  customer_name: "Test Customer",
+  site_address: "1 Test Street",
+  has_calculation_session: false,
+  can_start_estimate: true,
+  quote_summary: {
+    synced_quote_id: 1,
+    eworks_quote_id: 29306,
+    quote_ref: "Q22143",
+    customer_name: "Test Customer",
+    site_address: "1 Test Street",
+    quote_date: null,
+    expiry_date: null,
+    description: null,
+    tags: [],
+  },
+};
+
 test.describe("engineer estimate pages", () => {
+  test("assigned estimates shows Start Estimate for appointment-derived assignment", async ({ page }) => {
+    await mockAuthMe(page, "engineer");
+    await mockMyAssignments(page, [MOCK_APPOINTMENT_ASSIGNMENT]);
+    await page.goto("/engineer/assigned-estimates");
+
+    await expect(page.getByTestId("engineer-assignment--66054")).toBeVisible();
+    await expect(page.getByTestId("engineer-assignment-action--66054")).toHaveText("Start Estimate");
+    await expect(page.getByTestId("engineer-assignment-appointment--66054")).toContainText("Appointment:");
+  });
+
   test("assigned estimates shows active assignments only", async ({ page }) => {
     await mockAuthMe(page, "engineer");
     await mockMyAssignments(page, [MOCK_ACTIVE_ASSIGNMENT, MOCK_SUBMITTED_ASSIGNMENT]);

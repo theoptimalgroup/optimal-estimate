@@ -21,6 +21,7 @@ from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.support import AuditLog
 from app.models.user import User
 from app.schemas.eworks_link import EworksLinkPayload, Step1Snapshot
+from app.services.engineer_assigned_estimates_service import list_assigned_estimates_for_engineer
 from app.services.engineer_assigned_jobs_service import list_assigned_jobs_for_engineer
 from app.services.eworks_job_appointment_service import (
     apply_appointment_engineer_name_to_step1,
@@ -724,7 +725,7 @@ def test_external_assignee_not_in_engineer_assigned_jobs_for_other_user(db_sessi
     assert not any(item["job_ref"] == "JOB-EXT-JOBS" for item in items)
 
 
-def test_engineer_assigned_jobs_includes_matching_email(db_session):
+def test_quote_linked_appointment_in_assigned_estimates_not_assigned_jobs(db_session):
     quote, job = _seed_quote_with_job(
         db_session,
         eworks_quote_id=10014,
@@ -746,12 +747,16 @@ def test_engineer_assigned_jobs_includes_matching_email(db_session):
         auth_provider="dev",
     )
 
-    items = list_assigned_jobs_for_engineer(db_session, user)
+    job_items = list_assigned_jobs_for_engineer(db_session, user)
+    estimate_items = list_assigned_estimates_for_engineer(db_session, user)
 
-    assert len(items) == 1
-    assert items[0]["job_ref"] == job.job_ref
-    assert items[0]["quote_ref"] == quote.quote_ref
-    assert items[0]["source"] == "eworks_appointment"
+    assert job_items == []
+    assert len(estimate_items) == 1
+    assert estimate_items[0]["job_ref"] == job.job_ref
+    assert estimate_items[0]["quote_ref"] == quote.quote_ref
+    assert estimate_items[0]["source"] == "eworks_appointment"
+    assert estimate_items[0]["can_start_estimate"] is True
+    assert estimate_items[0]["appointment_id"] is not None
 
 
 def test_safe_detail_assignments_includes_eworks_appointment(db_session):

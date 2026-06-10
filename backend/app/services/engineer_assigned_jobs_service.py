@@ -5,13 +5,11 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.auth.types import AuthenticatedUser
-from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote
+from app.models.eworks_sync import EworksJob, EworksJobAppointment
+from app.services.engineer_assignment_routing import is_quote_linked_assignment, resolve_quote_ref_for_job
 from app.services.eworks_job_appointment_service import is_cancelled_appointment_status
-from app.services.quote_assignment_service import _as_uuid
-
-
-def _normalize_email(value: str | None) -> str:
-    return (value or "").strip().casefold()
+from app.services.quote_assignment_service import _as_uuid, _normalize_email
+from app.utils.html_text import html_to_plain_text
 
 
 def _appointment_user_matches(
@@ -23,20 +21,6 @@ def _appointment_user_matches(
     if not appointment.user_email:
         return False
     return _normalize_email(appointment.user_email) == _normalize_email(user.email)
-
-
-def _quote_ref_for_job(db: Session, job: EworksJob) -> str | None:
-    if job.eworks_quote_id is None:
-        return None
-    quote = (
-        db.query(EworksQuote)
-        .filter(EworksQuote.eworks_quote_id == job.eworks_quote_id)
-        .order_by(EworksQuote.id.desc())
-        .first()
-    )
-    if quote is None:
-        return None
-    return (quote.quote_ref or "").strip() or None
 
 
 def build_engineer_assigned_job_read(
@@ -52,13 +36,13 @@ def build_engineer_assigned_job_read(
         "eworks_job_id": job.eworks_job_id,
         "job_ref": job.job_ref,
         "eworks_quote_id": job.eworks_quote_id,
-        "quote_ref": _quote_ref_for_job(db, job),
+        "quote_ref": resolve_quote_ref_for_job(db, job),
         "customer_name": job.customer_name,
         "address": job.address,
         "status": job.status,
         "status_name": job.status_name,
         "job_date": job.job_date,
-        "description": job.description,
+        "description": html_to_plain_text(job.description) or None,
         "total": total,
         "appointment_user_name": appointment.user_name,
         "appointment_user_email": appointment.user_email,
@@ -87,6 +71,8 @@ def list_assigned_jobs_for_engineer(db: Session, user: AuthenticatedUser) -> lis
         if is_cancelled_appointment_status(appointment.status):
             continue
         if not _appointment_user_matches(appointment, user=user):
+            continue
+        if is_quote_linked_assignment(db, job, appointment):
             continue
         results.append(build_engineer_assigned_job_read(db, job, appointment))
     return results

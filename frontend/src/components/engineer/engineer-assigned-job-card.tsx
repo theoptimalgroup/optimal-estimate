@@ -2,6 +2,7 @@
 
 import { StatusBadge } from "@/components/ui";
 import { formatEstimateTotal, type EngineerAssignedJob } from "@/lib/engineer-jobs";
+import { cleanHtmlToReadableText } from "@/lib/html-text";
 
 type EngineerAssignedJobCardProps = {
   job: EngineerAssignedJob;
@@ -45,7 +46,9 @@ export function EngineerAssignedJobCard({ job }: EngineerAssignedJobCardProps) {
               {formatEstimateTotal(job.total)}
             </p>
           ) : null}
-          {job.description ? <p className="text-sm text-slate-600">{job.description}</p> : null}
+          {job.description ? (
+            <p className="whitespace-pre-line text-sm text-slate-600">{cleanHtmlToReadableText(job.description)}</p>
+          ) : null}
         </div>
         <StatusBadge tone="success" data-testid={`engineer-assigned-job-status-${job.id}`}>
           {statusLabel}

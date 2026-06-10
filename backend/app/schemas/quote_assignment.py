@@ -88,6 +88,9 @@ class AssignmentRead(BaseModel):
     appointment_status: str | None = None
     appointment_type: str | None = None
     job_ref: str | None = None
+    eworks_job_id: int | None = None
+    customer_name: str | None = None
+    site_address: str | None = None
 
 
 class AssignmentStartEstimateRead(BaseModel):

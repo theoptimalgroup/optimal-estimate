@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.auth.types import AuthenticatedUser
 from app.core.security import UserRole
 from app.models.calculation_session import CalculationSession
-from app.models.eworks_sync import EworksQuote
+from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote, EworksQuoteAppointment
 from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.trade import Trade
 from app.models.user import User
@@ -27,7 +27,7 @@ from app.services.eworks_job_appointment_service import (
     apply_appointment_engineer_name_to_step1,
     get_active_job_appointment_assignee,
 )
-from app.services.eworks_link_service import payload_to_step1, try_resolve_rate_rule
+from app.services.eworks_link_service import find_session_by_idempotency_key, payload_to_step1, try_resolve_rate_rule
 from app.services.eworks_questionnaire_service import apply_questionnaire_defaults
 from app.services.manager_dashboard_service import extract_all_tags
 from app.services.eworks_sync_service import lookup_customer_name_by_id
@@ -53,6 +53,7 @@ def _quote_summary(quote: EworksQuote) -> dict[str, Any]:
     address = None
     if isinstance(quote.raw_payload, dict):
         address = quote.raw_payload.get("site_address") or quote.raw_payload.get("address")
+    description = html_to_plain_text(quote.description) or None
     return {
         "synced_quote_id": quote.id,
         "eworks_quote_id": quote.eworks_quote_id,
@@ -61,7 +62,7 @@ def _quote_summary(quote: EworksQuote) -> dict[str, Any]:
         "site_address": address if isinstance(address, str) else None,
         "quote_date": quote.quote_date,
         "expiry_date": quote.expiry_date,
-        "description": quote.description,
+        "description": description,
         "tags": extract_all_tags(quote),
     }
 
@@ -144,15 +145,105 @@ def _normalize_email(email: str | None) -> str | None:
     return normalized or None
 
 
+def _appointment_assignment_idempotency_key(
+    *,
+    appointment_id: int,
+    synced_quote_id: int,
+    engineer_email: str,
+) -> str:
+    normalized = _normalize_email(engineer_email) or engineer_email.strip().lower()
+    return f"appointment.session.{appointment_id}.{synced_quote_id}.{normalized}"
+
+
+def _can_user_start_appointment(
+    user: AuthenticatedUser | None,
+    assignee: dict[str, Any],
+    *,
+    db: Session | None = None,
+) -> bool:
+    if user is None:
+        return False
+    if user.role == UserRole.ADMIN:
+        return True
+    if user.role != UserRole.ENGINEER:
+        return False
+    user_id = _as_uuid(user.id)
+    registered_user_id = assignee.get("registered_user_id")
+    if user_id is not None and registered_user_id:
+        if str(user_id) == str(registered_user_id):
+            return True
+    assignee_email = assignee.get("user_email")
+    if assignee_email and _normalize_email(assignee_email) == _normalize_email(user.email):
+        return True
+    if db is not None and user_id is not None and assignee_email:
+        from app.services.eworks_job_appointment_service import _match_registered_user_by_email
+
+        matched_user = _match_registered_user_by_email(db, assignee_email)
+        if matched_user is not None and matched_user.id == user_id:
+            return True
+    return False
+
+
+def _find_manual_assignment_session(
+    db: Session,
+    *,
+    synced_quote_id: int,
+    user: AuthenticatedUser,
+) -> CalculationSession | None:
+    user_id = _as_uuid(user.id)
+    if user_id is None:
+        return None
+    row = db.scalar(
+        select(EworksQuoteAssignment)
+        .where(
+            EworksQuoteAssignment.synced_quote_id == synced_quote_id,
+            EworksQuoteAssignment.assigned_user_id == user_id,
+            EworksQuoteAssignment.assignment_type == "engineer",
+            EworksQuoteAssignment.status != "cancelled",
+            EworksQuoteAssignment.calculation_session_id.isnot(None),
+        )
+        .order_by(EworksQuoteAssignment.id.desc())
+        .limit(1)
+    )
+    if row is None or row.calculation_session_id is None:
+        return None
+    return db.get(CalculationSession, row.calculation_session_id)
+
+
+def _find_appointment_assignment_session(
+    db: Session,
+    *,
+    quote: EworksQuote,
+    assignee: dict[str, Any],
+    user: AuthenticatedUser,
+) -> CalculationSession | None:
+    manual_session = _find_manual_assignment_session(db, synced_quote_id=quote.id, user=user)
+    if manual_session is not None:
+        return manual_session
+    appointment_id = assignee.get("appointment_id")
+    if appointment_id is None:
+        return None
+    key = _appointment_assignment_idempotency_key(
+        appointment_id=int(appointment_id),
+        synced_quote_id=quote.id,
+        engineer_email=user.email,
+    )
+    return find_session_by_idempotency_key(db, key)
+
+
 def _serialize_appointment_assignment(
     assignee: dict[str, Any],
     *,
     quote: EworksQuote,
+    current_user: AuthenticatedUser | None = None,
+    db: Session | None = None,
 ) -> dict[str, Any]:
     """Serialize an eWorks appointment assignee as a read-only assignment row."""
     appointment_id = assignee.get("appointment_id")
     synthetic_id = -(int(appointment_id)) if appointment_id is not None else -1
-    return {
+    summary = _quote_summary(quote)
+    can_start = _can_user_start_appointment(current_user, assignee, db=db)
+    data: dict[str, Any] = {
         "id": synthetic_id,
         "synced_quote_id": quote.id,
         "eworks_quote_id": quote.eworks_quote_id,
@@ -180,12 +271,40 @@ def _serialize_appointment_assignment(
         "appointment_status": assignee.get("status"),
         "appointment_type": assignee.get("appointment_type"),
         "job_ref": assignee.get("job_ref"),
+        "eworks_job_id": assignee.get("eworks_job_id"),
+        "customer_name": summary.get("customer_name"),
+        "site_address": summary.get("site_address"),
         "assignment_link": None,
         "has_calculation_session": False,
         "calculation_session_id": None,
-        "can_start_estimate": False,
+        "can_start_estimate": can_start,
         "can_view_submission": False,
+        "quote_summary": summary,
     }
+    if db is not None and current_user is not None:
+        session = _find_appointment_assignment_session(db, quote=quote, assignee=assignee, user=current_user)
+        if session is not None:
+            data["has_calculation_session"] = True
+            data["calculation_session_id"] = str(session.id)
+            if session.submitted_at is None:
+                data["status"] = "in_progress"
+            else:
+                data["status"] = "submitted"
+            submitted_at, final_total = _linked_session_submission_fields(db, session.id)
+            data["submitted_at"] = submitted_at
+            data["final_total"] = final_total
+            data["current_version_number"] = max(session.current_version_number, 1 if session.submitted_at else 0)
+            data["revision_in_progress"] = session.revision_in_progress
+            data["active_revision_reason"] = session.active_revision_reason
+            data["can_revise"] = (
+                session.status == "submitted" and session.locked and not session.revision_in_progress
+            )
+            data["can_continue_revision"] = session.revision_in_progress and not session.locked
+            data["can_view_submission"] = bool(
+                session.submitted_at is not None
+                and session.status in ("submitted", "revision_in_progress")
+            )
+    return data
 
 
 def _serialize_assignment(
@@ -219,7 +338,7 @@ def _serialize_assignment(
         "assigned_by_user_id": str(row.assigned_by_user_id) if row.assigned_by_user_id else None,
         "assigned_by_email": row.assigned_by_email,
         "assigned_at": str(row.assigned_at) if row.assigned_at else None,
-        "notes": row.notes,
+        "notes": html_to_plain_text(row.notes) or None,
         "source": "manual",
         "is_derived": False,
         "is_read_only": False,
@@ -637,15 +756,9 @@ def list_assignments_for_user(db: Session, user: AuthenticatedUser) -> list[dict
             .all()
         )
     elif user.role == UserRole.ENGINEER:
-        rows = (
-            q.filter(
-                EworksQuoteAssignment.assigned_user_id == _as_uuid(user.id),
-                EworksQuoteAssignment.assignment_type == "engineer",
-                EworksQuoteAssignment.status != "cancelled",
-            )
-            .order_by(EworksQuoteAssignment.assigned_at.desc())
-            .all()
-        )
+        from app.services.engineer_assigned_estimates_service import list_assigned_estimates_for_engineer
+
+        return list_assigned_estimates_for_engineer(db, user)
     else:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
@@ -1013,11 +1126,213 @@ def _ensure_assignment_calculation_session(
     return existing, created
 
 
+def _resolve_appointment_assignment(
+    db: Session,
+    synthetic_assignment_id: int,
+    user: AuthenticatedUser,
+) -> tuple[EworksQuote, dict[str, Any]]:
+    """Resolve a negative synthetic assignment id to quote + assignee payload."""
+    if synthetic_assignment_id >= 0:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    appointment_id = -synthetic_assignment_id
+    from app.services.engineer_assigned_estimates_service import (
+        _build_assignee_from_job_appointment,
+        _build_assignee_from_quote_appointment,
+    )
+    from app.services.engineer_assignment_routing import is_quote_linked_assignment
+    from app.services.eworks_job_appointment_service import is_cancelled_appointment_status
+
+    job_row = (
+        db.query(EworksJob, EworksJobAppointment)
+        .join(EworksJobAppointment, EworksJob.active_appointment_id == EworksJobAppointment.id)
+        .filter(EworksJobAppointment.appointment_id == appointment_id)
+        .order_by(EworksJobAppointment.start_at.desc(), EworksJob.synced_at.desc())
+        .first()
+    )
+    if job_row is not None:
+        job, appointment = job_row
+        if is_cancelled_appointment_status(appointment.status):
+            raise HTTPException(status_code=410, detail="Appointment has been cancelled")
+        if not is_quote_linked_assignment(db, job, appointment):
+            raise HTTPException(status_code=404, detail="Assignment not found")
+        quote = (
+            db.query(EworksQuote)
+            .filter(EworksQuote.eworks_quote_id == job.eworks_quote_id)
+            .order_by(EworksQuote.id.desc())
+            .first()
+        )
+        if quote is None:
+            raise HTTPException(status_code=404, detail="Quote not found")
+        assignee = _build_assignee_from_job_appointment(db, job=job, appointment=appointment)
+        assignee["eworks_job_id"] = job.eworks_job_id
+        if not _can_user_start_appointment(user, assignee, db=db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return quote, assignee
+
+    quote_row = (
+        db.query(EworksQuoteAppointment, EworksQuote)
+        .join(EworksQuote, EworksQuote.eworks_quote_id == EworksQuoteAppointment.eworks_quote_id)
+        .filter(EworksQuoteAppointment.appointment_id == appointment_id)
+        .order_by(EworksQuoteAppointment.start_at.desc(), EworksQuoteAppointment.id.desc())
+        .first()
+    )
+    if quote_row is not None:
+        appointment, quote = quote_row
+        if is_cancelled_appointment_status(appointment.status):
+            raise HTTPException(status_code=410, detail="Appointment has been cancelled")
+        assignee = _build_assignee_from_quote_appointment(db, quote=quote, appointment=appointment)
+        if not _can_user_start_appointment(user, assignee, db=db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return quote, assignee
+
+    raise HTTPException(status_code=404, detail="Assignment not found")
+
+
+def _create_calculation_session_for_appointment(
+    db: Session,
+    *,
+    quote: EworksQuote,
+    assignee: dict[str, Any],
+    user: AuthenticatedUser,
+) -> CalculationSession:
+    appointment_id = assignee.get("appointment_id")
+    if appointment_id is None:
+        raise HTTPException(status_code=400, detail="Appointment id is required")
+    customer_name = _resolve_quote_customer_name(db, quote)
+    client, _, _ = get_or_create_client_for_import(db, customer_name)
+    trade = _default_trade(db)
+    rule = try_resolve_rate_rule(db, client.id, trade.id)
+
+    quote_ref = quote.quote_ref or f"Q{quote.eworks_quote_id}"
+    eworks_job_id = assignee.get("eworks_job_id")
+    job_number = str(eworks_job_id) if eworks_job_id is not None else str(quote.eworks_quote_id)
+    property_address = _quote_site_address(quote)
+    description = (quote.description or "").strip() or None
+    scope_plain = html_to_plain_text(description) if description else None
+
+    payload = EworksLinkPayload(
+        source="assignment",
+        quote_number=quote_ref,
+        job_number=job_number,
+        external_job_id=str(eworks_job_id or quote.eworks_quote_id),
+        client=customer_name,
+        trade=trade.name,
+        property_address=property_address,
+        original_job_description=description,
+        quote_description=description,
+        scope=scope_plain,
+        expires_at=_quote_expires_at(quote),
+    )
+    step1 = payload_to_step1(payload, client, trade, client_display_name=customer_name)
+    step1 = apply_appointment_engineer_name_to_step1(
+        db,
+        step1,
+        quote_ref=quote_ref,
+        eworks_quote_id=quote.eworks_quote_id,
+    )
+    payload_dict = payload.model_dump(mode="json")
+    payload_dict["eworks_quote_id"] = quote.eworks_quote_id
+    payload_dict["synced_quote_id"] = quote.id
+    payload_dict["appointment_id"] = appointment_id
+    payload_dict["engineer_email"] = user.email
+    payload_dict["engineer_user_id"] = str(user.id) if user.id else None
+    payload_dict["source"] = "eworks_appointment"
+    if assignee.get("job_ref"):
+        payload_dict["job_ref"] = assignee.get("job_ref")
+
+    initial_step2 = Step2Snapshot(scope=scope_plain) if scope_plain else Step2Snapshot()
+    initial_step2 = apply_questionnaire_defaults(initial_step2, trade_name=trade.name, default_skill=True)
+
+    idempotency_key = _appointment_assignment_idempotency_key(
+        appointment_id=int(appointment_id),
+        synced_quote_id=quote.id,
+        engineer_email=user.email,
+    )
+    session = CalculationSession(
+        session_token=secrets.token_hex(32),
+        idempotency_key=idempotency_key,
+        source="assignment",
+        payload_snapshot=payload_dict,
+        step1_snapshot=step1.model_dump(mode="json"),
+        step2_snapshot=initial_step2.model_dump(mode="json"),
+        ui_state=SessionUiState().model_dump(mode="json"),
+        client_id=client.id,
+        trade_id=trade.id,
+        rate_rule_id=rule.id if rule else None,
+        eworks_customer_snapshot=None,
+        expires_at=_as_utc(payload.expires_at) or _now() + timedelta(days=DEFAULT_TOKEN_DAYS),
+    )
+    db.add(session)
+    db.flush()
+    return session
+
+
+def _ensure_appointment_calculation_session(
+    db: Session,
+    *,
+    quote: EworksQuote,
+    assignee: dict[str, Any],
+    user: AuthenticatedUser,
+) -> tuple[CalculationSession, bool]:
+    existing = _find_appointment_assignment_session(db, quote=quote, assignee=assignee, user=user)
+    if existing is not None:
+        return existing, False
+    existing = _create_calculation_session_for_appointment(
+        db, quote=quote, assignee=assignee, user=user
+    )
+    record_audit(
+        db,
+        actor=user,
+        action="quote_appointment_estimate_started",
+        entity_type="eworks_appointment",
+        entity_id=assignee.get("appointment_id"),
+        after={
+            "calculation_session_id": str(existing.id),
+            "quote_ref": quote.quote_ref,
+            "appointment_id": assignee.get("appointment_id"),
+            "engineer_email": user.email,
+        },
+        metadata={
+            "synced_quote_id": quote.id,
+            "eworks_quote_id": quote.eworks_quote_id,
+            "appointment_id": assignee.get("appointment_id"),
+            "job_ref": assignee.get("job_ref"),
+            "eworks_job_id": assignee.get("eworks_job_id"),
+        },
+    )
+    return existing, True
+
+
+def start_appointment_assignment_estimate(
+    db: Session,
+    synthetic_assignment_id: int,
+    current_user: AuthenticatedUser,
+) -> dict[str, Any]:
+    quote, assignee = _resolve_appointment_assignment(db, synthetic_assignment_id, current_user)
+    session, created = _ensure_appointment_calculation_session(
+        db, quote=quote, assignee=assignee, user=current_user
+    )
+    db.commit()
+    db.refresh(session)
+    response = {
+        "session_id": str(session.id),
+        "session_token": session.session_token,
+        "resume_url": _build_resume_url(session.id, session.session_token),
+        "assignment_id": synthetic_assignment_id,
+        "quote_ref": quote.quote_ref,
+        "created": created,
+    }
+    return response
+
+
 def start_assignment_estimate(
     db: Session,
     assignment_id: int,
     current_user: AuthenticatedUser,
 ) -> dict[str, Any]:
+    if assignment_id < 0:
+        return start_appointment_assignment_estimate(db, assignment_id, current_user)
+
     row = db.query(EworksQuoteAssignment).filter(EworksQuoteAssignment.id == assignment_id).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Assignment not found")
