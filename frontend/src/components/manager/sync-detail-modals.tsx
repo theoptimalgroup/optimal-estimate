@@ -442,7 +442,6 @@ export function QuoteDetailModal({
               <SectionCard title="Quote Summary" testId="quote-summary-section">
                 <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <DetailField label="Quote Ref" value={displayValue(detail.identity.quote_ref)} />
-                  <DetailField label="eWorks Quote ID" value={String(detail.identity.eworks_quote_id)} />
                   <DetailField
                     label="Status"
                     value={displayValue(detail.identity.status_name ?? detail.identity.status)}
@@ -458,8 +457,6 @@ export function QuoteDetailModal({
                   <DetailField label="Site" value={displayValue(detail.customer.site_name)} />
                   <DetailField label="Address" value={displayValue(detail.customer.site_address)} />
                   <DetailField label="Customer Ref" value={displayValue(detail.customer.customer_ref)} />
-                  <DetailField label="PO Ref" value={displayValue(detail.customer.po_ref)} />
-                  <DetailField label="WO Ref" value={displayValue(detail.customer.wo_ref)} />
                 </dl>
               </SectionCard>
 
