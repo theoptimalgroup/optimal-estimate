@@ -28,6 +28,20 @@ function fmtDate(val: string | null | undefined): string {
   }
 }
 
+function fmtUkDateTime(val: string | null | undefined): string {
+  if (!val) return "Not available";
+  const date = new Date(val);
+  if (Number.isNaN(date.getTime())) return val;
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/London",
+  });
+}
+
 function fmtMoney(val: number | null | undefined, currency?: string | null): string {
   if (val === null || val === undefined) return "Not available";
   const symbol = currency === "GBP" || !currency ? "£" : `${currency} `;
@@ -307,32 +321,33 @@ function ItemsTable({ items }: { items: EworksQuoteSafeDetail["items"] }) {
   );
 }
 
-function CustomFieldsTable({
+function isLongCustomFieldValue(value: string): boolean {
+  return value.length > 100 || value.includes("\n");
+}
+
+function CustomFieldsSummarySection({
   fields,
 }: {
   fields: EworksQuoteSafeDetail["custom_fields"] | EworksJobSafeDetail["custom_fields"];
 }) {
-  if (!fields.length) return null;
   return (
     <SectionCard title="Custom Fields" testId="custom-fields-section">
-      <DataTable testId="custom-fields-table">
-        <DataTableHead>
-          <DataTableRow>
-            <DataTableCell header>Label</DataTableCell>
-            <DataTableCell header>Field Key</DataTableCell>
-            <DataTableCell header>Value</DataTableCell>
-          </DataTableRow>
-        </DataTableHead>
-        <DataTableBody>
+      {!fields.length ? (
+        <p className="text-sm text-slate-600" data-testid="custom-fields-empty">
+          No custom fields available.
+        </p>
+      ) : (
+        <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="custom-fields-grid">
           {fields.map((field) => (
-            <DataTableRow key={`${field.field_key}-${field.label}`}>
-              <DataTableCell>{field.label}</DataTableCell>
-              <DataTableCell>{field.field_key}</DataTableCell>
-              <DataTableCell>{field.value}</DataTableCell>
-            </DataTableRow>
+            <div
+              key={`${field.field_key}-${field.label}`}
+              className={isLongCustomFieldValue(field.value) ? "sm:col-span-2 lg:col-span-3" : undefined}
+            >
+              <DetailField label={field.label} value={displayValue(field.value)} />
+            </div>
           ))}
-        </DataTableBody>
-      </DataTable>
+        </dl>
+      )}
     </SectionCard>
   );
 }
@@ -447,6 +462,7 @@ export function QuoteDetailModal({
                     value={displayValue(detail.identity.status_name ?? detail.identity.status)}
                   />
                   <DetailField label="Synced At" value={fmtDate(detail.identity.synced_at)} />
+                  <DetailField label="Created On" value={fmtUkDateTime(detail.dates.created_on)} />
                   <div className="sm:col-span-2 lg:col-span-3" data-testid="tags-section">
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Tags</dt>
                     <dd className="mt-1">
@@ -456,12 +472,27 @@ export function QuoteDetailModal({
                 </dl>
               </SectionCard>
 
+              <CustomFieldsSummarySection fields={detail.custom_fields} />
+
+              <SalesAppointmentsTable appointments={detail.sales_appointments} />
+
               <SectionCard title="Customer / Site" testId="customer-site-section">
                 <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <DetailField label="Customer" value={displayCustomerName(detail.customer.customer_name)} />
+                  <DetailField label="Company" value={displayValue(detail.customer.company)} />
                   <DetailField label="Contact" value={displayValue(detail.customer.customer_contact_name)} />
+                  <DetailField label="Phone" value={displayValue(detail.customer.phone)} />
+                  <DetailField
+                    label="Email"
+                    value={displayValue(detail.customer.email)}
+                  />
                   <DetailField label="Site" value={displayValue(detail.customer.site_name)} />
-                  <DetailField label="Address" value={displayValue(detail.customer.site_address)} />
+                  <DetailField label="Site Company" value={displayValue(detail.customer.site_company)} />
+                  <DetailField label="Site Phone" value={displayValue(detail.customer.site_phone)} />
+                  <DetailField label="Site Email" value={displayValue(detail.customer.site_email)} />
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <DetailField label="Address" value={displayValue(detail.customer.site_address)} />
+                  </div>
                   <DetailField label="Customer Ref" value={displayValue(detail.customer.customer_ref)} />
                 </dl>
               </SectionCard>
@@ -478,12 +509,9 @@ export function QuoteDetailModal({
                   ) : null}
                   <DetailField label="Converted Date" value={displayValue(detail.dates.converted_date)} />
                   <DetailField label="Accepted Date" value={displayValue(detail.dates.accepted_date)} />
-                  <DetailField label="Created On" value={displayValue(detail.dates.created_on)} />
                   <DetailField label="Updated On" value={displayValue(detail.dates.updated_on)} />
                 </dl>
               </SectionCard>
-
-              <SalesAppointmentsTable appointments={detail.sales_appointments} />
 
               <SectionCard title="Description & Notes" testId="description-notes-section">
                 <div className="space-y-4">
@@ -506,8 +534,6 @@ export function QuoteDetailModal({
               </SectionCard>
 
               <ItemsTable items={detail.items} />
-
-              <CustomFieldsTable fields={detail.custom_fields} />
 
               <AttachmentsSection
                 attachments={attachments}
@@ -692,7 +718,7 @@ export function JobDetailModal({
                 <TagBadgesSection tags={detail.tags} />
               </SectionCard>
 
-              <CustomFieldsTable fields={detail.custom_fields} />
+              <CustomFieldsSummarySection fields={detail.custom_fields} />
 
               <AttachmentsSection
                 attachments={attachments}

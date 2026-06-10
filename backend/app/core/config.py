@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     eworks_api_retry_backoff_seconds: float = 2.0
     eworks_api_max_pages: int = 0
     eworks_customers_resource_path: str = "Customer"
+    eworks_custom_fields_resource_path: str = "CustomFields"
     eworks_sync_attachments_enabled: bool = False
     eworks_sync_attachment_files_enabled: bool = False
     eworks_sync_running_timeout_minutes: int = 30

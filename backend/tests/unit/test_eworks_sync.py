@@ -16,7 +16,17 @@ from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
-from app.models.eworks_sync import EworksAttachment, EworksCustomer, EworksJob, EworksJobAppointment, EworksQuote, EworksSyncLock, EworksSyncRun
+from app.models.eworks_sync import (
+    EworksAttachment,
+    EworksCustomer,
+    EworksCustomFieldDefinition,
+    EworksJob,
+    EworksJobAppointment,
+    EworksQuote,
+    EworksQuoteAppointment,
+    EworksSyncLock,
+    EworksSyncRun,
+)
 from app.models.product import Product
 from app.models.support import AuditLog
 from app.models.user import User
@@ -38,8 +48,10 @@ def db_session():
         User.__table__,
         AuditLog.__table__,
         EworksQuote.__table__,
+        EworksCustomFieldDefinition.__table__,
         EworksJob.__table__,
         EworksJobAppointment.__table__,
+        EworksQuoteAppointment.__table__,
         EworksCustomer.__table__,
         EworksAttachment.__table__,
         EworksSyncRun.__table__,

@@ -263,9 +263,11 @@ class EworksSafeLineItem(BaseModel):
 
 
 class EworksSafeCustomField(BaseModel):
-    label: str
     field_key: str
+    label: str
+    type: str | None = None
     value: str
+    options: list[str] | None = None
 
 
 class EworksLinkedEstimate(BaseModel):
@@ -287,10 +289,16 @@ class EworksQuoteSafeIdentity(BaseModel):
 class EworksQuoteSafeCustomer(BaseModel):
     customer_id: int | str | None = None
     customer_name: str | None = None
+    company: str | None = None
     customer_contact_id: int | str | None = None
     customer_contact_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
     customer_site_id: int | str | None = None
     site_name: str | None = None
+    site_company: str | None = None
+    site_phone: str | None = None
+    site_email: str | None = None
     site_address: str | None = None
     customer_ref: str | None = None
     po_ref: str | None = None

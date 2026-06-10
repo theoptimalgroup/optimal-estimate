@@ -506,9 +506,11 @@ export type EworksSafeLineItem = {
 };
 
 export type EworksSafeCustomField = {
-  label: string;
   field_key: string;
+  label: string;
+  type?: string | null;
   value: string;
+  options?: string[] | null;
 };
 
 export type EworksLinkedEstimate = {
@@ -539,10 +541,16 @@ export type EworksQuoteSafeDetail = {
   customer: {
     customer_id?: number | string | null;
     customer_name?: string | null;
+    company?: string | null;
     customer_contact_id?: number | string | null;
     customer_contact_name?: string | null;
+    phone?: string | null;
+    email?: string | null;
     customer_site_id?: number | string | null;
     site_name?: string | null;
+    site_company?: string | null;
+    site_phone?: string | null;
+    site_email?: string | null;
     site_address?: string | null;
     customer_ref?: string | null;
     po_ref?: string | null;
@@ -700,4 +708,69 @@ export async function listJobAttachments(jobId: number): Promise<EworksAttachmen
 
 export function getSyncedAttachmentDownloadUrl(attachmentId: number): string {
   return `${getApiUrl()}/api/v1/eworks-sync/attachments/${attachmentId}/download`;
+}
+
+export type EworksCustomFieldDefinition = {
+  id: number;
+  eworks_custom_field_id: number;
+  field_key: string;
+  label: string;
+  type?: string | null;
+  section?: string | null;
+  options?: string[] | null;
+  default_value?: string | null;
+  synced_at?: string | null;
+};
+
+export type EworksCustomFieldDefinitionSyncSummary = {
+  fetched: number;
+  created: number;
+  updated: number;
+  failed: number;
+};
+
+export type EworksCustomFieldDebugRow = {
+  field_key: string;
+  label: string;
+  type?: string | null;
+  section?: string | null;
+  value?: string | null;
+  options?: string[] | null;
+};
+
+export async function listCustomFieldDefinitions(filters: {
+  section?: string;
+  search?: string;
+} = {}): Promise<EworksCustomFieldDefinition[]> {
+  const params = new URLSearchParams();
+  if (filters.section) params.set("section", filters.section);
+  if (filters.search) params.set("search", filters.search);
+  const qs = params.toString();
+  const resp = await apiFetch<{ items: EworksCustomFieldDefinition[] }>(
+    `/api/v1/eworks-sync/custom-field-definitions${qs ? `?${qs}` : ""}`
+  );
+  return resp.data.items;
+}
+
+export async function syncCustomFieldDefinitions(): Promise<EworksCustomFieldDefinitionSyncSummary> {
+  const resp = await apiFetch<EworksCustomFieldDefinitionSyncSummary>(
+    "/api/v1/eworks-sync/custom-field-definitions/sync",
+    { method: "POST" }
+  );
+  return resp.data;
+}
+
+export async function getQuoteCustomFieldsDebug(quoteId: number): Promise<{
+  quote_id: number;
+  eworks_quote_id: number;
+  quote_ref?: string | null;
+  fields: EworksCustomFieldDebugRow[];
+}> {
+  const resp = await apiFetch<{
+    quote_id: number;
+    eworks_quote_id: number;
+    quote_ref?: string | null;
+    fields: EworksCustomFieldDebugRow[];
+  }>(`/api/v1/eworks-sync/quotes/${quoteId}/custom-fields/debug`);
+  return resp.data;
 }

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.calculation_session import CalculationSession
-from app.models.eworks_sync import EworksJob, EworksQuote
+from app.models.eworks_sync import EworksCustomer, EworksJob, EworksQuote
 from app.services.eworks_acceptance_sync_service import resolve_eworks_quote_id
 from app.services.eworks_job_appointment_service import serialize_job_appointments
 from app.services.eworks_job_appointment_service import (
@@ -17,6 +17,12 @@ from app.services.eworks_job_appointment_service import (
     merge_quote_sales_appointments,
     serialize_appointment_assignee_safe_detail,
     serialize_linked_job_appointments_for_quote,
+)
+from app.services.eworks_custom_field_definition_service import (
+    CustomFieldDefinitionView,
+    ensure_custom_field_definitions,
+    definitions_lookup_map,
+    infer_field_type_from_key,
 )
 from app.services.eworks_linked_job_sync_service import maybe_auto_sync_linked_jobs_for_quote
 from app.services.eworks_quote_appointment_service import serialize_quote_appointments
@@ -119,6 +125,131 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _coerce_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _first_non_empty_str(*values: Any) -> str | None:
+    for value in values:
+        text = _as_str(value)
+        if text:
+            return text
+    return None
+
+
+def _resolve_phone(*sources: dict[str, Any]) -> str | None:
+    telephone_keys = ("telephone", "phone", "tel", "telephone_number", "phone_number")
+    mobile_keys = ("mobile", "mobile_number", "cell", "cellphone")
+    for source in sources:
+        if not source:
+            continue
+        for key in telephone_keys:
+            text = _as_str(source.get(key))
+            if text:
+                return text
+        for key in mobile_keys:
+            text = _as_str(source.get(key))
+            if text:
+                return text
+    return None
+
+
+def _lookup_synced_customer(db: Session, customer_id: Any) -> EworksCustomer | None:
+    if customer_id is None:
+        return None
+    try:
+        eworks_customer_id = int(customer_id)
+    except (TypeError, ValueError):
+        return None
+    return (
+        db.query(EworksCustomer)
+        .filter(EworksCustomer.eworks_customer_id == eworks_customer_id)
+        .one_or_none()
+    )
+
+
+def _build_quote_safe_customer(db: Session, quote: EworksQuote, raw: dict[str, Any]) -> dict[str, Any]:
+    customer = _coerce_dict(raw.get("customer"))
+    contact = _coerce_dict(raw.get("customer_contact") or raw.get("contact"))
+    site = _coerce_dict(raw.get("site"))
+    site_contact = _coerce_dict(raw.get("site_contact"))
+    billing = _coerce_dict(raw.get("billing"))
+    delivery = _coerce_dict(raw.get("delivery"))
+
+    customer_id = quote.customer_id or extract_customer_id_from_raw(raw)
+    synced_customer = _lookup_synced_customer(db, customer_id)
+
+    site_phone_source = {
+        "telephone": _pick(raw, "site_telephone"),
+        "phone": _pick(raw, "site_phone"),
+        "mobile": _pick(raw, "site_mobile"),
+    }
+
+    return {
+        "customer_id": customer_id,
+        "customer_name": _first_non_empty_str(
+            quote.customer_name,
+            extract_customer_name_from_raw(raw),
+            synced_customer.customer_name if synced_customer else None,
+            synced_customer.full_name if synced_customer else None,
+        ),
+        "company": _first_non_empty_str(
+            customer.get("company_name"),
+            customer.get("company"),
+            raw.get("company_name"),
+            raw.get("company"),
+            synced_customer.company_name if synced_customer else None,
+        ),
+        "customer_contact_id": quote.customer_contact_id or extract_customer_contact_id_from_raw(raw),
+        "customer_contact_name": _first_non_empty_str(
+            raw.get("customer_contact_name"),
+            contact.get("full_name"),
+            contact.get("name"),
+            contact.get("contact_name"),
+            billing.get("full_name"),
+        ),
+        "phone": _first_non_empty_str(
+            _resolve_phone(contact, customer, raw),
+            synced_customer.phone if synced_customer else None,
+        ),
+        "email": _first_non_empty_str(
+            contact.get("email"),
+            contact.get("email_address"),
+            raw.get("customer_contact_email"),
+            billing.get("email_address"),
+            billing.get("email"),
+            customer.get("email"),
+            customer.get("customer_email"),
+            raw.get("email"),
+            raw.get("customer_email"),
+            synced_customer.email if synced_customer else None,
+        ),
+        "customer_site_id": quote.customer_site_id or extract_customer_site_id_from_raw(raw),
+        "site_name": _first_non_empty_str(raw.get("site_name"), site.get("site_name"), site.get("name")),
+        "site_company": _first_non_empty_str(
+            site.get("company_name"),
+            site.get("company"),
+            site.get("site_company"),
+            raw.get("site_company"),
+            site_contact.get("company_name"),
+            site_contact.get("company"),
+            delivery.get("company_name"),
+        ),
+        "site_phone": _resolve_phone(site_contact, site, site_phone_source),
+        "site_email": _first_non_empty_str(
+            site_contact.get("email"),
+            site_contact.get("email_address"),
+            site.get("email"),
+            site.get("site_email"),
+            raw.get("site_email"),
+        ),
+        "site_address": _build_site_address(raw),
+        "customer_ref": quote.customer_ref or _as_str(_pick(raw, "customer_ref")),
+        "po_ref": quote.po_ref or _as_str(_pick(raw, "po_ref")),
+        "wo_ref": quote.wo_ref or _as_str(_pick(raw, "wo_ref")),
+    }
+
+
 def _format_custom_value(value: Any) -> str:
     if value is None:
         return ""
@@ -173,37 +304,116 @@ def _extract_line_items(raw: dict[str, Any]) -> list[dict[str, str | None]]:
     return items
 
 
-def _extract_custom_fields(raw: dict[str, Any]) -> list[dict[str, str]]:
-    fields: list[dict[str, str]] = []
+def _resolve_custom_field_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        for key in ("value", "display_value", "values", "text", "name"):
+            nested = value.get(key)
+            if nested not in (None, ""):
+                return nested
+        if len(value) == 1:
+            return next(iter(value.values()))
+    return value
+
+
+def _custom_field_label_map(raw: dict[str, Any]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for source_key in ("custom_field_labels", "field_labels", "custom_field_definitions"):
+        source = raw.get(source_key)
+        if isinstance(source, dict):
+            for key, label in source.items():
+                label_text = _as_str(label)
+                if label_text:
+                    labels[str(key)] = label_text
+        elif isinstance(source, list):
+            for item in source:
+                if not isinstance(item, dict):
+                    continue
+                field_key = _as_str(
+                    item.get("field_key") or item.get("key") or item.get("name") or item.get("id")
+                )
+                label = _as_str(item.get("label") or item.get("name") or item.get("title"))
+                if field_key and label:
+                    labels[field_key] = label
+    return labels
+
+
+def _extract_custom_fields(
+    raw: dict[str, Any],
+    *,
+    definitions: dict[str, CustomFieldDefinitionView] | None = None,
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
+    label_map = _custom_field_label_map(raw)
+
+    def resolve_definition(field_key: str) -> CustomFieldDefinitionView | None:
+        if not definitions:
+            return None
+        return definitions.get(field_key)
 
     def add_field(label: str | None, field_key: str | None, value: Any) -> None:
-        label_text = _as_str(label) or _as_str(field_key) or "Field"
-        key_text = _as_str(field_key) or label_text
-        if value in (None, ""):
-            return
-        if _is_sensitive_key(key_text) or _is_sensitive_key(label_text):
+        key_text = _as_str(field_key) or _as_str(label) or "Field"
+        defn = resolve_definition(key_text)
+        label_text = (
+            _as_str(label)
+            or (defn.label if defn else None)
+            or label_map.get(key_text)
+            or key_text
+        )
+        field_type = (defn.field_type if defn else None) or infer_field_type_from_key(key_text)
+        options = defn.options if defn and field_type == "LIST" else None
+        resolved_value = _resolve_custom_field_value(value)
+        if resolved_value in (None, ""):
+            value_text = "Not available"
+        elif _is_sensitive_key(key_text) or _is_sensitive_key(label_text):
             value_text = REDACTED
         else:
-            value_text = _format_custom_value(redact_sensitive_data(value))
+            value_text = _format_custom_value(redact_sensitive_data(resolved_value))
         entry = (label_text, key_text, value_text)
         if entry in seen:
             return
         seen.add(entry)
-        fields.append({"label": label_text, "field_key": key_text, "value": value_text})
+        fields.append(
+            {
+                "field_key": key_text,
+                "label": label_text,
+                "type": field_type,
+                "value": value_text,
+                "options": options,
+            }
+        )
 
-    for source_key in ("custom_fields", "cf_data", "custom_field_values"):
+    for source_key in (
+        "custom_fields",
+        "CustomFields",
+        "cf_data",
+        "cfData",
+        "custom_field_values",
+        "custom_field_values_data",
+    ):
         source = raw.get(source_key)
         if isinstance(source, dict):
             for key, value in source.items():
-                add_field(str(key), str(key), value)
+                add_field(label_map.get(str(key)), str(key), value)
         elif isinstance(source, list):
             for item in source:
                 if not isinstance(item, dict):
                     add_field(None, None, item)
                     continue
-                label = _as_str(item.get("label") or item.get("name") or item.get("field") or item.get("key"))
-                field_key = _as_str(item.get("field_key") or item.get("key") or item.get("name") or label)
+                nested = item.get("custom_field")
+                if isinstance(nested, dict):
+                    label = _as_str(
+                        nested.get("label")
+                        or nested.get("name")
+                        or nested.get("field")
+                        or nested.get("title")
+                    )
+                    field_key = _as_str(
+                        nested.get("field_key") or nested.get("key") or nested.get("name") or label
+                    )
+                else:
+                    label = _as_str(item.get("label") or item.get("name") or item.get("field") or item.get("key"))
+                    field_key = _as_str(item.get("field_key") or item.get("key") or item.get("name") or label)
                 value = item.get("value")
                 if value is None:
                     value = item.get("values") or item.get("display_value")
@@ -346,13 +556,16 @@ def build_quote_safe_detail(
     *,
     auto_sync_linked_jobs: bool = True,
 ) -> dict[str, Any]:
+    from app.services.eworks_quote_detail_sync_service import maybe_refresh_quote_detail_for_safe_view
+
+    maybe_refresh_quote_detail_for_safe_view(db, quote, opened_directly=True)
+    ensure_custom_field_definitions(db)
+    definitions = definitions_lookup_map(db)
+
     if auto_sync_linked_jobs:
         maybe_auto_sync_linked_jobs_for_quote(db, quote, opened_directly=True)
 
     raw = quote.raw_payload if isinstance(quote.raw_payload, dict) else {}
-    customer = raw.get("customer") if isinstance(raw.get("customer"), dict) else {}
-    contact = raw.get("customer_contact") if isinstance(raw.get("customer_contact"), dict) else {}
-    site = raw.get("site") if isinstance(raw.get("site"), dict) else {}
 
     tags = _serialize_tags(quote.tags) or _extract_tags_from_raw(raw)
 
@@ -369,21 +582,7 @@ def build_quote_safe_detail(
             ),
             "synced_at": str(quote.synced_at) if quote.synced_at else None,
         },
-        "customer": {
-            "customer_id": quote.customer_id or extract_customer_id_from_raw(raw),
-            "customer_name": _as_str(quote.customer_name) or extract_customer_name_from_raw(raw),
-            "customer_contact_id": quote.customer_contact_id or extract_customer_contact_id_from_raw(raw),
-            "customer_contact_name": _as_str(
-                _pick(raw, "customer_contact_name")
-                or _pick(contact, "full_name", "name", "contact_name")
-            ),
-            "customer_site_id": quote.customer_site_id or extract_customer_site_id_from_raw(raw),
-            "site_name": _as_str(_pick(raw, "site_name") or _pick(site, "site_name", "name")),
-            "site_address": _build_site_address(raw),
-            "customer_ref": quote.customer_ref or _as_str(_pick(raw, "customer_ref")),
-            "po_ref": quote.po_ref or _as_str(_pick(raw, "po_ref")),
-            "wo_ref": quote.wo_ref or _as_str(_pick(raw, "wo_ref")),
-        },
+        "customer": _build_quote_safe_customer(db, quote, raw),
         "quote_details": {
             "quote_type_id": quote.quote_type_id or _pick(raw, "quote_type_id"),
             "quote_source_id": quote.quote_source_id or _pick(raw, "quote_source_id"),
@@ -407,7 +606,7 @@ def build_quote_safe_detail(
         },
         "tags": tags,
         "items": _extract_line_items(raw),
-        "custom_fields": _extract_custom_fields(raw),
+        "custom_fields": _extract_custom_fields(raw, definitions=definitions),
         "dates": {
             "created_on": _as_str(_pick(raw, "created_on", "created_at", "Created_On")),
             "updated_on": _as_str(_pick(raw, "updated_on", "updated_at", "Updated_On", "timestamp")),
@@ -432,6 +631,8 @@ def build_quote_safe_detail(
 
 
 def build_job_safe_detail(db: Session, job: EworksJob) -> dict[str, Any]:
+    ensure_custom_field_definitions(db)
+    definitions = definitions_lookup_map(db)
     raw = job.raw_payload if isinstance(job.raw_payload, dict) else {}
     customer = raw.get("customer") if isinstance(raw.get("customer"), dict) else {}
     contact = raw.get("customer_contact") if isinstance(raw.get("customer_contact"), dict) else {}
@@ -484,7 +685,7 @@ def build_job_safe_detail(db: Session, job: EworksJob) -> dict[str, Any]:
         },
         "tags": tags,
         "items": _extract_line_items(raw),
-        "custom_fields": _extract_custom_fields(raw),
+        "custom_fields": _extract_custom_fields(raw, definitions=definitions),
         "dates": {
             "created_on": _as_str(_pick(raw, "created_on", "created_at")),
             "updated_on": _as_str(_pick(raw, "updated_on", "updated_at", "timestamp")),

@@ -16,7 +16,7 @@ from app.core.security import UserRole, get_password_hash
 from app.db.session import get_db
 from app.main import app
 from app.models.calculation_session import CalculationSession
-from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote, EworksQuoteAppointment
+from app.models.eworks_sync import EworksCustomer, EworksJob, EworksJobAppointment, EworksQuote, EworksQuoteAppointment, EworksCustomFieldDefinition
 from app.models.user import User
 from app.services.eworks_job_appointment_service import (
     merge_quote_sales_appointments,
@@ -28,6 +28,14 @@ from app.services.eworks_linked_job_sync_service import (
     sync_linked_jobs_for_quote,
 )
 from app.services.eworks_safe_detail_service import build_quote_safe_detail
+
+
+@pytest.fixture(autouse=True)
+def _skip_custom_field_definition_sync(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.eworks_safe_detail_service.ensure_custom_field_definitions",
+        lambda db, *, force=False: False,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +56,8 @@ def db_session():
         User.__table__,
         CalculationSession.__table__,
         EworksQuote.__table__,
+        EworksCustomFieldDefinition.__table__,
+        EworksCustomer.__table__,
         EworksJob.__table__,
         EworksJobAppointment.__table__,
         EworksQuoteAppointment.__table__,
@@ -451,3 +461,130 @@ def test_safe_detail_api_q22147_style_returns_vitor_after_auto_sync(
     assert appointments[0]["user_name"] == "Vitor Espirito Santo"
     assert appointments[0]["job_ref"] == "JOB-34012"
     assert appointments[0]["status"] == "Accepted"
+
+
+@patch("app.services.eworks_safe_detail_service.ensure_custom_field_definitions", return_value=False)
+def test_quote_safe_detail_customer_site_includes_company_phone_email(mock_ensure, db_session):
+    quote = EworksQuote(
+        eworks_quote_id=5001,
+        quote_ref="Q5001",
+        customer_name="Chestertons",
+        customer_id=100,
+        raw_payload={
+            "customer": {
+                "company_name": "Chestertons Estate Agents",
+                "telephone": "020 7340 1234",
+                "email": "info@chestertons.com",
+            },
+            "customer_contact": {
+                "full_name": "Jane Agent",
+                "email": "jane.agent@chestertons.com",
+                "mobile": "07700900123",
+            },
+            "site_name": "Flat 4, 10 High Street",
+            "site": {
+                "site_name": "Flat 4, 10 High Street",
+                "company_name": "Site Holdings Ltd",
+                "telephone": "020 7000 1111",
+                "email": "site@chestertons.com",
+                "address_1": "10 High Street",
+                "city": "London",
+                "postcode": "W6 8NX",
+            },
+            "customer_ref": "CR-5001",
+        },
+    )
+    db_session.add(quote)
+    db_session.commit()
+
+    detail = build_quote_safe_detail(db_session, quote, auto_sync_linked_jobs=False)
+    customer = detail["customer"]
+
+    assert customer["customer_name"] == "Chestertons"
+    assert customer["company"] == "Chestertons Estate Agents"
+    assert customer["customer_contact_name"] == "Jane Agent"
+    assert customer["phone"] == "07700900123"
+    assert customer["email"] == "jane.agent@chestertons.com"
+    assert customer["site_name"] == "Flat 4, 10 High Street"
+    assert customer["site_company"] == "Site Holdings Ltd"
+    assert customer["site_phone"] == "020 7000 1111"
+    assert customer["site_email"] == "site@chestertons.com"
+    assert "10 High Street" in customer["site_address"]
+    assert customer["customer_ref"] == "CR-5001"
+
+
+@patch("app.services.eworks_safe_detail_service.ensure_custom_field_definitions", return_value=False)
+def test_quote_safe_detail_customer_site_falls_back_to_synced_customer(mock_ensure, db_session):
+    db_session.add(
+        EworksCustomer(
+            eworks_customer_id=20,
+            customer_name="Portico Grace Conlon",
+            company_name="Portico Ltd",
+            phone="020 1234 5678",
+            email="hello@portico.com",
+        )
+    )
+    quote = EworksQuote(
+        eworks_quote_id=5002,
+        quote_ref="Q5002",
+        customer_id=20,
+        raw_payload={"customer_id": 20, "site": {"city": "London"}},
+    )
+    db_session.add(quote)
+    db_session.commit()
+
+    detail = build_quote_safe_detail(db_session, quote, auto_sync_linked_jobs=False)
+    customer = detail["customer"]
+
+    assert customer["customer_name"] == "Portico Grace Conlon"
+    assert customer["company"] == "Portico Ltd"
+    assert customer["phone"] == "020 1234 5678"
+    assert customer["email"] == "hello@portico.com"
+    assert customer["customer_contact_name"] is None
+    assert customer["site_company"] is None
+
+
+@patch("app.services.eworks_safe_detail_service.ensure_custom_field_definitions", return_value=False)
+def test_quote_safe_detail_customer_site_prefers_telephone_over_mobile(mock_ensure, db_session):
+    quote = EworksQuote(
+        eworks_quote_id=5003,
+        quote_ref="Q5003",
+        raw_payload={
+            "customer_contact": {
+                "telephone": "020 1111 2222",
+                "mobile": "07700900999",
+            }
+        },
+    )
+    db_session.add(quote)
+    db_session.commit()
+
+    customer = build_quote_safe_detail(db_session, quote, auto_sync_linked_jobs=False)["customer"]
+    assert customer["phone"] == "020 1111 2222"
+
+
+@patch("app.services.eworks_safe_detail_service.ensure_custom_field_definitions", return_value=False)
+@patch("app.auth.dependencies.settings")
+def test_quote_safe_detail_customer_site_api_returns_new_fields(mock_settings, mock_ensure, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=5004,
+            quote_ref="Q5004",
+            customer_name="Acme",
+            raw_payload={
+                "customer": {"company_name": "Acme Ltd", "phone": "0123456789"},
+                "customer_contact": {"email": "contact@acme.com"},
+            },
+        )
+    )
+    db_session.commit()
+    quote = db_session.query(EworksQuote).filter(EworksQuote.eworks_quote_id == 5004).one()
+
+    resp = api_client.get(f"/api/v1/eworks-sync/quotes/{quote.id}/safe")
+    assert resp.status_code == 200
+    customer = resp.json()["data"]["customer"]
+    assert customer["company"] == "Acme Ltd"
+    assert customer["phone"] == "0123456789"
+    assert customer["email"] == "contact@acme.com"
+    assert customer["site_company"] is None

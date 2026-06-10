@@ -59,6 +59,11 @@ from app.services.eworks_attachment_sync_service import (
     serialize_attachment_admin,
     serialize_attachment_safe,
 )
+from app.services.eworks_custom_field_definition_service import (
+    build_quote_custom_fields_debug,
+    list_custom_field_definitions,
+    sync_custom_field_definitions,
+)
 from app.services.eworks_safe_detail_service import (
     build_job_safe_detail,
     build_quote_safe_detail,
@@ -696,6 +701,40 @@ def get_quote_safe_detail(db: DbSession, quote_id: int, actor: StaffRead):
     return success_response(
         EworksQuoteSafeDetailRead.model_validate(build_quote_safe_detail(db, row)).model_dump()
     )
+
+
+@router.get("/quotes/{quote_id}/custom-fields/debug")
+def get_quote_custom_fields_debug(db: DbSession, quote_id: int, actor: AdminOnly):
+    """Admin debug view of quote custom fields with labels, types, sections, and values."""
+    row = db.query(EworksQuote).filter(EworksQuote.id == quote_id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    return success_response(
+        {
+            "quote_id": row.id,
+            "eworks_quote_id": row.eworks_quote_id,
+            "quote_ref": row.quote_ref,
+            "fields": build_quote_custom_fields_debug(db, row),
+        }
+    )
+
+
+@router.get("/custom-field-definitions")
+def get_custom_field_definitions(
+    db: DbSession,
+    actor: AdminOnly,
+    section: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+):
+    """List synced eWorks custom field definitions (admin only)."""
+    return success_response({"items": list_custom_field_definitions(db, section=section, search=search)})
+
+
+@router.post("/custom-field-definitions/sync")
+def sync_custom_field_definitions_endpoint(db: DbSession, actor: AdminOnly):
+    """Fetch CustomFields definitions from eWorks and upsert locally (admin only)."""
+    summary = sync_custom_field_definitions(db)
+    return success_response(summary.model_dump())
 
 
 @router.get("/quotes/{quote_id}")

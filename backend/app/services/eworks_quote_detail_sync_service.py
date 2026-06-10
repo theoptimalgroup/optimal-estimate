@@ -19,6 +19,80 @@ from app.services.eworks_sync_service import _extract_quote_fields, enrich_custo
 logger = logging.getLogger(__name__)
 
 _DASHBOARD_FETCH_LIMIT = 2000
+QUOTE_DETAIL_SAFE_VIEW_RETRY_WINDOW_SECONDS = 15 * 60
+
+_quote_detail_safe_view_attempts: dict[int, datetime] = {}
+
+
+def clear_quote_detail_safe_view_attempts() -> None:
+    """Clear in-memory safe-view refresh attempt timestamps (for tests)."""
+    _quote_detail_safe_view_attempts.clear()
+
+
+def _record_quote_detail_safe_view_attempt(eworks_quote_id: int) -> None:
+    _quote_detail_safe_view_attempts[eworks_quote_id] = datetime.now(timezone.utc)
+
+
+def _recent_quote_detail_safe_view_attempt(eworks_quote_id: int) -> bool:
+    attempted_at = _quote_detail_safe_view_attempts.get(eworks_quote_id)
+    if attempted_at is None:
+        return False
+    return datetime.now(timezone.utc) - attempted_at < timedelta(
+        seconds=QUOTE_DETAIL_SAFE_VIEW_RETRY_WINDOW_SECONDS
+    )
+
+
+def should_refresh_quote_detail_for_safe_view(quote: EworksQuote) -> str | None:
+    if not settings.eworks_api_enabled:
+        return "eworks_api_disabled"
+    if not quote.eworks_quote_id:
+        return "missing_eworks_quote_id"
+    if _recent_quote_detail_safe_view_attempt(quote.eworks_quote_id):
+        return "recent_attempt"
+    return None
+
+
+def maybe_refresh_quote_detail_for_safe_view(
+    db: Session,
+    quote: EworksQuote,
+    *,
+    opened_directly: bool = True,
+) -> bool:
+    """Fetch full eWorks quote detail (incl. cf_data) when opening the safe detail modal."""
+    if not opened_directly:
+        return False
+
+    skip_reason = should_refresh_quote_detail_for_safe_view(quote)
+    if skip_reason:
+        logger.info(
+            "Quote detail safe-view refresh skipped quote_ref=%s eworks_quote_id=%s reason=%s",
+            quote.quote_ref or "—",
+            quote.eworks_quote_id if quote.eworks_quote_id is not None else "—",
+            skip_reason,
+        )
+        return False
+
+    assert quote.eworks_quote_id is not None
+    _record_quote_detail_safe_view_attempt(quote.eworks_quote_id)
+
+    payload, _rate_limited, failed = _fetch_detail_safe(quote.eworks_quote_id)
+    if failed or payload is None:
+        logger.warning(
+            "Quote detail safe-view refresh failed quote_ref=%s eworks_quote_id=%s",
+            quote.quote_ref or "—",
+            quote.eworks_quote_id,
+        )
+        return False
+
+    apply_quote_detail_from_eworks(db, quote, payload)
+    db.commit()
+    db.refresh(quote)
+    logger.info(
+        "Quote detail safe-view refresh applied quote_ref=%s eworks_quote_id=%s",
+        quote.quote_ref or "—",
+        quote.eworks_quote_id,
+    )
+    return True
 
 
 @dataclass

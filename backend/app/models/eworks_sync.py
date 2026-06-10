@@ -285,7 +285,29 @@ class EworksAttachment(Base):
     uploaded_by: Mapped[str | None] = mapped_column(String(200))
     download_endpoint: Mapped[str | None] = mapped_column(String(1000))
     local_storage_path: Mapped[str | None] = mapped_column(String(1000))
-    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EworksCustomFieldDefinition(Base):
+    """Local mirror of eWorks CustomFields definitions (read-only sync)."""
+
+    __tablename__ = "eworks_custom_field_definitions"
+    __table_args__ = (
+        Index("ix_eworks_custom_field_definitions_field_key", "field_key"),
+        Index("ix_eworks_custom_field_definitions_synced_at", "synced_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    eworks_custom_field_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    field_key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    field_label: Mapped[str | None] = mapped_column(String(500))
+    field_type: Mapped[str | None] = mapped_column(String(50))
+    default_value: Mapped[str | None] = mapped_column(Text)
+    options: Mapped[list | None] = mapped_column(_json_col())
+    sections: Mapped[list | None] = mapped_column(_json_col())
+    status: Mapped[int | None] = mapped_column(Integer)
     raw_payload: Mapped[dict | None] = mapped_column(_json_col())
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

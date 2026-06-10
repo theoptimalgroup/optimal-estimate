@@ -42,6 +42,8 @@ import {
   listSyncedCustomers,
   listSyncedJobs,
   listSyncedQuotes,
+  listCustomFieldDefinitions,
+  syncCustomFieldDefinitions,
   runToSyncResult,
   triggerAllSync,
   triggerCustomersSync,
@@ -53,6 +55,7 @@ import {
   type EworksSyncRunRecord,
   type EworksSyncStatus,
   type EworksCustomerRecord,
+  type EworksCustomFieldDefinition,
   type EworksJobRecord,
   type EworksQuoteRecord,
 } from "@/lib/eworks-sync";
@@ -65,7 +68,7 @@ import {
   type ProductSyncSummary,
 } from "@/lib/products";
 
-type TabId = "sync" | "customers" | "quotes" | "jobs" | "products";
+type TabId = "sync" | "customers" | "quotes" | "jobs" | "products" | "custom-fields";
 type SyncType = "customers" | "quotes" | "quotes_incremental" | "jobs" | "all";
 
 const PAGE_SIZE = 50;
@@ -1259,12 +1262,124 @@ function ProductsTab({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+function CustomFieldsTab() {
+  const [items, setItems] = useState<EworksCustomFieldDefinition[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [sectionFilter, setSectionFilter] = useState("");
+  const [search, setSearch] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const rows = await listCustomFieldDefinitions({
+        section: sectionFilter || undefined,
+        search: search || undefined,
+      });
+      setItems(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load custom field definitions");
+    } finally {
+      setLoading(false);
+    }
+  }, [sectionFilter, search]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      await syncCustomFieldDefinitions();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Custom field definition sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4" data-testid="eworks-custom-fields-tab">
+      <SectionCard title="Custom Field Definitions" testId="custom-field-definitions-section">
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <FilterField label="Section">
+            <select
+              className={filterInputClass}
+              value={sectionFilter}
+              onChange={(e) => setSectionFilter(e.target.value)}
+              data-testid="custom-fields-section-filter"
+            >
+              <option value="">All sections</option>
+              <option value="QUOTE">Quote</option>
+              <option value="JOB">Job</option>
+              <option value="CUSTOMER">Customer</option>
+              <option value="INVOICE">Invoice</option>
+            </select>
+          </FilterField>
+          <FilterField label="Search">
+            <input
+              className={filterInputClass}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Field key or label"
+              data-testid="custom-fields-search"
+            />
+          </FilterField>
+          <PrimaryButton onClick={() => void handleSync()} disabled={syncing} data-testid="custom-fields-sync-button">
+            {syncing ? "Syncing..." : "Sync from eWorks"}
+          </PrimaryButton>
+        </div>
+
+        {error ? <ErrorState title="Custom fields error" message={error} /> : null}
+        {loading ? (
+          <LoadingState message="Loading custom field definitions..." />
+        ) : items.length === 0 ? (
+          <EmptyState
+            title="No custom field definitions synced"
+            description='Click "Sync from eWorks" to fetch CustomFields definitions.'
+            data-testid="custom-fields-empty"
+          />
+        ) : (
+          <DataTable testId="custom-field-definitions-table">
+            <DataTableHead>
+              <DataTableRow>
+                <DataTableCell header>Field Key</DataTableCell>
+                <DataTableCell header>Label</DataTableCell>
+                <DataTableCell header>Type</DataTableCell>
+                <DataTableCell header>Section</DataTableCell>
+                <DataTableCell header>Options</DataTableCell>
+              </DataTableRow>
+            </DataTableHead>
+            <DataTableBody>
+              {items.map((item) => (
+                <DataTableRow key={item.field_key} data-testid={`custom-field-row-${item.field_key}`}>
+                  <DataTableCell>{item.field_key}</DataTableCell>
+                  <DataTableCell>{item.label}</DataTableCell>
+                  <DataTableCell>{item.type ?? "—"}</DataTableCell>
+                  <DataTableCell>{item.section ?? "—"}</DataTableCell>
+                  <DataTableCell>{item.options?.length ? item.options.join(", ") : "—"}</DataTableCell>
+                </DataTableRow>
+              ))}
+            </DataTableBody>
+          </DataTable>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
 const TABS: { id: TabId; label: string }[] = [
   { id: "sync", label: "Sync" },
   { id: "customers", label: "Customers" },
   { id: "quotes", label: "Quotes" },
   { id: "jobs", label: "Jobs" },
   { id: "products", label: "Products" },
+  { id: "custom-fields", label: "Custom Fields" },
 ];
 
 export default function EworksSyncPage() {
@@ -1277,6 +1392,7 @@ export default function EworksSyncPage() {
     initialTabParam === "quotes" ||
     initialTabParam === "jobs" ||
     initialTabParam === "products" ||
+    initialTabParam === "custom-fields" ||
     initialTabParam === "sync"
       ? initialTabParam
       : "sync";
@@ -1525,6 +1641,9 @@ export default function EworksSyncPage() {
       </div>
       <div className={activeTab === "products" ? "block" : "hidden"} data-testid="eworks-sync-tab-products-panel">
         {activeTab === "products" ? <ProductsTab refreshKey={refreshKey} /> : null}
+      </div>
+      <div className={activeTab === "custom-fields" ? "block" : "hidden"} data-testid="eworks-sync-tab-custom-fields-panel">
+        {activeTab === "custom-fields" ? <CustomFieldsTab /> : null}
       </div>
     </div>
   );
