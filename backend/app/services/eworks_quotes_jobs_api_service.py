@@ -274,6 +274,7 @@ def fetch_all_jobs(
     date_from: str | None = None,
     date_to: str | None = None,
     status: str | None = None,
+    quote_id: int | None = None,
     page_limit: int | None = None,
     on_page_fetched: Any | None = None,
 ) -> list[dict[str, Any]]:
@@ -285,12 +286,19 @@ def fetch_all_jobs(
         extra["date_to"] = date_to
     if status:
         extra["status"] = status
+    if quote_id is not None:
+        extra["quote_id"] = quote_id
     return _fetch_all(
         resource_path="Job",
         extra_params=extra or None,
         page_limit=page_limit,
         on_page_fetched=on_page_fetched,
     )
+
+
+def fetch_jobs_for_quote(eworks_quote_id: int, *, page_limit: int = 3) -> list[dict[str, Any]]:
+    """Fetch Job list records linked to a quote id from eWorks (read-only)."""
+    return fetch_all_jobs(quote_id=eworks_quote_id, page_limit=page_limit)
 
 
 def fetch_quote_attachments(

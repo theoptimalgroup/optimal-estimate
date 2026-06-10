@@ -14,8 +14,11 @@ from app.services.eworks_acceptance_sync_service import resolve_eworks_quote_id
 from app.services.eworks_job_appointment_service import serialize_job_appointments
 from app.services.eworks_job_appointment_service import (
     get_active_job_appointment_assignee,
+    merge_quote_sales_appointments,
     serialize_appointment_assignee_safe_detail,
+    serialize_linked_job_appointments_for_quote,
 )
+from app.services.eworks_linked_job_sync_service import maybe_auto_sync_linked_jobs_for_quote
 from app.services.eworks_quote_appointment_service import serialize_quote_appointments
 from app.services.eworks_sync_service import (
     _extract_tags_from_raw,
@@ -357,7 +360,15 @@ def serialize_quote_list_item(quote: EworksQuote) -> dict[str, Any]:
     ).model_dump()
 
 
-def build_quote_safe_detail(db: Session, quote: EworksQuote) -> dict[str, Any]:
+def build_quote_safe_detail(
+    db: Session,
+    quote: EworksQuote,
+    *,
+    auto_sync_linked_jobs: bool = True,
+) -> dict[str, Any]:
+    if auto_sync_linked_jobs:
+        maybe_auto_sync_linked_jobs_for_quote(db, quote, opened_directly=True)
+
     raw = quote.raw_payload if isinstance(quote.raw_payload, dict) else {}
     customer = raw.get("customer") if isinstance(raw.get("customer"), dict) else {}
     contact = raw.get("customer_contact") if isinstance(raw.get("customer_contact"), dict) else {}
@@ -421,7 +432,10 @@ def build_quote_safe_detail(db: Session, quote: EworksQuote) -> dict[str, Any]:
             "accepted_date": _as_str(_pick(raw, "accepted_date", "Accepted_Date")),
         },
         "linked_estimate": _find_linked_estimate(db, quote=quote),
-        "sales_appointments": serialize_quote_appointments(db, quote),
+        "sales_appointments": merge_quote_sales_appointments(
+            serialize_quote_appointments(db, quote),
+            serialize_linked_job_appointments_for_quote(db, quote),
+        ),
     }
     assignee = get_active_job_appointment_assignee(
         db,

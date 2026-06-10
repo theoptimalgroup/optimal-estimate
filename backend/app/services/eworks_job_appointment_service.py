@@ -168,12 +168,21 @@ def _normalize_user_display_name(name: str | None) -> str | None:
     return cleaned or name
 
 
-def resolve_is_sales_appointment(raw: dict[str, Any], *, from_sales_list: bool = False) -> bool:
-    """True only when payload flag is set or source/type indicates a sales appointment."""
+def resolve_is_sales_appointment(
+    raw: dict[str, Any],
+    *,
+    from_sales_list: bool = False,
+    infer_unmarked_as_sales: bool = False,
+) -> bool:
+    """True when payload flag is set, source/type indicates sales, or job detail inference applies."""
     explicit = raw.get("is_sales_appointment")
     if explicit is not None and explicit != "":
         return parse_is_sales_appointment(explicit)
     if from_sales_list:
+        return True
+    if infer_unmarked_as_sales and (
+        "is_sales_appointment" not in raw or raw.get("is_sales_appointment") is None
+    ):
         return True
     for key in _SALES_SOURCE_KEYS:
         value = raw.get(key)
@@ -319,7 +328,12 @@ def is_cancelled_appointment_status(status: str | None) -> bool:
     return any(marker in normalized for marker in _CANCELLED_STATUS_MARKERS)
 
 
-def _parse_appointment_row(raw: dict[str, Any], *, from_sales_list: bool = False) -> SafeJobAppointment | None:
+def _parse_appointment_row(
+    raw: dict[str, Any],
+    *,
+    from_sales_list: bool = False,
+    infer_unmarked_as_sales: bool = False,
+) -> SafeJobAppointment | None:
     user_value = _pick_user_object(raw)
     user_id, user_name, user_email, user_mobile, user_telephone = _extract_user_fields(user_value)
     if user_mobile is None:
@@ -338,7 +352,11 @@ def _parse_appointment_row(raw: dict[str, Any], *, from_sales_list: bool = False
     start_at = _extract_datetime(raw, start=True)
     end_at = _extract_datetime(raw, start=False)
     duration_minutes = _parse_duration_minutes(_pick(raw, *_DURATION_KEYS))
-    is_sales = resolve_is_sales_appointment(raw, from_sales_list=from_sales_list)
+    is_sales = resolve_is_sales_appointment(
+        raw,
+        from_sales_list=from_sales_list,
+        infer_unmarked_as_sales=infer_unmarked_as_sales,
+    )
 
     return {
         "appointment_id": appointment_id,
@@ -356,11 +374,19 @@ def _parse_appointment_row(raw: dict[str, Any], *, from_sales_list: bool = False
     }
 
 
-def extract_job_appointments_from_raw(raw_payload: dict[str, Any] | None) -> list[SafeJobAppointment]:
+def extract_job_appointments_from_raw(
+    raw_payload: dict[str, Any] | None,
+    *,
+    infer_unmarked_as_sales: bool = False,
+) -> list[SafeJobAppointment]:
     """Return safe appointment rows extracted from a synced job payload."""
     appointments: list[SafeJobAppointment] = []
     for item, from_sales_list in _appointment_list_from_raw(raw_payload):
-        parsed = _parse_appointment_row(item, from_sales_list=from_sales_list)
+        parsed = _parse_appointment_row(
+            item,
+            from_sales_list=from_sales_list,
+            infer_unmarked_as_sales=infer_unmarked_as_sales,
+        )
         if parsed is not None:
             appointments.append(parsed)
     return appointments
@@ -456,8 +482,15 @@ def sync_job_appointments(
     source = appointment_source_payload(job, payload if isinstance(payload, dict) else None)
     synced = synced_at or datetime.now(timezone.utc)
 
+    infer_unmarked_as_sales = (
+        isinstance(job.raw_detail_payload, dict)
+        and source is job.raw_detail_payload
+    )
     try:
-        extracted = extract_job_appointments_from_raw(source if isinstance(source, dict) else None)
+        extracted = extract_job_appointments_from_raw(
+            source if isinstance(source, dict) else None,
+            infer_unmarked_as_sales=infer_unmarked_as_sales,
+        )
     except Exception:
         logger.exception(
             "Failed to extract appointments for eWorks job id=%s ref=%s",
@@ -824,6 +857,72 @@ def apply_appointment_engineer_name_to_step1(
             "engineer_name_source": "eworks_appointment",
         }
     )
+
+
+def _sales_appointment_dedupe_key(appointment: dict[str, Any]) -> str:
+    appointment_id = appointment.get("appointment_id")
+    if appointment_id is not None:
+        return f"id:{appointment_id}"
+    return (
+        "composite:"
+        f"{appointment.get('source') or ''}|"
+        f"{appointment.get('job_ref') or ''}|"
+        f"{(appointment.get('user_name') or '').casefold()}|"
+        f"{appointment.get('start_at') or ''}|"
+        f"{appointment.get('end_at') or ''}"
+    )
+
+
+def serialize_linked_job_appointments_for_quote(
+    db: Session,
+    quote: EworksQuote,
+    *,
+    sales_only: bool = True,
+) -> list[dict[str, Any]]:
+    """Return job-level appointments from jobs linked to the quote."""
+    job = _find_linked_job(db, eworks_quote_id=quote.eworks_quote_id)
+    if job is None:
+        return []
+
+    appointments: list[dict[str, Any]] = []
+    for row in serialize_job_appointments(db, job):
+        if sales_only and not row.get("is_sales_appointment"):
+            continue
+        appointments.append(
+            {
+                **row,
+                "source": "job",
+                "job_ref": job.job_ref,
+                "eworks_job_id": job.eworks_job_id,
+            }
+        )
+    return appointments
+
+
+def merge_quote_sales_appointments(
+    quote_appointments: list[dict[str, Any]],
+    job_appointments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge quote- and job-level sales appointments without duplicates."""
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for appointment in quote_appointments:
+        tagged = {**appointment, "source": appointment.get("source") or "quote"}
+        key = _sales_appointment_dedupe_key(tagged)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(tagged)
+
+    for appointment in job_appointments:
+        key = _sales_appointment_dedupe_key(appointment)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(appointment)
+
+    return merged
 
 
 def serialize_job_appointments(db: Session, job: EworksJob) -> list[dict[str, Any]]:

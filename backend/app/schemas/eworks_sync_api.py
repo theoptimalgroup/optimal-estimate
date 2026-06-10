@@ -331,6 +331,9 @@ class EworksQuoteAppointmentSafeRead(BaseModel):
     start_at: str | None = None
     end_at: str | None = None
     duration_minutes: int | None = None
+    source: str | None = None
+    job_ref: str | None = None
+    eworks_job_id: int | None = None
 
 
 class EworksAppointmentAssigneeSafeRead(BaseModel):
@@ -446,6 +449,25 @@ class EworksAttachmentDetailRead(EworksAttachmentSafeRead):
     local_storage_path: str | None = None
     downloaded_at: str | None = None
     raw_payload: dict | None = None
+
+
+class EworksLinkedJobSyncRead(BaseModel):
+    quote_ref: str | None = None
+    eworks_quote_id: int | None = None
+    jobs_found_in_eworks: int = 0
+    jobs_upserted: int = 0
+    jobs_created: int = 0
+    jobs_updated: int = 0
+    detail_fetches_attempted: int = 0
+    detail_fetches_success: int = 0
+    detail_fetches_failed: int = 0
+    appointments_found: int = 0
+    appointments_created: int = 0
+    appointments_updated: int = 0
+    failed: int = 0
+    skipped: int = 0
+    elapsed_seconds: float = 0.0
+    stopped_reason: str = "completed"
 
 
 class EworksJobAppointmentBackfillRead(BaseModel):

@@ -175,6 +175,7 @@ function SalesAppointmentsTable({
             <DataTableCell header>Email</DataTableCell>
             <DataTableCell header>Appointment Time</DataTableCell>
             <DataTableCell header>Status</DataTableCell>
+            <DataTableCell header>Source</DataTableCell>
             <DataTableCell header>Sales</DataTableCell>
           </DataTableRow>
         </DataTableHead>
@@ -191,6 +192,13 @@ function SalesAppointmentsTable({
                 )}
               </DataTableCell>
               <DataTableCell>{displayValue(appointment.status)}</DataTableCell>
+              <DataTableCell>
+                {appointment.source === "job" && appointment.job_ref
+                  ? `From linked job ${appointment.job_ref}`
+                  : appointment.source === "quote"
+                    ? "Quote"
+                    : "—"}
+              </DataTableCell>
               <DataTableCell>{fmtSalesAppointment(appointment.is_sales_appointment)}</DataTableCell>
             </DataTableRow>
           ))}

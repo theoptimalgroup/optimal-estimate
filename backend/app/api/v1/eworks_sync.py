@@ -29,6 +29,7 @@ from app.schemas.eworks_sync_api import (
     EworksCustomerRead,
     EworksJobRead,
     EworksJobAppointmentBackfillRead,
+    EworksLinkedJobSyncRead,
     EworksJobSafeDetailRead,
     EworksQuoteDetailRead,
     EworksQuoteRead,
@@ -346,6 +347,38 @@ def backfill_job_appointments(
         fetch_missing=fetch_missing,
     )
     return success_response(EworksJobAppointmentBackfillRead.model_validate(summary.__dict__).model_dump())
+
+
+@router.post("/jobs/sync-linked-for-quote")
+def sync_linked_jobs_for_quote(
+    db: DbSession,
+    actor: AdminOnly,
+    quote_ref: str | None = Query(default=None),
+    eworks_quote_id: int | None = Query(default=None, ge=1),
+    quote_id: int | None = Query(default=None, ge=1),
+    fetch_detail: bool = Query(default=True),
+):
+    """Sync eWorks jobs linked to a quote and upsert their appointment rows (admin only)."""
+    from app.core.config import settings as cfg
+    from app.services.eworks_linked_job_sync_service import sync_linked_jobs_for_quote as run_sync
+
+    if fetch_detail and not cfg.eworks_api_enabled:
+        raise HTTPException(status_code=503, detail="eWorks API is disabled")
+
+    if quote_ref is None and eworks_quote_id is None and quote_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide quote_ref, eworks_quote_id, or quote_id",
+        )
+
+    summary = run_sync(
+        db,
+        quote_id=quote_id,
+        quote_ref=quote_ref,
+        eworks_quote_id=eworks_quote_id,
+        fetch_detail=fetch_detail,
+    )
+    return success_response(EworksLinkedJobSyncRead.model_validate(summary.__dict__).model_dump())
 
 
 @router.post("/quotes/backfill-sales-appointments")

@@ -508,6 +508,9 @@ def test_q22105_integration_fixture(db_session):
 
     detail = build_quote_safe_detail(db_session, quote)
     assert detail["appointment_assignee"]["name"] == "Alex Alves"
+    assert len(detail["sales_appointments"]) == 1
+    assert detail["sales_appointments"][0]["source"] == "job"
+    assert detail["sales_appointments"][0]["job_ref"] == job.job_ref
 
 
 def test_q22105_lookup_by_quote_id(db_session):

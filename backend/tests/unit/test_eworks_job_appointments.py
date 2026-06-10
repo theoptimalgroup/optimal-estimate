@@ -455,7 +455,14 @@ def test_resolve_is_sales_appointment_requires_flag_or_source():
     assert resolve_is_sales_appointment({"tab": "Sales Appointments"}) is True
     assert resolve_is_sales_appointment({"appointment_type": "Sales Visit"}) is True
     assert resolve_is_sales_appointment({"is_sales_appointment": None}) is False
+    assert resolve_is_sales_appointment({"is_sales_appointment": None}, infer_unmarked_as_sales=True) is True
     assert resolve_is_sales_appointment({}, from_sales_list=True) is True
+
+
+def test_job_detail_payload_infers_sales_when_flag_null():
+    rows = extract_job_appointments_from_raw(_job_33957_payload(), infer_unmarked_as_sales=True)
+    assert len(rows) == 1
+    assert rows[0]["is_sales_appointment"] is True
 
 
 def test_job_ref_single_mode_backfill_processes_one_job(db_session):

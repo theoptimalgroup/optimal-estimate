@@ -618,6 +618,9 @@ export type EworksQuoteAppointmentSafe = {
   start_at?: string | null;
   end_at?: string | null;
   duration_minutes?: number | null;
+  source?: "quote" | "job" | string | null;
+  job_ref?: string | null;
+  eworks_job_id?: number | null;
 };
 
 export type EworksJobSafeDetail = {
