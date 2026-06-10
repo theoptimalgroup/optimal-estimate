@@ -455,15 +455,14 @@ export function QuoteDetailModal({
           ) : detail ? (
             <>
               <SectionCard title="Quote Summary" testId="quote-summary-section">
-                <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <DetailField label="Quote Ref" value={displayValue(detail.identity.quote_ref)} />
                   <DetailField
                     label="Status"
                     value={displayValue(detail.identity.status_name ?? detail.identity.status)}
                   />
-                  <DetailField label="Synced At" value={fmtDate(detail.identity.synced_at)} />
                   <DetailField label="Created On" value={fmtUkDateTime(detail.dates.created_on)} />
-                  <div className="sm:col-span-2 lg:col-span-3" data-testid="tags-section">
+                  <div className="col-span-full" data-testid="tags-section">
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Tags</dt>
                     <dd className="mt-1">
                       <TagBadgesSection tags={detail.tags} />
