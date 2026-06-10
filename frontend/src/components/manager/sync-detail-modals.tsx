@@ -447,6 +447,12 @@ export function QuoteDetailModal({
                     value={displayValue(detail.identity.status_name ?? detail.identity.status)}
                   />
                   <DetailField label="Synced At" value={fmtDate(detail.identity.synced_at)} />
+                  <div className="sm:col-span-2 lg:col-span-3" data-testid="tags-section">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Tags</dt>
+                    <dd className="mt-1">
+                      <TagBadgesSection tags={detail.tags} />
+                    </dd>
+                  </div>
                 </dl>
               </SectionCard>
 
@@ -492,11 +498,6 @@ export function QuoteDetailModal({
                     testId="quote-customer-notes-rich-text"
                   />
                   <RichTextBlock
-                    label="Terms"
-                    value={detail.quote_details.terms}
-                    testId="quote-terms-rich-text"
-                  />
-                  <RichTextBlock
                     label="Notes"
                     value={detail.quote_details.notes}
                     testId="quote-notes-rich-text"
@@ -504,34 +505,7 @@ export function QuoteDetailModal({
                 </div>
               </SectionCard>
 
-              <SectionCard title="Financial Summary" testId="financial-summary-section">
-                <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <DetailField
-                    label="Subtotal"
-                    value={fmtMoney(detail.financials.subtotal, detail.financials.currency)}
-                    align="right"
-                  />
-                  <DetailField
-                    label="VAT"
-                    value={fmtMoney(detail.financials.vat, detail.financials.currency)}
-                    align="right"
-                  />
-                  <DetailField
-                    label="Total"
-                    value={fmtMoney(detail.financials.total, detail.financials.currency)}
-                    align="right"
-                  />
-                  <DetailField label="Currency" value={displayValue(detail.financials.currency)} />
-                  <DetailField label="Discount Type" value={displayValue(detail.financials.discount_type)} />
-                  <DetailField label="Discount Value" value={displayValue(detail.financials.discount_value)} />
-                </dl>
-              </SectionCard>
-
               <ItemsTable items={detail.items} />
-
-              <SectionCard title="Tags" testId="tags-section">
-                <TagBadgesSection tags={detail.tags} />
-              </SectionCard>
 
               <CustomFieldsTable fields={detail.custom_fields} />
 

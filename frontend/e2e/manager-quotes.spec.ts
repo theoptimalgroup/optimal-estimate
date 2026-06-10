@@ -364,7 +364,6 @@ test.describe("Manager quotes page", () => {
     await expect(page.getByTestId("quote-detail-modal")).toBeVisible();
     await expect(page.getByTestId("quote-summary-section")).toBeVisible();
     await expect(page.getByTestId("customer-site-section")).toBeVisible();
-    await expect(page.getByTestId("financial-summary-section")).toBeVisible();
     await expect(page.getByTestId("custom-fields-section")).toBeVisible();
     await expect(page.getByTestId("quote-items-table")).toBeVisible();
     await expect(page.getByTestId("attachments-section")).toBeVisible();
@@ -379,7 +378,6 @@ test.describe("Manager quotes page", () => {
     await expect(page.getByTestId("quote-description-rich-text")).toContainText("Access");
     await expect(page.getByTestId("quote-description-rich-text")).toContainText("Check fuse board");
     await expect(page.getByTestId("quote-description-rich-text")).toContainText("Replace panel");
-    await expect(page.getByTestId("quote-terms-rich-text")).toContainText("Payment due in 30 days");
     await expect(page.getByTestId("description-notes-section")).not.toContainText("<span");
     await expect(page.getByTestId("description-notes-section")).not.toContainText("<ol>");
     await expect(page.getByTestId("description-notes-section")).not.toContainText("<strong>");
