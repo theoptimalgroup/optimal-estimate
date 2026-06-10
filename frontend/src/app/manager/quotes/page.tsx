@@ -28,6 +28,7 @@ import {
   getSafeQuoteDetail,
   listJobAttachments,
   listQuoteAttachments,
+  formatEworksSyncError,
   listSyncedJobs,
   listSyncedQuotes,
   type EworksAttachmentSafe,
@@ -235,7 +236,7 @@ export default function ManagerQuotesPage() {
       setQuoteItems(result.items);
       setQuoteTotal(result.total);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load quotes");
+      setError(formatEworksSyncError(e, "Failed to load quotes"));
       setQuoteItems([]);
       setQuoteTotal(0);
     } finally {
@@ -260,7 +261,7 @@ export default function ManagerQuotesPage() {
       setJobItems(result.items);
       setJobTotal(result.total);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load jobs");
+      setError(formatEworksSyncError(e, "Failed to load jobs"));
       setJobItems([]);
       setJobTotal(0);
     } finally {

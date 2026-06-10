@@ -1,4 +1,14 @@
-import { apiFetch, getApiUrl } from "@/lib/api";
+import { apiFetch, ApiError, getApiUrl } from "@/lib/api";
+
+export function formatEworksSyncError(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
 
 // ---------------------------------------------------------------------------
 // Types
