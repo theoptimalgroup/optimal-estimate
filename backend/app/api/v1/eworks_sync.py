@@ -48,6 +48,7 @@ from app.services.background_sync_scheduler import (
     get_last_successful_sync_runs,
     serialize_background_sync_run,
 )
+from app.services.quote_search_service import paginate_eworks_quotes
 from app.services.eworks_sync_lock_service import (
     get_active_sync_locks,
     has_stale_running_locks,
@@ -674,15 +675,19 @@ def list_quotes(
         q = q.filter(EworksQuote.customer_id == customer_id)
     if customer_name:
         q = q.filter(EworksQuote.customer_name.ilike(f"%{customer_name.strip()}%"))
-    q = _apply_status_filter(q, status, EworksQuote.status, EworksQuote.status_name, EworksQuote.raw_payload)
-    q = _apply_tag_filter(q, tag, EworksQuote.tags, EworksQuote.raw_payload)
     if date_from:
         q = q.filter(EworksQuote.quote_date >= date_from)
     if date_to:
         q = q.filter(EworksQuote.quote_date <= date_to)
 
-    total = q.count()
-    rows = q.order_by(EworksQuote.eworks_quote_id.desc()).offset(offset).limit(limit).all()
+    rows, total = paginate_eworks_quotes(
+        q,
+        status=status,
+        tag=tag,
+        limit=limit,
+        offset=offset,
+        order_col=EworksQuote.eworks_quote_id,
+    )
 
     return success_response({
         "items": [serialize_quote_list_item(r) for r in rows],

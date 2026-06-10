@@ -703,6 +703,153 @@ def test_quote_search_filters_by_ref_customer_status(mock_settings, api_client, 
     assert by_status.json()["data"]["total"] == 1
 
 
+BOOKED_TAG = "Booked (Quotes)"
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_status_one_returns_only_draft(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add_all(
+        [
+            EworksQuote(eworks_quote_id=901, quote_ref="DRAFT-1", status="1", status_name="Draft"),
+            EworksQuote(eworks_quote_id=902, quote_ref="CALLBACK-1", status="5", status_name="Call Back"),
+            EworksQuote(eworks_quote_id=903, quote_ref="PROCESSED-1", status="4", status_name="Processed"),
+        ]
+    )
+    db_session.commit()
+
+    resp = api_client.get("/api/v1/eworks-sync/quotes", params={"status": "1"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["total"] == 1
+    assert data["items"][0]["quote_ref"] == "DRAFT-1"
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_status_one_and_booked_tag_returns_only_draft_booked(mock_settings, api_client, db_session):
+    from app.services.manager_dashboard_service import MUST_ATTEND_TAG
+    from app.services.quote_search_service import quote_has_booked_tag, quote_is_draft
+
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add_all(
+        [
+            EworksQuote(
+                eworks_quote_id=911,
+                quote_ref="DRAFT-BOOKED",
+                status="1",
+                status_name="Draft",
+                tags=[BOOKED_TAG],
+            ),
+            EworksQuote(
+                eworks_quote_id=912,
+                quote_ref="CALLBACK-BOOKED",
+                status="5",
+                status_name="Call Back",
+                tags=[BOOKED_TAG],
+                raw_payload={"id": 912, "quote_status": {"id": 5, "quote_status": "Call Back"}},
+            ),
+            EworksQuote(
+                eworks_quote_id=913,
+                quote_ref="PROCESSED-BOOKED",
+                status="4",
+                status_name="Processed",
+                tags=[BOOKED_TAG],
+            ),
+            EworksQuote(
+                eworks_quote_id=914,
+                quote_ref="APPROVED-BOOKED",
+                status="3",
+                status_name="Approved",
+                tags=[BOOKED_TAG],
+            ),
+            EworksQuote(
+                eworks_quote_id=915,
+                quote_ref="REJECTED-BOOKED",
+                status="6",
+                status_name="Rejected",
+                tags=[BOOKED_TAG],
+            ),
+            EworksQuote(
+                eworks_quote_id=916,
+                quote_ref="DRAFT-MUST-ATTEND",
+                status="1",
+                status_name="Draft",
+                tags=[MUST_ATTEND_TAG],
+            ),
+            EworksQuote(
+                eworks_quote_id=917,
+                quote_ref="DRAFT-BOOKED-PRIORITY",
+                status="1",
+                status_name="Draft",
+                tags=[BOOKED_TAG, "Priority (Quotes)"],
+            ),
+            EworksQuote(
+                eworks_quote_id=918,
+                quote_ref="ID-TRAP-BOOKED",
+                status="3",
+                status_name="Approved",
+                tags=[BOOKED_TAG],
+                raw_payload={"id": 1, "customer_id": 1, "quote_status": {"id": 3}},
+            ),
+        ]
+    )
+    db_session.commit()
+
+    resp = api_client.get(
+        "/api/v1/eworks-sync/quotes",
+        params={"status": "1", "tag": BOOKED_TAG},
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["total"] == 2
+    refs = {item["quote_ref"] for item in data["items"]}
+    assert refs == {"DRAFT-BOOKED", "DRAFT-BOOKED-PRIORITY"}
+
+    rows = db_session.query(EworksQuote).filter(EworksQuote.quote_ref.in_(refs)).all()
+    for row in rows:
+        assert quote_is_draft(row)
+        assert quote_has_booked_tag(row)
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_tag_only_returns_all_booked(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add_all(
+        [
+            EworksQuote(eworks_quote_id=921, status="1", tags=[BOOKED_TAG]),
+            EworksQuote(eworks_quote_id=922, status="5", status_name="Call Back", tags=[BOOKED_TAG]),
+        ]
+    )
+    db_session.commit()
+
+    resp = api_client.get("/api/v1/eworks-sync/quotes", params={"tag": BOOKED_TAG})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["total"] == 2
+
+
+@patch("app.auth.dependencies.settings")
+def test_quote_list_status_one_excludes_call_back_with_loose_raw_id(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    db_session.add(
+        EworksQuote(
+            eworks_quote_id=931,
+            quote_ref="CALLBACK-ID-TRAP",
+            status="5",
+            status_name="Call Back",
+            tags=[BOOKED_TAG],
+            raw_payload={"id": 931, "customer_id": 1, "quote_status": {"id": 5}},
+        )
+    )
+    db_session.commit()
+
+    resp = api_client.get(
+        "/api/v1/eworks-sync/quotes",
+        params={"status": "1", "tag": BOOKED_TAG},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["total"] == 0
+
+
 @patch("app.auth.dependencies.settings")
 def test_job_search_filters_by_ref_customer_status(mock_settings, api_client, db_session):
     _patch_dev_user(mock_settings, role="manager")

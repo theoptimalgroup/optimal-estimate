@@ -2,13 +2,174 @@
 
 from __future__ import annotations
 
+from sqlalchemy import Integer, String, and_, cast, or_
+
 from app.models.eworks_sync import EworksQuote
+from app.services.eworks_quote_status import EWORKS_QUOTE_STATUS_LABELS
+
+_RAW_STATUS_KEYS = ("status", "Status")
+_RAW_QUOTE_STATUS_KEYS = ("quote_status", "QuoteStatus")
+_RAW_QUOTE_STATUS_FIELDS = ("id", "status", "quote_status_id")
+_RAW_TAG_KEYS = ("tags", "tag_names", "labels", "categories")
 
 
 def _value_is_one(value: object | None) -> bool:
     if value is None:
         return False
     return str(value).strip() == "1"
+
+
+def _value_equals_code(value: object | None, code: str) -> bool:
+    if value is None:
+        return False
+    return str(value).strip() == str(code).strip()
+
+
+def _json_field_equals_code(json_col, path: tuple[str, ...], code: str):
+    """Exact JSON path equality — no substring/LIKE matching on raw_payload."""
+    field = json_col
+    for key in path:
+        field = field[key]
+    text_code = str(code).strip()
+    clauses = [cast(field, String) == text_code]
+    if text_code.isdigit():
+        clauses.append(cast(field, Integer) == int(text_code))
+    return or_(*clauses)
+
+
+def _raw_payload_has_status_code(raw_payload_col, code: str):
+    """Match status code in known raw_payload fields only (exact JSON paths)."""
+    if raw_payload_col is None:
+        return False
+    clauses: list = []
+    for key in _RAW_STATUS_KEYS:
+        clauses.append(_json_field_equals_code(raw_payload_col, (key,), code))
+    for qs_key in _RAW_QUOTE_STATUS_KEYS:
+        for field in _RAW_QUOTE_STATUS_FIELDS:
+            clauses.append(_json_field_equals_code(raw_payload_col, (qs_key, field), code))
+    return or_(*clauses)
+
+
+def _quote_is_draft_sql_clause(status_col, raw_payload_col):
+    """SQL clause mirroring quote_is_draft() — numeric status code 1 only, no status_name."""
+    col_match = or_(status_col == "1", cast(status_col, String) == "1", cast(status_col, Integer) == 1)
+    if raw_payload_col is None:
+        return col_match
+    return or_(col_match, _raw_payload_has_status_code(raw_payload_col, "1"))
+
+
+def _normalized_status_column_empty(status_col):
+    return or_(status_col.is_(None), status_col == "")
+
+
+def _quote_status_code_sql_clause(status_col, raw_payload_col, code: str):
+    """Match quotes whose normalized status code equals ``code`` (column preferred over raw)."""
+    col_match = or_(status_col == code, cast(status_col, String) == code)
+    if code.isdigit():
+        col_match = or_(col_match, cast(status_col, Integer) == int(code))
+    if raw_payload_col is None:
+        return col_match
+    raw_match = _raw_payload_has_status_code(raw_payload_col, code)
+    return or_(col_match, and_(_normalized_status_column_empty(status_col), raw_match))
+
+
+def _normalize_status_filter_value(status: str) -> str | None:
+    value = str(status).strip()
+    if not value:
+        return None
+    if value.isdigit():
+        return value
+    for code, label in EWORKS_QUOTE_STATUS_LABELS.items():
+        if label.casefold() == value.casefold():
+            return code
+    return None
+
+
+def _tag_sql_clause(tag_text: str, column):
+    """Build SQL clause for a tag filter on a single JSON/text column."""
+    from app.services.manager_dashboard_service import (
+        is_awaiting_supplier_tag,
+        is_booked_tag,
+        is_ready_to_send_tag,
+    )
+
+    col = cast(column, String)
+    if is_booked_tag(tag_text):
+        return col.ilike("%booked%")
+    if is_awaiting_supplier_tag(tag_text):
+        return col.ilike("%awaiting supplier%")
+    if is_ready_to_send_tag(tag_text):
+        return and_(
+            col.ilike("%ready to send%"),
+            or_(col.ilike("%quote%"), col.ilike("%quotes%")),
+        )
+    return col.ilike(f"%{tag_text}%")
+
+
+def apply_eworks_quote_status_filter(q, status: str | None, status_col, raw_payload_col=None):
+    """Apply server-side eWorks quote status filtering for list queries."""
+    code = _normalize_status_filter_value(status) if status else None
+    if code is None:
+        return q
+    if code == "1":
+        return q.filter(_quote_is_draft_sql_clause(status_col, raw_payload_col))
+    return q.filter(_quote_status_code_sql_clause(status_col, raw_payload_col, code))
+
+
+def apply_eworks_quote_tag_filter(q, tag: str | None, tags_col, raw_payload_col=None):
+    """Apply server-side tag filtering using known tag fields (AND-safe with status filter)."""
+    if not tag or not str(tag).strip():
+        return q
+    tag_text = str(tag).strip()
+    clauses = [_tag_sql_clause(tag_text, tags_col)]
+    if raw_payload_col is not None:
+        for key in _RAW_TAG_KEYS:
+            clauses.append(_tag_sql_clause(tag_text, raw_payload_col[key]))
+    return q.filter(or_(*clauses))
+
+
+def needs_python_quote_filters(status: str | None, tag: str | None) -> bool:
+    """True when status or tag filters require Python predicates (avoids risky JSON SQL)."""
+    if status and str(status).strip():
+        return True
+    return bool(tag and str(tag).strip())
+
+
+def quote_matches_list_filters(quote: EworksQuote, status: str | None, tag: str | None) -> bool:
+    """Strict AND of status + tag filters using quote object fields (list endpoint)."""
+    return quote_matches_status_filter(quote, status) and quote_matches_tag_filter(quote, tag)
+
+
+def filter_quotes_in_python(
+    rows: list[EworksQuote],
+    status: str | None,
+    tag: str | None,
+) -> list[EworksQuote]:
+    """Apply status/tag predicates in Python (stage 2 of two-stage quote list filtering)."""
+    if not needs_python_quote_filters(status, tag):
+        return rows
+    return [row for row in rows if quote_matches_list_filters(row, status, tag)]
+
+
+def paginate_eworks_quotes(
+    q,
+    *,
+    status: str | None,
+    tag: str | None,
+    limit: int,
+    offset: int,
+    order_col,
+):
+    """Paginate quote list queries; status/tag use Python predicates when present."""
+    if not needs_python_quote_filters(status, tag):
+        total = q.count()
+        rows = q.order_by(order_col.desc()).offset(offset).limit(limit).all()
+        return rows, total
+
+    ordered = q.order_by(order_col.desc()).all()
+    filtered = filter_quotes_in_python(ordered, status, tag)
+    total = len(filtered)
+    return filtered[offset : offset + limit], total
 
 
 def quote_is_draft(quote: EworksQuote) -> bool:
@@ -22,18 +183,52 @@ def quote_is_draft(quote: EworksQuote) -> bool:
 
     raw = quote.raw_payload
     if isinstance(raw, dict):
-        for key in ("status", "Status"):
+        for key in _RAW_STATUS_KEYS:
             if _value_is_one(raw.get(key)):
                 return True
 
-        for qs_key in ("quote_status", "QuoteStatus"):
+        for qs_key in _RAW_QUOTE_STATUS_KEYS:
             qs = raw.get(qs_key)
             if isinstance(qs, dict):
-                for field in ("id", "status", "quote_status_id"):
+                for field in _RAW_QUOTE_STATUS_FIELDS:
                     if _value_is_one(qs.get(field)):
                         return True
 
     return False
+
+
+def quote_matches_status_filter(quote: EworksQuote, status: str | None) -> bool:
+    """Python equivalent of apply_eworks_quote_status_filter for unit tests."""
+    code = _normalize_status_filter_value(status) if status else None
+    if code is None:
+        return True
+    if code == "1":
+        return quote_is_draft(quote)
+    if _value_equals_code(quote.status, code):
+        return True
+    if quote.status and str(quote.status).strip():
+        return False
+
+    raw = quote.raw_payload
+    if not isinstance(raw, dict):
+        return False
+    for key in _RAW_STATUS_KEYS:
+        if _value_equals_code(raw.get(key), code):
+            return True
+    for qs_key in _RAW_QUOTE_STATUS_KEYS:
+        qs = raw.get(qs_key)
+        if isinstance(qs, dict):
+            for field in _RAW_QUOTE_STATUS_FIELDS:
+                if _value_equals_code(qs.get(field), code):
+                    return True
+    return False
+
+
+def quote_matches_tag_filter(quote: EworksQuote, tag: str | None) -> bool:
+    """Python equivalent of apply_eworks_quote_tag_filter for unit tests."""
+    from app.services.manager_dashboard_service import quote_matches_tag_filter as _matches
+
+    return _matches(quote, tag or "")
 
 
 def quote_has_no_tags(quote: EworksQuote) -> bool:
@@ -41,3 +236,11 @@ def quote_has_no_tags(quote: EworksQuote) -> bool:
     from app.services.manager_dashboard_service import extract_all_tags
 
     return len(extract_all_tags(quote)) == 0
+
+
+def quote_has_booked_tag(quote: EworksQuote) -> bool:
+    """True when the quote has a Booked tag (case-insensitive flexible matching)."""
+    from app.services.manager_dashboard_service import extract_all_tags, is_booked_tag
+
+    tags = extract_all_tags(quote)
+    return any(is_booked_tag(t) for t in tags)
