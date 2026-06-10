@@ -174,6 +174,7 @@ def _seed_quote_with_job(
     status_text: str = "Awaiting",
     appointment_id: int | None = None,
     quote_status: str = "1",
+    tags: str | None = None,
 ) -> tuple[EworksQuote, EworksJob]:
     appt_id = appointment_id if appointment_id is not None else eworks_job_id * 2
     quote = EworksQuote(
@@ -181,6 +182,7 @@ def _seed_quote_with_job(
         quote_ref=quote_ref,
         customer_name="Customer",
         status=quote_status,
+        tags=tags,
     )
     job = EworksJob(
         eworks_job_id=eworks_job_id,
@@ -737,6 +739,7 @@ def test_quote_linked_appointment_in_assigned_estimates_not_assigned_jobs(db_ses
         job_ref="JOB-ASSIGNED-JOBS",
         user_name="User Abc",
         user_email="abc@example.com",
+        tags="Booked (Quotes)",
     )
     engineer = db_session.query(User).filter(User.email == "abc@example.com").one()
     from app.auth.types import AuthenticatedUser

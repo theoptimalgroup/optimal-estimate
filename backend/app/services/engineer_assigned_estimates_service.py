@@ -24,20 +24,28 @@ logger = logging.getLogger(__name__)
 
 
 def _quote_qualifies_for_assigned_estimates(quote: EworksQuote | None) -> bool:
-    """True when the linked quote is Draft (eWorks status code 1)."""
-    from app.services.quote_search_service import quote_is_draft
+    """True when the linked quote is Draft (status 1) and has a Booked tag."""
+    from app.services.quote_search_service import quote_has_booked_tag, quote_is_draft
 
     if quote is None:
+        logger.debug("Skipping assigned estimate: reason=quote_not_resolved")
         return False
-    if quote_is_draft(quote):
-        return True
-    logger.debug(
-        "Skipping assigned estimate: quote_ref=%s eworks_quote_id=%s status=%s reason=not_draft",
-        quote.quote_ref,
-        quote.eworks_quote_id,
-        quote.status,
-    )
-    return False
+    if not quote_is_draft(quote):
+        logger.debug(
+            "Skipping assigned estimate: quote_ref=%s eworks_quote_id=%s status=%s reason=not_draft",
+            quote.quote_ref,
+            quote.eworks_quote_id,
+            quote.status,
+        )
+        return False
+    if not quote_has_booked_tag(quote):
+        logger.debug(
+            "Skipping assigned estimate: quote_ref=%s eworks_quote_id=%s reason=missing_booked_tag",
+            quote.quote_ref,
+            quote.eworks_quote_id,
+        )
+        return False
+    return True
 
 
 def _appointment_user_matches(

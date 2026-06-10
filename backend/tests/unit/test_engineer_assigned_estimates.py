@@ -18,6 +18,7 @@ from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.support import AuditLog
 from app.models.user import User
 from app.services.engineer_assigned_estimates_service import list_assigned_estimates_for_engineer
+from app.services.engineer_assigned_jobs_service import list_assigned_jobs_for_engineer
 from app.services.eworks_job_appointment_service import sync_job_appointments
 from app.services.quote_assignment_service import list_assignments_for_user
 from app.utils.html_text import html_to_plain_text
@@ -26,6 +27,8 @@ EWORKS_ACCESS_HTML = (
     "&lt;span style=&quot;font-size: 12px;&quot;&gt;&lt;strong&gt;Access&lt;/strong&gt;"
     "&lt;br&gt;&lt;li&gt;Side gate&lt;/li&gt;&lt;/span&gt;"
 )
+
+BOOKED_TAG = "Booked (Quotes)"
 
 
 @pytest.fixture()
@@ -114,6 +117,7 @@ def _seed_quote_linked_job(
     appointment_id: int,
     description: str | None = None,
     status: str = "1",
+    tags: str | None = BOOKED_TAG,
 ) -> tuple[EworksQuote, EworksJob]:
     quote = EworksQuote(
         eworks_quote_id=eworks_quote_id,
@@ -121,6 +125,7 @@ def _seed_quote_linked_job(
         customer_name="Test Customer",
         description=description,
         status=status,
+        tags=tags,
         raw_payload={"site_address": "1 Test Street"},
     )
     job = EworksJob(
@@ -144,7 +149,7 @@ def _seed_quote_linked_job(
     return quote, job
 
 
-def test_job_ref_and_quote_ref_appointment_appears_in_assigned_estimates(db_session):
+def test_draft_booked_appears_in_assigned_estimates(db_session):
     quote, job = _seed_quote_linked_job(
         db_session,
         eworks_quote_id=29301,
@@ -152,6 +157,7 @@ def test_job_ref_and_quote_ref_appointment_appears_in_assigned_estimates(db_sess
         eworks_job_id=34005,
         job_ref="JOB-34005",
         appointment_id=66050,
+        tags=BOOKED_TAG,
     )
     user = _engineer_user(db_session)
 
@@ -168,7 +174,76 @@ def test_job_ref_and_quote_ref_appointment_appears_in_assigned_estimates(db_sess
     assert items[0]["eworks_job_id"] == job.eworks_job_id
 
 
-def test_linked_job_appointment_for_draft_quote_appears_in_assigned_estimates(db_session):
+def test_draft_must_attend_excluded_from_assigned_estimates(db_session):
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29320,
+        quote_ref="Q-MUST-ATTEND",
+        eworks_job_id=34020,
+        job_ref="JOB-34020",
+        appointment_id=66020,
+        tags="Must Attend",
+    )
+    user = _engineer_user(db_session)
+
+    items = list_assigned_estimates_for_engineer(db_session, user)
+
+    assert items == []
+
+
+def test_draft_awaiting_desktop_info_excluded_from_assigned_estimates(db_session):
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29321,
+        quote_ref="Q-DESKTOP-INFO",
+        eworks_job_id=34021,
+        job_ref="JOB-34021",
+        appointment_id=66021,
+        tags="Awaiting Desktop Info",
+    )
+    user = _engineer_user(db_session)
+
+    items = list_assigned_estimates_for_engineer(db_session, user)
+
+    assert items == []
+
+
+def test_draft_no_tags_excluded_from_assigned_estimates(db_session):
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29322,
+        quote_ref="Q-NO-TAGS",
+        eworks_job_id=34022,
+        job_ref="JOB-34022",
+        appointment_id=66022,
+        tags=None,
+    )
+    user = _engineer_user(db_session)
+
+    items = list_assigned_estimates_for_engineer(db_session, user)
+
+    assert items == []
+
+
+def test_non_draft_booked_excluded_from_assigned_estimates(db_session):
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29323,
+        quote_ref="Q-NON-DRAFT-BOOKED",
+        eworks_job_id=34023,
+        job_ref="JOB-34023",
+        appointment_id=66023,
+        status="4",
+        tags=BOOKED_TAG,
+    )
+    user = _engineer_user(db_session)
+
+    items = list_assigned_estimates_for_engineer(db_session, user)
+
+    assert items == []
+
+
+def test_job_linked_appointment_draft_booked_appears(db_session):
     quote, _job = _seed_quote_linked_job(
         db_session,
         eworks_quote_id=29302,
@@ -176,6 +251,7 @@ def test_linked_job_appointment_for_draft_quote_appears_in_assigned_estimates(db
         eworks_job_id=34006,
         job_ref="JOB-34006",
         appointment_id=66051,
+        tags=BOOKED_TAG,
     )
     user = _engineer_user(db_session)
 
@@ -184,12 +260,13 @@ def test_linked_job_appointment_for_draft_quote_appears_in_assigned_estimates(db
     assert any(item["quote_ref"] == quote.quote_ref for item in items)
 
 
-def test_quote_level_appointment_appears_in_assigned_estimates(db_session):
+def test_quote_level_appointment_draft_booked_appears(db_session):
     quote = EworksQuote(
         eworks_quote_id=29303,
         quote_ref="Q-QUOTE-ONLY",
         customer_name="Quote Customer",
         status="1",
+        tags=BOOKED_TAG,
         raw_payload={"site_address": "2 Quote Street"},
     )
     db_session.add(quote)
@@ -217,12 +294,13 @@ def test_quote_level_appointment_appears_in_assigned_estimates(db_session):
     assert items[0]["appointment_id"] == 66052
 
 
-def test_manual_engineer_assignment_appears_in_assigned_estimates(db_session):
+def test_manual_assignment_draft_booked_appears(db_session):
     quote = EworksQuote(
         eworks_quote_id=29304,
         quote_ref="Q-MANUAL",
         customer_name="Manual Customer",
         status="1",
+        tags=BOOKED_TAG,
     )
     db_session.add(quote)
     db_session.flush()
@@ -250,6 +328,66 @@ def test_manual_engineer_assignment_appears_in_assigned_estimates(db_session):
     assert items[0]["quote_ref"] == "Q-MANUAL"
 
 
+def test_excluded_items_not_in_assigned_jobs(db_session):
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29324,
+        quote_ref="Q-EXCLUDED",
+        eworks_job_id=34024,
+        job_ref="JOB-34024",
+        appointment_id=66024,
+        tags="Must Attend",
+    )
+    user = _engineer_user(db_session)
+
+    estimate_items = list_assigned_estimates_for_engineer(db_session, user)
+    job_items = list_assigned_jobs_for_engineer(db_session, user)
+
+    assert estimate_items == []
+    assert job_items == []
+
+
+def test_vitor_sees_only_draft_booked(db_session):
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29306,
+        quote_ref="Q22143",
+        eworks_job_id=34005,
+        job_ref="JOB-34005",
+        appointment_id=66054,
+        status="1",
+        tags=BOOKED_TAG,
+    )
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29307,
+        quote_ref="Q22132",
+        eworks_job_id=34008,
+        job_ref="JOB-34008",
+        appointment_id=66055,
+        status="1",
+        tags=BOOKED_TAG,
+    )
+    _seed_quote_linked_job(
+        db_session,
+        eworks_quote_id=29308,
+        quote_ref="Q-DRAFT-NO-BOOKED",
+        eworks_job_id=34009,
+        job_ref="JOB-34009",
+        appointment_id=66056,
+        status="1",
+        tags="Must Attend",
+    )
+    user = _engineer_user(db_session)
+
+    items = list_assignments_for_user(db_session, user)
+    quote_refs = {item["quote_ref"] for item in items}
+
+    assert "Q22143" in quote_refs
+    assert "Q22132" in quote_refs
+    assert "Q-DRAFT-NO-BOOKED" not in quote_refs
+
+
 def test_description_html_is_sanitized_in_assigned_estimates(db_session):
     _seed_quote_linked_job(
         db_session,
@@ -271,34 +409,6 @@ def test_description_html_is_sanitized_in_assigned_estimates(db_session):
     assert description == html_to_plain_text(EWORKS_ACCESS_HTML)
 
 
-def test_vitor_assigned_estimates_includes_q22143_and_q22132_when_draft(db_session):
-    _seed_quote_linked_job(
-        db_session,
-        eworks_quote_id=29306,
-        quote_ref="Q22143",
-        eworks_job_id=34005,
-        job_ref="JOB-34005",
-        appointment_id=66054,
-        status="1",
-    )
-    _seed_quote_linked_job(
-        db_session,
-        eworks_quote_id=29307,
-        quote_ref="Q22132",
-        eworks_job_id=34008,
-        job_ref="JOB-34008",
-        appointment_id=66055,
-        status="1",
-    )
-    user = _engineer_user(db_session)
-
-    items = list_assignments_for_user(db_session, user)
-    quote_refs = {item["quote_ref"] for item in items}
-
-    assert "Q22143" in quote_refs
-    assert "Q22132" in quote_refs
-
-
 def test_vitor_assigned_estimates_excludes_q22143_and_q22132_when_not_draft(db_session):
     _seed_quote_linked_job(
         db_session,
@@ -308,6 +418,7 @@ def test_vitor_assigned_estimates_excludes_q22143_and_q22132_when_not_draft(db_s
         job_ref="JOB-34005",
         appointment_id=66054,
         status="4",
+        tags=BOOKED_TAG,
     )
     _seed_quote_linked_job(
         db_session,
@@ -317,6 +428,7 @@ def test_vitor_assigned_estimates_excludes_q22143_and_q22132_when_not_draft(db_s
         job_ref="JOB-34008",
         appointment_id=66055,
         status="4",
+        tags=BOOKED_TAG,
     )
     user = _engineer_user(db_session)
 
@@ -353,6 +465,7 @@ def test_manual_assignment_on_non_draft_hidden(db_session):
         quote_ref="Q-MANUAL-NON-DRAFT",
         customer_name="Manual Customer",
         status="4",
+        tags=BOOKED_TAG,
     )
     db_session.add(quote)
     db_session.flush()
@@ -384,6 +497,7 @@ def test_quote_level_appointment_on_non_draft_hidden(db_session):
         quote_ref="Q-QUOTE-NON-DRAFT",
         customer_name="Quote Customer",
         status="4",
+        tags=BOOKED_TAG,
     )
     db_session.add(quote)
     db_session.flush()
