@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 
+from app.api.v1.call_back_dashboard_routes import fetch_call_back_dashboard_payload
 from app.api.v1.processed_dashboard_routes import fetch_processed_dashboard_payload
 from app.auth.dependencies import AuthenticatedUser, require_roles
 from app.core.config import settings
@@ -50,3 +51,13 @@ def get_admin_processed_dashboard_endpoint(
 ):
     """Return sales pipeline dashboard for processed eWorks quotes (local DB only)."""
     return success_response(fetch_processed_dashboard_payload(db, search=search))
+
+
+@router.get("/call-back-dashboard")
+def get_admin_call_back_dashboard_endpoint(
+    db: DbSession,
+    search: str | None = Query(default=None, max_length=200),
+    _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Return Call Back dashboard for eWorks Call Back quotes (local DB only)."""
+    return success_response(fetch_call_back_dashboard_payload(db, search=search))

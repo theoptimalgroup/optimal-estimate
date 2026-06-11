@@ -351,3 +351,41 @@ def quote_is_accepted(quote: EworksQuote) -> bool:
 
 def quote_is_rejected(quote: EworksQuote) -> bool:
     return quote_is_sales_pipeline_rejected_closed(quote)
+
+
+# Call Back dashboard — eWorks status 5 / display name "Call Back".
+EWORKS_CALL_BACK_STATUS = "5"
+EWORKS_CALL_BACK_STATUS_NAME = "call back"
+
+_CALL_BACK_EXCLUDED_STATUS_CODES = frozenset({"1", "2", "3", "4", "6", "7", "8", "9"})
+_CALL_BACK_EXCLUDED_STATUS_NAMES = frozenset(
+    {"draft", "pending", "approved", "processed", "closed", "rejected", "converted", "sent"}
+)
+
+
+def quote_is_call_back_excluded(quote: EworksQuote) -> bool:
+    """True when quote must not appear on the Call Back dashboard."""
+    code = resolve_quote_status_code(quote)
+    name = _quote_resolved_status_name(quote)
+    if code in _CALL_BACK_EXCLUDED_STATUS_CODES:
+        return True
+    if name in _CALL_BACK_EXCLUDED_STATUS_NAMES:
+        return True
+    return False
+
+
+def quote_is_call_back(quote: EworksQuote) -> bool:
+    """True for eWorks Call Back quotes: status 5 and/or display status Call Back."""
+    if quote_is_call_back_excluded(quote):
+        return False
+
+    code = resolve_quote_status_code(quote)
+    if code == EWORKS_CALL_BACK_STATUS:
+        return True
+    if quote_matches_status_filter(quote, EWORKS_CALL_BACK_STATUS):
+        return True
+
+    name = _quote_resolved_status_name(quote)
+    if name == EWORKS_CALL_BACK_STATUS_NAME:
+        return True
+    return False
