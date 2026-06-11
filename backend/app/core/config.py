@@ -151,6 +151,25 @@ class Settings(BaseSettings):
     azure_openai_use_managed_identity: bool = False
     scope_reword_enabled: bool = False
 
+    # ElevenLabs — voice dictation
+    elevenlabs_api_key: str | None = None
+
+    # Azure OpenAI — voice transcript cleanup
+    azure_openai_cleanup_deployment: str | None = None
+    azure_openai_cleanup_api_version: str = "2024-10-21"
+
+    @property
+    def voice_dictation_configured(self) -> bool:
+        return bool(self.elevenlabs_api_key)
+
+    @property
+    def voice_cleanup_configured(self) -> bool:
+        if not self.azure_openai_endpoint or not self.azure_openai_cleanup_deployment:
+            return False
+        if self.azure_openai_use_managed_identity:
+            return True
+        return bool(self.azure_openai_api_key)
+
     @property
     def scope_reword_configured(self) -> bool:
         if not self.azure_openai_endpoint or not self.azure_openai_deployment:

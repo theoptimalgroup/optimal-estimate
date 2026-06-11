@@ -5,6 +5,7 @@ import type { Control, FieldErrors, UseFormRegister, UseFormSetValue, UseFormWat
 import type { FromLinkResponse } from "@/lib/eworks-session";
 import { EworksAdditionalChargesForm } from "@/components/eworks-additional-charges-form";
 import { EworksTextarea, cn } from "@/components/eworks-ui";
+import { VoiceDictationButton } from "@/components/voice/VoiceDictationButton";
 import { SafeRichText } from "@/components/ui/safe-rich-text";
 import type { QuestionnaireFormValues } from "@/lib/eworks-calculate-schema";
 
@@ -187,15 +188,28 @@ export function EworksEstimationFormStep({
 
       <FormSectionCard title="Findings Report" testId="estimation-findings-report">
         <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <label htmlFor={findingsFieldId} className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Findings Report
             </label>
-            {findingsReportSaving ? (
-              <span className="text-xs font-medium text-slate-500" data-testid="findings-report-saving">
-                Saving…
-              </span>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <VoiceDictationButton
+                context="engineer_findings"
+                mode="append"
+                disabled={submitted}
+                onCleanText={(text) => {
+                  const current = localFindings.trim();
+                  const next = current ? `${current}\n\n${text}` : text;
+                  setLocalFindings(next);
+                  onFindingsReportChange?.(next);
+                }}
+              />
+              {findingsReportSaving ? (
+                <span className="text-xs font-medium text-slate-500" data-testid="findings-report-saving">
+                  Saving…
+                </span>
+              ) : null}
+            </div>
           </div>
           <EworksTextarea
             id={findingsFieldId}

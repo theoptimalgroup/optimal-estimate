@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ChangeEvent } from "react";
 import type { ControllerRenderProps } from "react-hook-form";
 import { Controller } from "react-hook-form";
@@ -26,6 +26,7 @@ import {
 import { cleanRichTextForTextarea } from "@/lib/html-text";
 import type { AttachmentMeta, MaterialSupplierFormValues, ProductOption, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
 import { defaultMaterialSuppliers, formatCurrency, formatSupplierDisplayName, grandTotalMaterials, computeProductTotalPrice, shelfMaterialsTotal, supplierMaterialsSubtotal, supplierMaterialsTotal, workBlockHasProductContext } from "@/lib/eworks-calculate-schema";
+import { VoiceDictationButton } from "@/components/voice/VoiceDictationButton";
 import { getAttachmentUrl, rewordScope } from "@/lib/eworks-session";
 import { withRegisterChange } from "@/lib/form-register";
 
@@ -809,6 +810,33 @@ export function EworksWorkBlockForm({
     setValue(`works.${workIndex}.labour_needed`, 0, { shouldValidate: true });
   };
 
+  const appendScopeText = useCallback(
+    (text: string) => {
+      const current = values.scope?.trim() ?? "";
+      const next = current ? `${current}\n\n${text}` : text;
+      setRewordError(null);
+      setValue(fieldPath(workIndex, "scope"), next, { shouldDirty: true, shouldValidate: true });
+      setValue(fieldPath(workIndex, "scope_from_product"), false, { shouldValidate: false });
+    },
+    [setValue, values.scope, workIndex],
+  );
+
+  const appendOtherNotes = useCallback(
+    (text: string) => {
+      const current = values.other_notes?.trim() ?? "";
+      const next = current ? `${current}\n\n${text}` : text;
+      setValue(fieldPath(workIndex, "other_notes"), next, { shouldDirty: true, shouldValidate: true });
+    },
+    [setValue, values.other_notes, workIndex],
+  );
+
+  const appendDraftDescription = useCallback((text: string) => {
+    setDraftDescription((current) => {
+      const trimmed = current.trim();
+      return trimmed ? `${trimmed}\n\n${text}` : text;
+    });
+  }, []);
+
   const handleRewordScope = async () => {
     if (!scopeText) {
       setRewordError("Enter scope text first");
@@ -919,15 +947,26 @@ export function EworksWorkBlockForm({
                       data-testid="custom-scope-title-input"
                     />
                   </EworksLabel>
-                  <EworksLabel>
-                    Description (optional)
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <EworksLabel className="space-y-0 text-sm font-medium text-slate-900">
+                        Description (optional)
+                      </EworksLabel>
+                      <VoiceDictationButton
+                        key={`voice-client-description-${workIndex}`}
+                        context="client_description"
+                        mode="append"
+                        workIndex={workIndex}
+                        onCleanText={appendDraftDescription}
+                      />
+                    </div>
                     <EworksTextarea
                       rows={3}
                       value={draftDescription}
                       onChange={(event) => setDraftDescription(event.target.value)}
                       data-testid="custom-scope-description-input"
                     />
-                  </EworksLabel>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     <EworksButton
                       type="button"
@@ -970,6 +1009,16 @@ export function EworksWorkBlockForm({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <EworksLabel className="space-y-0 text-sm font-medium text-slate-900">Scope of Works</EworksLabel>
             <div className="flex flex-wrap items-center gap-2">
+              <VoiceDictationButton
+                key={`voice-scope-${workIndex}`}
+                context="scope_of_work"
+                mode="append"
+                disabled={rewordingScope}
+                label="Dictate Scope"
+                fieldLabel="Scope of Works"
+                workIndex={workIndex}
+                onCleanText={appendScopeText}
+              />
               {hasSelectedProduct ? (
                 <EworksButton
                   type="button"
@@ -1017,10 +1066,21 @@ export function EworksWorkBlockForm({
               </>
             )}
           />
-          <EworksLabel>
-            Notes
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <EworksLabel className="space-y-0 text-sm font-medium text-slate-900">Notes</EworksLabel>
+              <VoiceDictationButton
+                key={`voice-notes-${workIndex}`}
+                context="internal_notes"
+                mode="append"
+                label="Dictate Notes"
+                fieldLabel="Notes"
+                workIndex={workIndex}
+                onCleanText={appendOtherNotes}
+              />
+            </div>
             <EworksTextarea rows={3} {...register(fieldPath(workIndex, "other_notes"))} />
-          </EworksLabel>
+          </div>
           <div className="space-y-3">
             <p className="text-sm font-medium text-slate-900">Photos &amp; Videos</p>
             {attachments.length > 0 && (() => {

@@ -12,6 +12,8 @@
   "dependencies": {
     "@azure/msal-browser": "^5.11.0",
     "@azure/msal-react": "^5.4.2",
+    "@elevenlabs/elevenlabs-js": "^2.52.0",
+    "@elevenlabs/react": "^1.6.6",
     "@hookform/resolvers": "^5.4.0",
     "@tanstack/react-query": "^5.100.14",
     "clsx": "^2.1.1",
