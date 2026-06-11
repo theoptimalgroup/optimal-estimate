@@ -126,6 +126,14 @@ describe("CallBackDashboardPage", () => {
     element.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  async function openEditModal(quoteId: number) {
+    const editBtn = container.querySelector(`[data-testid="edit-call-details-${quoteId}"]`) as HTMLButtonElement;
+    await act(async () => {
+      editBtn?.click();
+      await Promise.resolve();
+    });
+  }
+
   it("admin can open Call Back Dashboard", async () => {
     await renderPage("admin");
     expect(mockGetCallBackDashboard).toHaveBeenCalledWith("admin", undefined);
@@ -142,47 +150,63 @@ describe("CallBackDashboardPage", () => {
     expect(container.querySelector('[data-testid="kpi-call-back-quotes"]')?.textContent).toContain("4");
     expect(container.querySelector('[data-testid="kpi-total-value"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="kpi-overdue"]')?.textContent).toContain("1");
+    expect(container.querySelector('[data-testid="kpi-no-call-date"]')?.textContent).toContain("1");
   });
 
-  it("renders call buckets", async () => {
+  it("renders call bucket filters", async () => {
     await renderPage();
+    expect(container.querySelector('[data-testid="call-back-bucket-all"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="call-back-bucket-overdue"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="call-back-bucket-due_today"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="call-back-bucket-upcoming"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="call-back-bucket-no_call_date"]')).toBeTruthy();
   });
 
-  it("displays quote ref customer and value", async () => {
+  it("displays quote ref customer and value in table", async () => {
     await renderPage();
-    const card = container.querySelector('[data-testid="call-back-quote-1"]');
-    expect(card?.textContent).toContain("Q-OVER");
-    expect(card?.textContent).toContain("Acme Ltd");
+    const row = container.querySelector('[data-testid="call-back-quote-1"]');
+    expect(row?.textContent).toContain("Q-OVER");
+    expect(row?.textContent).toContain("Acme Ltd");
+    expect(container.querySelector('[data-testid="call-back-quotes-table"]')).toBeTruthy();
   });
 
-  it("user can set next call date and save", async () => {
+  it("edit call details opens modal and saves next call date", async () => {
     await renderPage();
+    await openEditModal(4);
+    expect(container.querySelector('[data-testid="edit-call-modal-4"]')).toBeTruthy();
+
     const dateInput = container.querySelector('[data-testid="next-call-4"]') as HTMLInputElement;
     setFieldValue(dateInput, "2026-06-25");
-    const saveBtn = container.querySelector('[data-testid="call-back-quote-4"] button');
+
+    const saveBtn = Array.from(container.querySelectorAll('[data-testid="edit-call-modal-4"] button')).find(
+      (btn) => btn.textContent === "Save",
+    );
     await act(async () => {
       saveBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
+
     expect(mockPatchCallBackTracking).toHaveBeenCalledWith(
       4,
       expect.objectContaining({ next_call_at: "2026-06-25T09:00:00Z" }),
     );
   });
 
-  it("user can save call note", async () => {
+  it("edit call details saves call note", async () => {
     await renderPage();
-    const textarea = container.querySelector('[data-testid="call-back-quote-4"] textarea') as HTMLTextAreaElement;
+    await openEditModal(4);
+
+    const textarea = container.querySelector('[data-testid="edit-call-note-4"]') as HTMLTextAreaElement;
     setFieldValue(textarea, "Customer requested callback");
-    const buttons = container.querySelectorAll('[data-testid="call-back-quote-4"] button');
+
+    const saveBtn = Array.from(container.querySelectorAll('[data-testid="edit-call-modal-4"] button')).find(
+      (btn) => btn.textContent === "Save",
+    );
     await act(async () => {
-      buttons[0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      saveBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
+
     expect(mockPatchCallBackTracking).toHaveBeenCalledWith(
       4,
       expect.objectContaining({ call_note: "Customer requested callback" }),

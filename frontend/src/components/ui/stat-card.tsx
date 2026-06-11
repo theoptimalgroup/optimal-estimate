@@ -7,11 +7,20 @@ type StatCardProps = {
   value: ReactNode;
   hint?: string;
   icon?: ReactNode;
+  iconClassName?: string;
   className?: string;
   "data-testid"?: string;
 };
 
-export function StatCard({ label, value, hint, icon, className, "data-testid": testId }: StatCardProps) {
+export function StatCard({
+  label,
+  value,
+  hint,
+  icon,
+  iconClassName,
+  className,
+  "data-testid": testId,
+}: StatCardProps) {
   return (
     <div
       className={cn(
@@ -27,7 +36,12 @@ export function StatCard({ label, value, hint, icon, className, "data-testid": t
           {hint ? <p className="text-xs text-slate-500">{hint}</p> : null}
         </div>
         {icon ? (
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500">
+          <div
+            className={cn(
+              "flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500",
+              iconClassName,
+            )}
+          >
             {icon}
           </div>
         ) : null}
