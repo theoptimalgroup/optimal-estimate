@@ -7,6 +7,7 @@ export type NavItem = {
 
 const ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/admin/dashboard" },
+  { label: "Sales Pipeline", href: "/admin/processed-dashboard" },
   { label: "New Estimate", href: "/new-estimate" },
   { label: "Quotes", href: "/manager/quotes" },
   { label: "Quote Review", href: "/manager/review" },
@@ -31,6 +32,7 @@ const ESTIMATOR_NAV: NavItem[] = [
 
 const MANAGER_NAV: NavItem[] = [
   { label: "Dashboard", href: "/manager/dashboard" },
+  { label: "Sales Pipeline", href: "/manager/processed-dashboard" },
   { label: "Quotes", href: "/manager/quotes" },
   { label: "Quote Review", href: "/manager/review" },
   { label: "Reports", href: "/manager/reports" },

@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import Integer, String, and_, cast, or_
 
 from app.models.eworks_sync import EworksQuote
-from app.services.eworks_quote_status import EWORKS_QUOTE_STATUS_LABELS
+from app.services.eworks_quote_status import EWORKS_QUOTE_STATUS_LABELS, resolve_eworks_quote_status_label
 
 _RAW_STATUS_KEYS = ("status", "Status")
 _RAW_QUOTE_STATUS_KEYS = ("quote_status", "QuoteStatus")
@@ -244,3 +244,110 @@ def quote_has_booked_tag(quote: EworksQuote) -> bool:
 
     tags = extract_all_tags(quote)
     return any(is_booked_tag(t) for t in tags)
+
+
+# Sales pipeline eWorks status codes (Optimal tenant — local DB mapping).
+# Active pipeline: status 2 / display name "Pending" (processed quote awaiting client decision).
+# Not to be confused with the local sales_bucket value "pending".
+EWORKS_STATUS_PROCESSED = "2"
+EWORKS_PIPELINE_ACTIVE_STATUS_NAME = "pending"
+
+# Excluded from active sales pipeline (status codes and display names).
+_SALES_PIPELINE_EXCLUDED_STATUS_CODES = frozenset({"1", "3", "4", "5", "6", "7", "8", "9"})
+_SALES_PIPELINE_EXCLUDED_STATUS_NAMES = frozenset({"draft", "approved", "call back", "closed", "rejected", "converted", "sent", "processed"})
+
+# Closed outcomes for tracked pipeline rows (left active Pending/2 state).
+_SALES_PIPELINE_ACCEPTED_CODES = frozenset({"3", "4"})
+_SALES_PIPELINE_ACCEPTED_NAMES = frozenset({"approved", "processed"})
+_SALES_PIPELINE_REJECTED_CODES = frozenset({"5", "6", "9"})
+_SALES_PIPELINE_REJECTED_NAMES = frozenset({"call back", "rejected", "closed"})
+
+# Legacy aliases used by older tests/spec wording.
+EWORKS_STATUS_ACCEPTED = "4"
+EWORKS_STATUS_REJECTED = "5"
+
+
+def _normalized_status_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text.casefold() if text else None
+
+
+def _quote_resolved_status_name(quote: EworksQuote) -> str | None:
+    raw = quote.raw_payload if isinstance(quote.raw_payload, dict) else None
+    label = resolve_eworks_quote_status_label(
+        status=quote.status,
+        status_name=quote.status_name,
+        raw_payload=raw,
+    )
+    return _normalized_status_name(label) or _normalized_status_name(quote.status_name)
+
+
+def resolve_quote_status_code(quote: EworksQuote) -> str | None:
+    """Return normalised numeric eWorks quote status code from quote fields."""
+    if quote.status and str(quote.status).strip().isdigit():
+        return str(quote.status).strip()
+    if quote_matches_status_filter(quote, "1"):
+        return "1"
+    for code in (
+        EWORKS_STATUS_PROCESSED,
+        *sorted(_SALES_PIPELINE_EXCLUDED_STATUS_CODES),
+    ):
+        if quote_matches_status_filter(quote, code):
+            return code
+    status = (quote.status or "").strip()
+    return status if status.isdigit() else None
+
+
+def quote_is_sales_pipeline_excluded(quote: EworksQuote) -> bool:
+    """True when quote must not appear in the active sales pipeline."""
+    code = resolve_quote_status_code(quote)
+    name = _quote_resolved_status_name(quote)
+    if code in _SALES_PIPELINE_EXCLUDED_STATUS_CODES:
+        return True
+    if name in _SALES_PIPELINE_EXCLUDED_STATUS_NAMES:
+        return True
+    return False
+
+
+def quote_is_sales_pipeline_active(quote: EworksQuote) -> bool:
+    """True for eWorks processed quotes: status 2 and/or display status Pending."""
+    if quote_is_sales_pipeline_excluded(quote):
+        return False
+
+    code = resolve_quote_status_code(quote)
+    if code == EWORKS_STATUS_PROCESSED:
+        return True
+    if quote_matches_status_filter(quote, EWORKS_STATUS_PROCESSED):
+        return True
+
+    name = _quote_resolved_status_name(quote)
+    if name == EWORKS_PIPELINE_ACTIVE_STATUS_NAME:
+        return True
+    return False
+
+
+def quote_is_sales_pipeline_accepted_closed(quote: EworksQuote) -> bool:
+    code = resolve_quote_status_code(quote)
+    name = _quote_resolved_status_name(quote)
+    return code in _SALES_PIPELINE_ACCEPTED_CODES or name in _SALES_PIPELINE_ACCEPTED_NAMES
+
+
+def quote_is_sales_pipeline_rejected_closed(quote: EworksQuote) -> bool:
+    code = resolve_quote_status_code(quote)
+    name = _quote_resolved_status_name(quote)
+    return code in _SALES_PIPELINE_REJECTED_CODES or name in _SALES_PIPELINE_REJECTED_NAMES
+
+
+def quote_is_processed(quote: EworksQuote) -> bool:
+    """Sales pipeline active filter (eWorks status 2 / Pending)."""
+    return quote_is_sales_pipeline_active(quote)
+
+
+def quote_is_accepted(quote: EworksQuote) -> bool:
+    return quote_is_sales_pipeline_accepted_closed(quote)
+
+
+def quote_is_rejected(quote: EworksQuote) -> bool:
+    return quote_is_sales_pipeline_rejected_closed(quote)

@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from app.api.v1.processed_dashboard_routes import fetch_processed_dashboard_payload
 from app.auth.dependencies import AuthenticatedUser, require_roles
 from app.core.exceptions import AppError, success_response
 from app.core.security import UserRole
@@ -34,6 +35,16 @@ def get_manager_dashboard_endpoint(
         search=search,
     )
     return success_response(ManagerDashboardRead.model_validate(data).model_dump())
+
+
+@router.get("/processed-dashboard")
+def get_manager_processed_dashboard_endpoint(
+    db: DbSession,
+    search: str | None = Query(default=None, max_length=200),
+    _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER)),
+):
+    """Return sales pipeline dashboard for processed eWorks quotes (local DB only)."""
+    return success_response(fetch_processed_dashboard_payload(db, search=search))
 
 
 def _select_estimate_handler(

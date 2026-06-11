@@ -15,6 +15,7 @@ from app.models.eworks_sync import (
 from app.models.quote_assignment import EworksQuoteAssignment
 from app.models.quote_work_attachment import QuoteWorkAttachment
 from app.models.quote_work_snapshot import QuoteWorkSnapshot
+from app.models.processed_sales_pipeline import ProcessedQuoteSalesPipeline
 from app.models.quote_job_assignment import QuoteJobAssignment
 from app.models.selected_estimate_decision import SelectedEstimateDecision
 from app.models.job import Job, JobFinding
@@ -58,6 +59,7 @@ __all__ = [
     "EworksQuoteAssignment",
     "QuoteWorkAttachment",
     "QuoteWorkSnapshot",
+    "ProcessedQuoteSalesPipeline",
     "QuoteJobAssignment",
     "SelectedEstimateDecision",
 ]
