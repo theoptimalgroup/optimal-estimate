@@ -15,6 +15,7 @@ import {
   StatCard,
   StatusBadge,
 } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import {
   AGING_LABELS,
   BUCKET_LABELS,
@@ -27,6 +28,32 @@ import {
 } from "@/lib/processed-dashboard";
 
 const BUCKETS: SalesBucket[] = ["pending", "possible", "strong", "dormant"];
+
+const BUCKET_COLORS: Record<
+  SalesBucket,
+  { kpiBorder: string; columnBorder: string; badge: string }
+> = {
+  pending: {
+    kpiBorder: "border-t-2 border-t-blue-500",
+    columnBorder: "border-t-blue-500",
+    badge: "bg-blue-50 text-blue-700 ring-blue-200",
+  },
+  possible: {
+    kpiBorder: "border-t-2 border-t-amber-500",
+    columnBorder: "border-t-amber-500",
+    badge: "bg-amber-50 text-amber-800 ring-amber-200",
+  },
+  strong: {
+    kpiBorder: "border-t-2 border-t-emerald-500",
+    columnBorder: "border-t-emerald-500",
+    badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  },
+  dormant: {
+    kpiBorder: "border-t-2 border-t-slate-400",
+    columnBorder: "border-t-slate-400",
+    badge: "bg-slate-100 text-slate-700 ring-slate-200",
+  },
+};
 
 type Props = {
   apiBase: "manager" | "admin";
@@ -98,98 +125,122 @@ function PipelineQuoteCard({
 
   return (
     <div
-      className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+      className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md"
       data-testid={`pipeline-quote-${quote.id}`}
     >
+      {/* header */}
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="font-semibold text-slate-900">{quote.quote_ref ?? `Quote ${quote.eworks_quote_id}`}</p>
+        <div className="min-w-0">
+          <p className="truncate font-semibold text-slate-900">
+            {quote.quote_ref ?? `Quote ${quote.eworks_quote_id}`}
+          </p>
           <p className="text-xs text-slate-600">{quote.customer_name ?? "Unknown customer"}</p>
-          {quote.site_address ? <p className="text-xs text-slate-500">{quote.site_address}</p> : null}
+          {quote.site_address ? (
+            <p className="mt-0.5 truncate text-xs text-slate-500">{quote.site_address}</p>
+          ) : null}
         </div>
-        <MoneyText value={quote.quote_value ?? 0} className="text-sm font-semibold text-slate-900" />
+        <span className="shrink-0 text-sm font-semibold text-slate-900">
+          <MoneyText value={quote.quote_value ?? 0} />
+        </span>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1">
+
+      {/* badges */}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <StatusBadge tone={followUpTone(quote.follow_up_status)}>
           {FOLLOW_UP_LABELS[quote.follow_up_status]}
         </StatusBadge>
-        <span className="text-[11px] text-slate-500">{quote.days_since_processed}d processed</span>
-        <span className="text-[11px] text-slate-500">{quote.days_in_current_bucket}d in bucket</span>
-        {quote.eworks_status_name || quote.eworks_status ? (
-          <span className="text-[11px] text-slate-500">
-            eWorks: {quote.eworks_status_name ?? quote.eworks_status}
+        <span className="text-[11px] text-slate-400">{quote.days_since_processed}d processed</span>
+        <span className="text-[11px] text-slate-400">{quote.days_in_current_bucket}d in bucket</span>
+        {quote.eworks_status_name ?? quote.eworks_status ? (
+          <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+            {quote.eworks_status_name ?? quote.eworks_status}
           </span>
         ) : null}
+        {quote.tags.map((tag) => (
+          <span key={tag} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+            {tag}
+          </span>
+        ))}
       </div>
-      {quote.tags.length > 0 ? (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {quote.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
+
+      {/* next follow-up */}
       {quote.next_follow_up_at ? (
-        <p className="text-xs text-slate-500">Next follow-up: {quote.next_follow_up_at.slice(0, 10)}</p>
+        <p className="mt-1.5 text-xs text-slate-500">
+          Next follow-up:{" "}
+          <span className="font-medium text-slate-700">{quote.next_follow_up_at.slice(0, 10)}</span>
+        </p>
       ) : null}
-      <div className="mt-2 flex flex-wrap gap-1">
+
+      {/* assigned */}
+      {quote.assigned_sales_name ? (
+        <p className="mt-1 text-xs text-slate-500">
+          Assigned:{" "}
+          <span className="font-medium text-slate-700">{quote.assigned_sales_name}</span>
+        </p>
+      ) : null}
+
+      {/* move-to-bucket */}
+      <div className="mt-3 flex flex-wrap gap-1">
         {BUCKETS.filter((b) => b !== quote.sales_bucket).map((b) => (
           <button
             key={b}
             type="button"
             disabled={saving}
-            className="rounded border border-slate-200 px-2 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50"
+            className="rounded-md border border-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
             onClick={() => void moveBucket(b)}
           >
             → {BUCKET_LABELS[b]}
           </button>
         ))}
       </div>
-      <textarea
-        className="mt-2 w-full rounded border border-slate-200 p-2 text-xs"
-        rows={2}
-        placeholder="Sales note"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        <input
-          type="text"
-          className="rounded border border-slate-200 px-2 py-1 text-xs"
-          placeholder="Salesperson name"
-          value={assigneeName}
-          onChange={(e) => setAssigneeName(e.target.value)}
-          data-testid={`assignee-name-${quote.id}`}
+
+      {/* inline edit fields */}
+      <div className="mt-3 space-y-2">
+        <textarea
+          className="w-full rounded-lg border border-slate-200 p-2 text-xs shadow-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-100"
+          rows={2}
+          placeholder="Sales note…"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
         />
-        <input
-          type="email"
-          className="rounded border border-slate-200 px-2 py-1 text-xs"
-          placeholder="Salesperson email"
-          value={assigneeEmail}
-          onChange={(e) => setAssigneeEmail(e.target.value)}
-          data-testid={`assignee-email-${quote.id}`}
-        />
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <input
-          type="date"
-          className="rounded border border-slate-200 px-2 py-1 text-xs"
-          value={nextFollowUp}
-          onChange={(e) => setNextFollowUp(e.target.value)}
-        />
-        <SecondaryButton type="button" disabled={saving} onClick={() => void saveDetails()}>
-          Save
-        </SecondaryButton>
-        <SecondaryButton type="button" disabled={saving} onClick={() => void logFollowUp()}>
-          Log follow-up
-        </SecondaryButton>
-        <Link href={quote.quote_detail_link} className="text-xs text-blue-600 underline">
-          Open quote
-        </Link>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input
+            type="text"
+            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs shadow-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-100"
+            placeholder="Salesperson name"
+            value={assigneeName}
+            onChange={(e) => setAssigneeName(e.target.value)}
+            data-testid={`assignee-name-${quote.id}`}
+          />
+          <input
+            type="email"
+            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs shadow-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-100"
+            placeholder="Salesperson email"
+            value={assigneeEmail}
+            onChange={(e) => setAssigneeEmail(e.target.value)}
+            data-testid={`assignee-email-${quote.id}`}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="date"
+            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs shadow-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-100"
+            value={nextFollowUp}
+            onChange={(e) => setNextFollowUp(e.target.value)}
+          />
+          <SecondaryButton type="button" disabled={saving} onClick={() => void saveDetails()}>
+            Save
+          </SecondaryButton>
+          <SecondaryButton type="button" disabled={saving} onClick={() => void logFollowUp()}>
+            Log follow-up
+          </SecondaryButton>
+          <Link
+            href={quote.quote_detail_link}
+            className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            Open quote
+          </Link>
+        </div>
       </div>
     </div>
   );
@@ -239,36 +290,86 @@ export function ProcessedDashboardPage({ apiBase }: Props) {
       <DashboardSearch value={searchInput} onChange={setSearchInput} placeholder="Search quote ref or customer…" />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Processed Quotes" value={String(totals.processed_quotes)} data-testid="kpi-processed-quotes" />
-        <StatCard label="Pipeline Value" value={<MoneyText value={totals.pipeline_value} />} data-testid="kpi-pipeline-value" />
-        <StatCard label="Strong Value" value={<MoneyText value={totals.strong_value} />} data-testid="kpi-strong-value" />
-        <StatCard label="Conversion Rate" value={`${totals.conversion_rate}%`} data-testid="kpi-conversion-rate" />
-        <StatCard label="Overdue Follow-ups" value={String(totals.overdue_followups)} data-testid="kpi-overdue" />
-        <StatCard label="Average Age" value={`${totals.average_age_days}d`} data-testid="kpi-average-age" />
+        <StatCard
+          label="Processed Quotes"
+          value={String(totals.processed_quotes)}
+          className="border-t-2 border-t-blue-500"
+          data-testid="kpi-processed-quotes"
+        />
+        <StatCard
+          label="Pipeline Value"
+          value={<MoneyText value={totals.pipeline_value} />}
+          className="border-t-2 border-t-violet-500"
+          data-testid="kpi-pipeline-value"
+        />
+        <StatCard
+          label="Strong Value"
+          value={<MoneyText value={totals.strong_value} />}
+          className="border-t-2 border-t-emerald-500"
+          data-testid="kpi-strong-value"
+        />
+        <StatCard
+          label="Conversion Rate"
+          value={`${totals.conversion_rate}%`}
+          className="border-t-2 border-t-teal-500"
+          data-testid="kpi-conversion-rate"
+        />
+        <StatCard
+          label="Overdue Follow-ups"
+          value={String(totals.overdue_followups)}
+          className="border-t-2 border-t-rose-500"
+          data-testid="kpi-overdue"
+        />
+        <StatCard
+          label="Average Age"
+          value={`${totals.average_age_days}d`}
+          className="border-t-2 border-t-orange-500"
+          data-testid="kpi-average-age"
+        />
       </div>
 
-      <SectionCard title="Pipeline buckets" testId="pipeline-buckets-section">
-        <div className="grid gap-4 lg:grid-cols-4">
-          {BUCKETS.map((bucket) => (
-            <div key={bucket} data-testid={`pipeline-bucket-${bucket}`}>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-800">{BUCKET_LABELS[bucket]}</h3>
-                <span className="text-xs text-slate-500">
-                  {categories[bucket].count} · <MoneyText value={categories[bucket].value} />
-                </span>
-              </div>
-              <div className="space-y-2">
-                {categories[bucket].quotes.map((q) => (
-                  <PipelineQuoteCard key={q.id} quote={q} onUpdated={() => void load()} />
-                ))}
-                {categories[bucket].quotes.length === 0 ? (
-                  <p className="text-xs text-slate-400">No quotes in this bucket.</p>
-                ) : null}
-              </div>
-            </div>
-          ))}
+      <div className="overflow-x-auto pb-2" data-testid="pipeline-buckets-section">
+        <div className="grid min-w-[700px] gap-4 lg:grid-cols-4">
+          {BUCKETS.map((bucket) => {
+            const colors = BUCKET_COLORS[bucket];
+            return (
+              <section
+                key={bucket}
+                className={cn(
+                  "flex min-h-[10rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm border-t-4",
+                  colors.columnBorder,
+                )}
+                data-testid={`pipeline-bucket-${bucket}`}
+              >
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                  <h3 className="text-sm font-semibold text-slate-900">{BUCKET_LABELS[bucket]}</h3>
+                  <span
+                    className={cn(
+                      "inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset",
+                      colors.badge,
+                    )}
+                  >
+                    {categories[bucket].count}
+                  </span>
+                </div>
+                <div className="flex flex-1 flex-col gap-3 p-3">
+                  {categories[bucket].quotes.map((q) => (
+                    <PipelineQuoteCard key={q.id} quote={q} onUpdated={() => void load()} />
+                  ))}
+                  {categories[bucket].quotes.length === 0 ? (
+                    <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                      No quotes in this bucket.
+                    </div>
+                  ) : null}
+                  <p className="mt-auto pt-1 text-xs text-slate-400">
+                    <MoneyText value={categories[bucket].value} />
+                  </p>
+                </div>
+              </section>
+            );
+          })}
         </div>
-      </SectionCard>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <SectionCard title="Follow-up reminders" testId="follow-up-reminders-section">
