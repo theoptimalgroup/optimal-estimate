@@ -417,11 +417,6 @@ function VoiceDictationButtonInner({
           {mode === "append" ? " · append" : " · replace"}
         </span>
       ) : null}
-      {status !== "cleaning" && status !== "done" ? (
-        <span className="max-w-xs text-right text-[10px] text-slate-500">
-          Speak clearly. Say dimensions like &apos;ten by ten meters&apos;.
-        </span>
-      ) : null}
       {error ? (
         <span className="max-w-xs text-right text-[11px] font-medium text-red-600" data-testid={`voice-error-${context}`}>
           {error}
