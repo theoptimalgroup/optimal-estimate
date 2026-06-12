@@ -592,6 +592,9 @@ def _build_calculation_response(
     step1: Step1Snapshot,
     step2_data: Step2Snapshot,
 ) -> CalculateSessionResponse:
+    from app.services.pdf_estimator_identity_service import resolve_estimated_by_for_pdf
+
+    who_quoted = resolve_estimated_by_for_pdf(db, session, step1)
     charges = aggregate_work_charges(step1, step2_data.works, step2=step2_data)
     single_work = len(step2_data.works) == 1
     work_skills = collect_work_skills(step2_data.works, step1.trade_name)
@@ -633,7 +636,7 @@ def _build_calculation_response(
                 material_items=materials,
                 charges=work_charges,
                 internal_notes_context=build_work_internal_notes_context(
-                    step1, block, step2_data, allocation
+                    step1, block, step2_data, allocation, who_quoted=who_quoted
                 ),
             ),
         )
@@ -665,7 +668,9 @@ def _build_calculation_response(
                 labour_items=labour,
                 material_items=materials,
                 charges=combined_charges,
-                internal_notes_context=build_combined_internal_notes_context(step1, step2_data.works, step2_data),
+                internal_notes_context=build_combined_internal_notes_context(
+                    step1, step2_data.works, step2_data, who_quoted=who_quoted
+                ),
             ),
         )
         aggregated_summary_payload = (
@@ -1707,6 +1712,9 @@ def _preview_internal_notes_for_works(
     blocks: list[WorkBlockSnapshot],
     skill: str,
 ) -> str:
+    from app.services.pdf_estimator_identity_service import resolve_estimated_by_for_pdf
+
+    who_quoted = resolve_estimated_by_for_pdf(db, session, step1)
     trade = resolve_skill_trade(db, skill, fallback_trade_name=step1.trade_name)
     if len(blocks) == 1:
         block = blocks[0]
@@ -1731,7 +1739,9 @@ def _preview_internal_notes_for_works(
                 labour_items=labour,
                 material_items=materials,
                 charges=work_charges,
-                internal_notes_context=build_work_internal_notes_context(step1, block, step2, allocation),
+                internal_notes_context=build_work_internal_notes_context(
+                    step1, block, step2, allocation, who_quoted=who_quoted
+                ),
             ),
         )
         return breakdown.internal_notes or ""
@@ -1751,7 +1761,9 @@ def _preview_internal_notes_for_works(
             labour_items=labour,
             material_items=materials,
             charges=combined_charges,
-            internal_notes_context=build_combined_internal_notes_context(step1, blocks, step2),
+            internal_notes_context=build_combined_internal_notes_context(
+                step1, blocks, step2, who_quoted=who_quoted
+            ),
         ),
     )
     return breakdown.internal_notes or ""
@@ -1871,6 +1883,9 @@ def _breakdown_for_work_block(
         include_charges=False,
     )
     work_charges = ChargeInput()
+    from app.services.pdf_estimator_identity_service import resolve_estimated_by_for_pdf
+
+    who_quoted = resolve_estimated_by_for_pdf(db, session, step1)
     return preview_calculation(
         db,
         _eworks_preview_request(
@@ -1881,7 +1896,7 @@ def _breakdown_for_work_block(
             labour_items=labour,
             material_items=materials,
             charges=work_charges,
-            internal_notes_context=build_internal_notes_context(step1, block),
+            internal_notes_context=build_internal_notes_context(step1, block, who_quoted=who_quoted),
         ),
     )
 
@@ -1972,6 +1987,7 @@ def render_combined_all_trades_pdf(
     *,
     session_id: UUID,
     work_indexes: list[int],
+    current_user=None,
 ) -> tuple[bytes, str, str]:
     from app.adapters.pdf_renderer import render_all_trades_document
     from app.services.eworks_pdf_context_service import build_all_trades_pdf_context
@@ -1979,6 +1995,7 @@ def render_combined_all_trades_pdf(
         build_pdf_calculation_context,
         session_blocks_recalculation,
     )
+    from app.services.pdf_estimator_identity_service import resolve_estimated_by_for_pdf
 
     session = db.get(CalculationSession, session_id)
     if session is None:
@@ -2004,6 +2021,7 @@ def render_combined_all_trades_pdf(
     breakdown = pdf_ctx.breakdown.model_dump(mode="json")
     work_breakdowns = [item.model_dump(mode="json") for item in pdf_ctx.work_breakdowns]
     try:
+        estimated_by_name = resolve_estimated_by_for_pdf(db, session, pdf_ctx.step1, current_user=current_user)
         context = build_all_trades_pdf_context(
             db=db,
             step1=pdf_ctx.step1,
@@ -2011,6 +2029,7 @@ def render_combined_all_trades_pdf(
             breakdown=breakdown,
             work_breakdowns=work_breakdowns,
             work_indexes=filtered_indexes,
+            estimated_by_name=estimated_by_name,
         )
     except ValueError as exc:
         raise AppError("CALCULATION_REQUIRED", str(exc), 400) from exc
@@ -2025,6 +2044,7 @@ def render_combined_works_pdf(
     work_indexes: list[int],
     view_type: str,
     version_number: int | None = None,
+    current_user=None,
 ) -> tuple[bytes, str, str]:
     from app.adapters.pdf_renderer import render_combined_works_document
     from app.services.pdf_calculation_context_service import (
@@ -2034,6 +2054,7 @@ def render_combined_works_pdf(
         session_blocks_recalculation,
         work_breakdown_map,
     )
+    from app.services.pdf_estimator_identity_service import resolve_estimated_by_for_pdf
 
     session = db.get(CalculationSession, session_id)
     if session is None:
@@ -2043,6 +2064,7 @@ def render_combined_works_pdf(
             db,
             session_id=session_id,
             work_indexes=work_indexes,
+            current_user=current_user,
         )
     if view_type not in {"client", "optimal"}:
         raise AppError("VIEW_TYPE_INVALID", "view_type must be 'client', 'optimal', or 'all_trades'", 400)
@@ -2066,6 +2088,7 @@ def render_combined_works_pdf(
             raise AppError("WORK_INDEX_INVALID", f"Invalid work index: {index}", 400)
 
     breakdown_by_work = work_breakdown_map(pdf_ctx.work_breakdowns)
+    estimated_by_name = resolve_estimated_by_for_pdf(db, session, step1, current_user=current_user)
     items: list[dict] = []
     total_material_cost = Decimal("0")
     total_labour_charge = Decimal("0")
@@ -2087,6 +2110,7 @@ def render_combined_works_pdf(
                 quote_internal_notes=pdf_ctx.internal_notes,
                 quote_breakdown=breakdown,
                 work_count=len(step2.works),
+                who_quoted=estimated_by_name or None,
             )
         # For single-work XLSX quotes, parking/CC charges are folded into the
         # combined materials bucket. The per-work breakdown is computed with an
@@ -2132,7 +2156,8 @@ def render_combined_works_pdf(
         "job_number": step1.job_number,
         "client_name": step1.client_name,
         "property_address": step1.property_address or "",
-        "engineer_name": step1.engineer_name or "",
+        "engineer_name": estimated_by_name,
+        "estimated_by_name": estimated_by_name,
         "trade_name": step1.trade_name,
         "prepared_by": "The Optimal Group",
         "property_manager": _format_property_manager(step1),

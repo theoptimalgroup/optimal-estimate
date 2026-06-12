@@ -12,6 +12,7 @@ from app.services.calculation_session_pdf_service import render_session_quote_pd
 from app.services.calculation_session_service import render_combined_works_pdf
 from app.services.pdf_calculation_context_service import build_pdf_calculation_context
 from app.services.eworks_pdf_context_service import build_all_trades_pdf_context
+from app.services.pdf_estimator_identity_service import resolve_estimated_by_for_pdf
 
 ManagerQuotePdfView = Literal["client", "internal", "combined", "all-trades"]
 
@@ -39,6 +40,7 @@ def render_all_trades_quote_pdf(
     *,
     session: CalculationSession,
     version_number: int | None = None,
+    current_user=None,
 ) -> tuple[bytes, str, str]:
     from app.adapters.pdf_renderer import render_all_trades_document
 
@@ -55,12 +57,14 @@ def render_all_trades_quote_pdf(
     breakdown = pdf_ctx.breakdown.model_dump(mode="json")
     work_breakdowns = [item.model_dump(mode="json") for item in pdf_ctx.work_breakdowns]
     try:
+        estimated_by_name = resolve_estimated_by_for_pdf(db, session, pdf_ctx.step1, current_user=current_user)
         context = build_all_trades_pdf_context(
             db=db,
             step1=pdf_ctx.step1,
             step2=pdf_ctx.step2,
             breakdown=breakdown,
             work_breakdowns=work_breakdowns,
+            estimated_by_name=estimated_by_name,
         )
     except ValueError as exc:
         raise AppError("CALCULATION_REQUIRED", str(exc), 400) from exc
@@ -74,6 +78,7 @@ def render_manager_quote_pdf(
     session_id: UUID,
     view: ManagerQuotePdfView,
     version_number: int | None = None,
+    current_user=None,
 ) -> tuple[bytes, str, str]:
     session = _require_submitted_session(db, session_id)
     original_step1 = dict(session.step1_snapshot or {})
@@ -94,12 +99,14 @@ def render_manager_quote_pdf(
                 session_id=session_id,
                 session_token=session.session_token,
                 read_only=True,
+                current_user=current_user,
             )
         if view == "all-trades":
             return render_all_trades_quote_pdf(
                 db,
                 session=session,
                 version_number=version_number,
+                current_user=current_user,
             )
         view_type = "client" if view == "client" else "optimal"
         return render_combined_works_pdf(
@@ -108,6 +115,7 @@ def render_manager_quote_pdf(
             work_indexes=_all_work_indexes(session),
             view_type=view_type,
             version_number=version_number,
+            current_user=current_user,
         )
     finally:
         session.step1_snapshot = original_step1

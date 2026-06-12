@@ -124,6 +124,7 @@ def download_manager_quote_pdf(
             session_id=session_id,
             view=view,
             version_number=version,
+            current_user=user,
         )
         record_audit(
             db,

@@ -128,6 +128,8 @@ def build_combined_internal_notes_context(
     step1: Step1Snapshot,
     works: list[WorkBlockSnapshot],
     step2: Step2Snapshot | None = None,
+    *,
+    who_quoted: str | None = None,
 ) -> InternalNotesContext:
     link_parts: list[str] = []
     best_engineers: list[str] = []
@@ -138,9 +140,14 @@ def build_combined_internal_notes_context(
             link_parts.append(formatted)
         if block.best_engineer and block.best_engineer.strip():
             best_engineers.append(block.best_engineer.strip())
+    resolved_who_quoted = (
+        (who_quoted or "").strip()
+        if who_quoted is not None
+        else (step1.engineer_name or "").strip()
+    )
     context = InternalNotesContext(
         links_and_quantity=" / ".join(link_parts),
-        who_quoted=(step1.engineer_name or "").strip(),
+        who_quoted=resolved_who_quoted,
         best_engineer=" / ".join(dict.fromkeys(best_engineers)),
     )
     if step2 is None:

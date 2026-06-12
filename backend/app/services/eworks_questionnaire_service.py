@@ -33,11 +33,21 @@ def format_links_and_quantity(rows: list[MaterialLinkRow] | list[MaterialOrderRo
     return " / ".join(parts)
 
 
-def build_internal_notes_context(step1: Step1Snapshot, block: WorkBlockSnapshot) -> InternalNotesContext:
+def build_internal_notes_context(
+    step1: Step1Snapshot,
+    block: WorkBlockSnapshot,
+    *,
+    who_quoted: str | None = None,
+) -> InternalNotesContext:
     rows = [*flatten_supplier_links(block.materials_to_order), *block.shelf_materials_rows]
+    resolved_who_quoted = (
+        (who_quoted or "").strip()
+        if who_quoted is not None
+        else (step1.engineer_name or "").strip()
+    )
     return InternalNotesContext(
         links_and_quantity=format_links_and_quantity(rows),
-        who_quoted=(step1.engineer_name or "").strip(),
+        who_quoted=resolved_who_quoted,
         best_engineer=(block.best_engineer or "").strip(),
     )
 

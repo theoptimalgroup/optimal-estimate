@@ -165,8 +165,11 @@ def build_work_internal_calculation_note(
     quote_internal_notes: str | None,
     quote_breakdown: CalculationBreakdown | None,
     work_count: int,
+    who_quoted: str | None = None,
 ) -> str | None:
     """Resolve internal notes for PDF from manual notes and cached calculation breakdown."""
+    from app.services.pdf_estimator_identity_service import patch_who_quoted_in_internal_notes
+
     _ = work_index  # reserved for future per-work labelling
     manual = (work_block.other_notes or "").strip() if work_block else ""
 
@@ -190,6 +193,9 @@ def build_work_internal_calculation_note(
                 generated = str(candidate).strip()
                 break
 
+    if who_quoted:
+        generated = patch_who_quoted_in_internal_notes(generated, who_quoted)
+
     parts: list[str] = []
     if manual:
         parts.append(manual)
@@ -204,8 +210,11 @@ def build_combined_internal_notes_for_pdf(
     work_breakdowns: list[WorkBreakdownResult],
     quote_internal_notes: str | None,
     quote_breakdown: CalculationBreakdown,
+    who_quoted: str | None = None,
 ) -> str | None:
     """Build combined internal notes page content from cached calculation results."""
+    from app.services.pdf_estimator_identity_service import patch_who_quoted_in_internal_notes
+
     work_count = len(work_blocks)
     breakdown_map = work_breakdown_map(work_breakdowns)
 
@@ -217,11 +226,12 @@ def build_combined_internal_notes_for_pdf(
             quote_internal_notes=quote_internal_notes,
             quote_breakdown=quote_breakdown,
             work_count=1,
+            who_quoted=who_quoted,
         )
 
     quote_combined = (quote_internal_notes or quote_breakdown.internal_notes or "").strip()
     if quote_combined:
-        return quote_combined
+        return patch_who_quoted_in_internal_notes(quote_combined, who_quoted or "")
 
     sections: list[str] = []
     for index, block in enumerate(work_blocks):
@@ -232,6 +242,7 @@ def build_combined_internal_notes_for_pdf(
             quote_internal_notes=quote_internal_notes,
             quote_breakdown=quote_breakdown,
             work_count=work_count,
+            who_quoted=who_quoted,
         )
         if note:
             sections.append(f"--- Work {index + 1} ---\n{note}")

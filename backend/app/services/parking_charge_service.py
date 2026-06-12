@@ -388,11 +388,13 @@ def build_work_internal_notes_context(
     block: WorkBlockSnapshot,
     step2: Step2Snapshot,
     allocation: WorkSessionChargeAllocation | None,
+    *,
+    who_quoted: str | None = None,
 ):
     from app.schemas.calculation import InternalNotesContext
     from app.services.eworks_questionnaire_service import build_internal_notes_context
 
-    base = build_internal_notes_context(step1, block)
+    base = build_internal_notes_context(step1, block, who_quoted=who_quoted)
     if allocation is None:
         return base
     parking_summary = ""

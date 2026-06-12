@@ -199,9 +199,13 @@
         <div class="meta-cell"><strong>Client</strong> {{ client_name }}</div>
         <div class="meta-cell"><strong>Property</strong> {{ property_address }}</div>
       </div>
-      {% if engineer_name and engineer_name != "—" %}
+      {% if estimated_by_name and estimated_by_name != "—" %}
       <div class="meta-row">
-        <div class="meta-cell"><strong>Engineer</strong> {{ engineer_name }}</div>
+        <div class="meta-cell"><strong>Estimated By</strong> {{ estimated_by_name }}</div>
+      </div>
+      {% elif engineer_name and engineer_name != "—" %}
+      <div class="meta-row">
+        <div class="meta-cell"><strong>Estimated By</strong> {{ engineer_name }}</div>
       </div>
       {% endif %}
     </div>

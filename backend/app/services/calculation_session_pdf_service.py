@@ -14,8 +14,10 @@ from app.schemas.eworks_link import (
 from app.services.pdf_calculation_context_service import build_pdf_calculation_context
 from app.services.calculation_view_service import build_client_view_from_session
 from app.services.eworks_link_service import get_session_by_token
+from app.auth.types import AuthenticatedUser
 from app.services.eworks_pdf_context_service import build_eworks_estimate_pdf_context
 from app.services.eworks_questionnaire_service import work_block_to_step2_snapshot
+from app.services.pdf_estimator_identity_service import resolve_estimated_by_for_pdf
 
 
 def _load_session_for_pdf(
@@ -48,6 +50,7 @@ def render_session_quote_pdf(
     is_draft: bool = False,
     read_only: bool = False,
     show_internal_notes: bool = True,
+    current_user: AuthenticatedUser | None = None,
 ) -> tuple[bytes, str, str]:
     session = _load_session_for_pdf(
         db,
@@ -78,6 +81,7 @@ def render_session_quote_pdf(
     )
     primary_step2 = primary_step2.model_copy(update={"scope": combined_scope})
     client_view = build_client_view_from_session(session, breakdown, step1, primary_step2)
+    estimated_by_name = resolve_estimated_by_for_pdf(db, session, step1, current_user=current_user)
     context = build_eworks_estimate_pdf_context(
         step1=step1,
         step2=step2_data,
@@ -87,6 +91,7 @@ def render_session_quote_pdf(
         aggregated_summary=aggregated_summary,
         internal_notes=internal_notes,
         show_internal_notes=show_internal_notes,
+        estimated_by_name=estimated_by_name,
     )
     context["quote_number"] = step1.quote_number
     return render_eworks_estimate_document(context, is_draft=is_draft)

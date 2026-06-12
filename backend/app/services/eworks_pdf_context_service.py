@@ -181,9 +181,9 @@ def _time_frame_display(block: WorkBlockSnapshot) -> str:
     return "—"
 
 
-def _estimation_form_fields(step1: Step1Snapshot) -> list[dict[str, str]]:
+def _estimation_form_fields(step1: Step1Snapshot, *, estimated_by_name: str) -> list[dict[str, str]]:
     return [
-        {"label": "Engineer Name", "value": _display(step1.engineer_name)},
+        {"label": "Estimated By", "value": _display(estimated_by_name)},
         {"label": "Quote Number", "value": _display(step1.quote_number)},
         {"label": "Job Number", "value": _display(step1.job_number)},
         {"label": "Property Address", "value": _display(step1.property_address)},
@@ -371,6 +371,7 @@ def _format_work_results(
     show_internal_notes: bool = True,
     quote_internal_notes: str | None = None,
     quote_breakdown: CalculationBreakdown | None = None,
+    who_quoted: str | None = None,
 ) -> list[dict[str, object]]:
     blocks = work_blocks or []
     works: list[dict[str, object]] = []
@@ -394,6 +395,7 @@ def _format_work_results(
                 quote_internal_notes=quote_internal_notes,
                 quote_breakdown=quote_breakdown,
                 work_count=len(work_breakdowns),
+                who_quoted=who_quoted,
             )
         else:
             notes_raw = None
@@ -462,6 +464,7 @@ def build_eworks_estimate_pdf_context(
     aggregated_summary: AggregatedQuoteSummary | None = None,
     internal_notes: str | None = None,
     show_internal_notes: bool = True,
+    estimated_by_name: str | None = None,
 ) -> dict:
     calc = client_view.get("calculation", {})
     works = step2.works or []
@@ -469,10 +472,12 @@ def build_eworks_estimate_pdf_context(
         works = [WorkBlockSnapshot(scope=step2.scope, findings=step2.findings)]
 
     work_forms = [_work_form_page(block, index=i + 1, trade_name=step1.trade_name) for i, block in enumerate(works)]
-    estimation_fields = _estimation_form_fields(step1)
+    resolved_estimated_by = (estimated_by_name or step1.engineer_name or "").strip()
+    estimation_fields = _estimation_form_fields(step1, estimated_by_name=resolved_estimated_by)
     charges_fields = _charges_fields(step2, step2.works)
-    # Legacy keys retained for tests and compatibility.
-    header_parts = [part for part in (step1.engineer_name, step1.quote_number, step1.job_number) if part]
+    header_parts = [
+        part for part in (resolved_estimated_by or None, step1.quote_number, step1.job_number) if part
+    ]
 
     work_results = work_breakdowns or []
     formatted_works = _format_work_results(
@@ -481,6 +486,7 @@ def build_eworks_estimate_pdf_context(
         show_internal_notes=show_internal_notes,
         quote_internal_notes=internal_notes,
         quote_breakdown=breakdown,
+        who_quoted=resolved_estimated_by or None,
     )
     if show_internal_notes:
         combined_notes_raw = build_combined_internal_notes_for_pdf(
@@ -488,6 +494,7 @@ def build_eworks_estimate_pdf_context(
             work_breakdowns=work_results,
             quote_internal_notes=internal_notes,
             quote_breakdown=breakdown,
+            who_quoted=resolved_estimated_by or None,
         )
     else:
         combined_notes_raw = None
@@ -542,6 +549,7 @@ def build_eworks_estimate_pdf_context(
         "combined_page": combined_page,
         "notes_page": notes_page,
         "total_pages": total_pages,
+        "estimated_by_name": _display(resolved_estimated_by),
     }
 
 
@@ -553,6 +561,7 @@ def build_all_trades_pdf_context(
     breakdown: dict,
     work_breakdowns: list[dict],
     work_indexes: list[int] | None = None,
+    estimated_by_name: str | None = None,
 ) -> dict:
     from app.services.calculation_session_service import (
         _dashboard_quote_summary_breakdown,
@@ -645,13 +654,16 @@ def build_all_trades_pdf_context(
             "final_total": _money(summary_breakdown.final_total),
         }
 
+    resolved_estimated_by = (estimated_by_name or step1.engineer_name or "").strip()
+
     return {
         "document_title": "All Trades / Skills",
         "quote_number": step1.quote_number,
         "job_number": step1.job_number,
         "client_name": _display(step1.client_name),
         "property_address": _display(step1.property_address),
-        "engineer_name": _display(step1.engineer_name),
+        "engineer_name": _display(resolved_estimated_by),
+        "estimated_by_name": _display(resolved_estimated_by),
         "all_trades_works": all_trades_works,
         "summary": summary,
         "additional_charges": additional_charges,

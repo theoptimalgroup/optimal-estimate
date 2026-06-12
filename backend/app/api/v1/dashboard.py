@@ -140,6 +140,7 @@ def download_combined_pdf(
             session_id=session_id,
             work_indexes=payload.work_indexes,
             view_type=payload.view_type,
+            current_user=auth.user,
         )
         record_dashboard_audit(
             db,
