@@ -110,19 +110,21 @@ export function AppShell({ children }: AppShellProps) {
               mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
             )}
           >
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-5">
-              <div className="min-w-0 space-y-2.5">
-                <CompanyLogo className="h-8" priority />
-                <p className="text-sm font-bold leading-tight tracking-tight text-slate-900">Optimal Estimate</p>
-              </div>
+            <div className="relative border-b border-slate-200 px-5 py-6">
               <button
                 type="button"
-                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden"
+                className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden"
                 aria-label="Close sidebar"
                 onClick={closeMobileNav}
               >
                 <X className="size-5" />
               </button>
+              <div className="flex flex-col items-center text-center" data-testid="sidebar-branding">
+                <CompanyLogo className="mx-auto h-9 object-center sm:h-10" priority />
+                <p className="mt-3 text-lg font-extrabold leading-tight tracking-tight text-slate-900">
+                  Optimal Estimate
+                </p>
+              </div>
             </div>
 
             <nav
