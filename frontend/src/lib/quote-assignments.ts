@@ -248,6 +248,61 @@ export function formatAssignedAt(value: string | null | undefined): string {
   }).format(date);
 }
 
+function parseAppointmentDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isSameUtcDay(start: Date, end: Date): boolean {
+  return (
+    start.getUTCFullYear() === end.getUTCFullYear()
+    && start.getUTCMonth() === end.getUTCMonth()
+    && start.getUTCDate() === end.getUTCDate()
+  );
+}
+
+function formatAppointmentDateTime(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function formatAppointmentDate(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function formatAppointmentTime(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+/** Format appointment window for list cards (same-day end omits repeated date). */
+export function formatAppointmentWindow(
+  startAt: string | null | undefined,
+  endAt: string | null | undefined,
+): string {
+  const start = parseAppointmentDate(startAt);
+  const end = parseAppointmentDate(endAt);
+
+  if (!start && !end) return "Not available";
+  if (start && !end) return formatAppointmentDateTime(start);
+  if (!start && end) return formatAppointmentDateTime(end);
+
+  if (isSameUtcDay(start, end)) {
+    return `${formatAppointmentDate(start)}, ${formatAppointmentTime(start)} – ${formatAppointmentTime(end)}`;
+  }
+
+  return `${formatAppointmentDateTime(start)} – ${formatAppointmentDateTime(end)}`;
+}
+
 export function buildAssignmentLink(link: string | null | undefined): string {
   if (!link) return "";
   if (link.startsWith("http")) return link;

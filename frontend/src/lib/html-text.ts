@@ -171,6 +171,13 @@ export function cleanHtmlToReadableText(value: string | null | undefined): strin
   return htmlToPlainText(String(value));
 }
 
+/** Compact single-line preview for list cards (collapses whitespace; full text stays in forms). */
+export function compactCardPreviewText(value: string | null | undefined): string {
+  const text = cleanHtmlToReadableText(value);
+  if (!text) return "";
+  return text.replace(/\s+/g, " ").trim();
+}
+
 /** Plain text suitable for textarea/input values (strips HTML, normalizes whitespace). */
 export function cleanRichTextForTextarea(value: string | null | undefined): string {
   if (value == null || value === "") return "";

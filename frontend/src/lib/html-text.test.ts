@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   cleanHtmlToReadableText,
   cleanRichTextForTextarea,
+  compactCardPreviewText,
   decodeHtmlEntitiesRepeated,
   htmlToPlainText,
   isHtmlLike,
@@ -121,5 +122,16 @@ describe("stripHtmlFromLabel", () => {
   it("strips HTML from product names", () => {
     expect(stripHtmlFromLabel("<strong>Plant Room</strong>")).toBe("Plant Room");
     expect(stripHtmlFromLabel("Window Repair")).toBe("Window Repair");
+  });
+});
+
+describe("compactCardPreviewText", () => {
+  it("collapses whitespace and strips HTML for card previews", () => {
+    const preview = compactCardPreviewText(
+      "<strong>SCOPE OF WORK</strong><br /><br />Line one.<br /><br />Line two.",
+    );
+    expect(preview).toBe("SCOPE OF WORK Line one. Line two.");
+    expect(preview).not.toContain("<");
+    expect(preview).not.toContain("\n");
   });
 });
