@@ -253,8 +253,8 @@ test.describe("Admin dashboard", () => {
     await page.goto("/admin/dashboard");
 
     await expect(page.getByTestId("admin-dashboard-page")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Admin Dashboard" })).toBeVisible();
-    await expect(page.getByText("Track synced eWorks quotes and operational status.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Draft Dashboard" })).toBeVisible();
+    await expect(page.getByText("Track draft eWorks quotes and operational status.")).toBeVisible();
 
     await expect(page.getByTestId("kpi-new-quotes")).toBeVisible();
     await expect(page.getByTestId("kpi-awaiting-supplier")).toBeVisible();

@@ -144,11 +144,11 @@ test.describe("role-based navigation and access", () => {
     await page.goto("/admin/dashboard");
     await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("app-shell-nav")).toBeVisible();
-    await expect(page.getByTestId("nav-item-dashboard")).toBeVisible();
+    await expect(page.getByTestId("nav-item-draft-dashboard")).toBeVisible();
     await expect(page.getByTestId("nav-item-users-roles")).toBeVisible();
     await expect(page.getByTestId("nav-item-quote-review")).toBeVisible();
     await expect(page.getByTestId("nav-item-quotes")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Admin Dashboard" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Draft Dashboard" })).toBeVisible();
   });
 
   test("estimator is blocked from admin pages", async ({ page }) => {
@@ -247,6 +247,7 @@ test.describe("navigation UX", () => {
     expect(new Set(hrefs).size).toBe(hrefs.length);
     await expect(page.getByTestId("nav-item-quotes")).toBeVisible();
     await expect(page.getByTestId("nav-item-quote-review")).toBeVisible();
+    await expect(page.getByTestId("nav-item-draft-dashboard")).toBeVisible();
     await expect(page.getByTestId("nav-item-clients")).toBeVisible();
     await expect(page.getByTestId("nav-item-assigned-estimates")).toBeVisible();
     await expect(page.getByTestId("nav-item-assigned-jobs")).toBeVisible();

@@ -84,8 +84,8 @@ export default function ManagerDashboardPage() {
   return (
     <div className="space-y-6" data-testid="manager-dashboard-page">
       <PageHeader
-        title="Manager Dashboard"
-        subtitle="Track synced eWorks quotes and operational status."
+        title="Draft Dashboard"
+        subtitle="Track draft eWorks quotes and operational status."
       />
 
       <DashboardSearch value={searchInput} onChange={setSearchInput} />

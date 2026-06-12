@@ -108,8 +108,8 @@ export default function AdminDashboardPage() {
   return (
     <div className="space-y-6" data-testid="admin-dashboard-page">
       <PageHeader
-        title="Admin Dashboard"
-        subtitle="Track synced eWorks quotes and operational status."
+        title="Draft Dashboard"
+        subtitle="Track draft eWorks quotes and operational status."
       />
 
       <DashboardSearch value={searchInput} onChange={setSearchInput} />

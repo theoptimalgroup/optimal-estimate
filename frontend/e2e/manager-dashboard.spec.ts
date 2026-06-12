@@ -246,7 +246,7 @@ test.describe("Manager dashboard", () => {
     await page.goto("/manager/dashboard");
 
     await expect(page.getByTestId("manager-dashboard-page")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Manager Dashboard" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Draft Dashboard" })).toBeVisible();
 
     await expect(page.getByTestId("kpi-new-quotes")).toBeVisible();
     await expect(page.getByTestId("kpi-awaiting-supplier")).toBeVisible();

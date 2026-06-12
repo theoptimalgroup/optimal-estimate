@@ -6,7 +6,7 @@ export type NavItem = {
 };
 
 const ADMIN_NAV: NavItem[] = [
-  { label: "Dashboard", href: "/admin/dashboard" },
+  { label: "Draft Dashboard", href: "/admin/dashboard" },
   { label: "Sales Pipeline", href: "/admin/processed-dashboard" },
   { label: "Call Backs", href: "/admin/call-back-dashboard" },
   { label: "New Estimate", href: "/new-estimate" },
@@ -39,7 +39,7 @@ export const ENGINEER_NAV: NavItem[] = [
 ];
 
 const MANAGER_NAV: NavItem[] = [
-  { label: "Dashboard", href: "/manager/dashboard" },
+  { label: "Draft Dashboard", href: "/manager/dashboard" },
   { label: "Sales Pipeline", href: "/manager/processed-dashboard" },
   { label: "Call Backs", href: "/manager/call-back-dashboard" },
   { label: "Quotes", href: "/manager/quotes" },
