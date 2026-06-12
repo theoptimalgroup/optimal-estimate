@@ -273,9 +273,9 @@ def _parking_type_display(parking_type: str | None) -> str:
 def _charges_fields(step2: Step2Snapshot, works: list[WorkBlockSnapshot] | None = None) -> list[dict[str, str]]:
     from app.services.parking_charge_service import (
         calculate_cc_total,
-        cc_chargeable_days,
+        calculate_cc_total_days,
+        calculate_parking_total,
         decompose_duration_hours,
-        quote_parking_raw,
         works_combined_duration_hours,
     )
 
@@ -301,7 +301,7 @@ def _charges_fields(step2: Step2Snapshot, works: list[WorkBlockSnapshot] | None 
             fields.append({"label": "Rate per hour (£)", "value": _money(step2.parking_rate_per_hour)})
         else:
             fields.append({"label": "Rate per day (£)", "value": _money(step2.parking_fixed_amount)})
-        fields.append({"label": "Parking total", "value": _money(quote_parking_raw(step2, work_blocks))})
+        fields.append({"label": "Parking total", "value": _money(calculate_parking_total(step2, work_blocks))})
         maps_url = _google_maps_url(step2.parking_latitude, step2.parking_longitude)
         if maps_url:
             fields.append({"label": "GPS snapshot", "value": maps_url})
@@ -312,7 +312,7 @@ def _charges_fields(step2: Step2Snapshot, works: list[WorkBlockSnapshot] | None 
     )
     if step2.congestion_required:
         fields.append({"label": "CC charge per day (£)", "value": _money(step2.congestion_amount)})
-        cc_days = cc_chargeable_days(combined_hours)
+        cc_days = calculate_cc_total_days(step2, work_blocks)
         fields.append({"label": "CC days", "value": _display(cc_days)})
         fields.append({"label": "CC total", "value": _money(calculate_cc_total(step2, work_blocks))})
     fields.extend(

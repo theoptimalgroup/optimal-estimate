@@ -24,6 +24,8 @@ from app.services.calculation_session_service import _session_ui_state
 
 logger = logging.getLogger(__name__)
 
+PdfCalculationSource = Literal["cached", "preview"]
+
 
 @dataclass(frozen=True)
 class PdfCalculationContext:
@@ -33,7 +35,7 @@ class PdfCalculationContext:
     internal_notes: str | None
     step1: Step1Snapshot
     step2: Step2Snapshot
-    source: Literal["cached", "calculated"]
+    source: PdfCalculationSource
 
 
 def session_blocks_recalculation(session: CalculationSession) -> bool:
@@ -59,21 +61,22 @@ def resolve_session_calculation_result(
     allow_recalculate: bool = False,
     session_id: UUID | None = None,
     session_token: str | None = None,
-) -> tuple[dict, Literal["cached", "calculated"]]:
-    """Return raw last_result payload; never recalculates submitted/locked sessions."""
+) -> tuple[dict, PdfCalculationSource]:
+    """Return raw last_result payload; uses preview fallback when cache is missing."""
+    _ = allow_recalculate, session_id, session_token
     cached = _cached_last_result(session)
     if cached is not None:
         return cached, "cached"
 
-    if session_blocks_recalculation(session) or not allow_recalculate:
+    if not session.step2_snapshot:
+        raise AppError("STEP2_REQUIRED", "Estimator inputs are required before generating PDF", 400)
+
+    from app.services.work_quote_review_fallback_service import build_preview_calculation_last_result
+
+    preview = build_preview_calculation_last_result(db, session)
+    if preview is None:
         raise AppError("CALCULATION_REQUIRED", "No calculation result available for this quote", 400)
-
-    from app.services.calculation_session_service import calculate_session
-
-    sid = session_id or session.id
-    token = session_token or session.session_token
-    result = calculate_session(db, session_id=sid, session_token=token, step2=None)
-    return result.model_dump(mode="json"), "calculated"
+    return preview, "preview"
 
 
 def build_pdf_calculation_context(
@@ -86,7 +89,7 @@ def build_pdf_calculation_context(
     version_number: int | None = None,
     view_type: str | None = None,
 ) -> PdfCalculationContext:
-    """Resolve breakdown and work rows for PDF rendering from cached or live calculation."""
+    """Resolve breakdown and work rows for PDF rendering from cached or preview calculation."""
     last_result, source = resolve_session_calculation_result(
         db,
         session,
@@ -133,7 +136,7 @@ def log_pdf_calculation_totals(
     session_id: UUID,
     version_number: int | None,
     view_type: str | None,
-    source: Literal["cached", "calculated"],
+    source: PdfCalculationSource,
     breakdown: CalculationBreakdown,
 ) -> None:
     """Debug-safe logging: ids and totals only, no secrets or PII."""

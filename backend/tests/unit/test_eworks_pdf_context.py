@@ -158,6 +158,15 @@ def test_render_eworks_estimate_document_includes_form_sections():
 
 def test_quote_additional_charge_lines_omits_ulez_and_waste():
     step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                scope="Test work",
+                engineers_required=True,
+                engineers_needed=1,
+                engineer_time_unit="hours",
+                engineer_time_value=Decimal("2"),
+            )
+        ],
         congestion_required=True,
         congestion_amount=Decimal("18"),
         travel_charge=Decimal("10"),
@@ -170,7 +179,7 @@ def test_quote_additional_charge_lines_omits_ulez_and_waste():
     )
     lines = quote_additional_charge_lines(step2)
     joined = " ".join(lines)
-    assert "Congestion: £18" in joined
+    assert "CC charge per day: £18" in joined
     assert "Travel: £10" in joined
     assert "Other: £5" in joined
     assert "ULEZ" not in joined
@@ -233,19 +242,26 @@ def test_pdf_charges_fixed_parking_omits_hourly_fields():
         client_view={"calculation": {"subtotal": 565, "vat_rate": 20, "vat_total": 113, "final_total": 678}},
     )
     labels = [field["label"] for field in context["charges_fields"]]
-    assert "Parking fixed amount (£)" in labels
-    assert "Parking rate per hour (£)" not in labels
-    assert "Parking hours" not in labels
-    fixed = next(field for field in context["charges_fields"] if field["label"] == "Parking fixed amount (£)")
+    assert "Rate per day (£)" in labels
+    assert "Rate per hour (£)" not in labels
+    fixed = next(field for field in context["charges_fields"] if field["label"] == "Rate per day (£)")
     assert fixed["value"] == "£100.00"
 
 
 def test_pdf_charges_hourly_parking_shows_rate_and_hours():
     step2 = Step2Snapshot(
+        works=[
+            WorkBlockSnapshot(
+                scope="Hourly parking work",
+                engineers_required=True,
+                engineers_needed=1,
+                engineer_time_unit="hours",
+                engineer_time_value=Decimal("2"),
+            )
+        ],
         parking_required=True,
         parking_type="hourly",
         parking_rate_per_hour=Decimal("30"),
-        parking_hours=Decimal("2"),
         parking_fixed_amount=Decimal("100"),
     )
     context = build_eworks_estimate_pdf_context(
@@ -264,9 +280,9 @@ def test_pdf_charges_hourly_parking_shows_rate_and_hours():
         client_view={"calculation": {"subtotal": 100, "vat_rate": 20, "vat_total": 20, "final_total": 120}},
     )
     labels = [field["label"] for field in context["charges_fields"]]
-    assert "Parking rate per hour (£)" in labels
-    assert "Parking hours" in labels
-    assert "Parking fixed amount (£)" not in labels
+    assert "Rate per hour (£)" in labels
+    assert "Rate per day (£)" not in labels
+    assert "Parking total" in labels
 
 
 def test_pdf_quote_level_parking_in_charges_not_work_form():
@@ -309,7 +325,7 @@ def test_pdf_quote_level_parking_in_charges_not_work_form():
     parking = context["work_forms"][0]["parking"]
     assert parking["required"] is False
     charge_labels = [field["label"] for field in context["charges_fields"]]
-    assert "Parking fixed amount (£)" in charge_labels
+    assert "Rate per day (£)" in charge_labels
     assert "Number of vehicles" in charge_labels
     assert "GPS snapshot" in charge_labels
     parking_notes = next(field for field in context["charges_fields"] if field["label"] == "Parking notes")

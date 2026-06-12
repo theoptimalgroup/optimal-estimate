@@ -548,52 +548,50 @@ def _merge_skill_group_breakdowns(
     )
 
 
-def calculate_session(
+def _prepare_step2_for_calculation(
     db: Session,
+    session: CalculationSession,
+    step2_data: Step2Snapshot,
     *,
-    session_id: UUID,
-    session_token: str,
-    step2: Step2Snapshot | None = None,
-    idempotency_key: str | None = None,
-) -> CalculateSessionResponse:
-    from app.services.quote_work_snapshot_service import (
-        normalize_shared_work_blocks,
-        resolve_shared_step2_for_session,
-        save_shared_step2,
-        sync_session_step2_from_shared,
-    )
+    merge_attachments: bool = True,
+) -> Step2Snapshot:
+    from app.services.quote_work_snapshot_service import normalize_shared_work_blocks
 
-    request_body = {"step2": step2.model_dump(mode="json") if step2 else None}
-    if idempotency_key:
-        replay = check_idempotency(db, key=idempotency_key, request_hash=hash_payload(request_body))
-        if replay is not None:
-            return CalculateSessionResponse.model_validate(replay.payload)
-
-    session = get_session_by_token(db, session_id, session_token)
-    assert_session_editable(session)
-    if step2 is not None:
-        shared_step2, _ = resolve_shared_step2_for_session(db, session)
-        step2_data = normalize_shared_work_blocks(_merge_incoming_step2_with_shared(step2, shared_step2))
-        save_shared_step2(db, session, step2_data)
-    else:
-        step2_data, _ = resolve_shared_step2_for_session(db, session)
-    step2_data = _merge_shared_quote_attachments(db, session, step2_data)
+    step2_data = normalize_shared_work_blocks(step2_data)
+    if merge_attachments:
+        step2_data = _merge_shared_quote_attachments(db, session, step2_data)
     if step2_data is not None:
         step2_data = normalize_shared_work_blocks(step2_data)
-    if step2_data is None:
-        raise AppError("STEP2_REQUIRED", "Estimator inputs are required before calculation", 400)
-    sync_session_step2_from_shared(db, session, step2_data)
-    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
     if not step2_data.works:
         step2_data = Step2Snapshot.model_validate(step2_data.model_dump(mode="json"))
-
+    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
     for index in range(len(step2_data.works)):
         block = step2_data.works[index]
         if not block.findings and step1.findings_report:
             block = block.model_copy(update={"findings": step1.findings_report})
             step2_data.works[index] = block
         _validate_work_block(step2_data, index)
+    return step2_data
 
+
+def _resolve_step2_data_for_calculation_preview(db: Session, session: CalculationSession) -> Step2Snapshot:
+    from app.services.quote_work_snapshot_service import resolve_shared_step2_for_session
+
+    if session.step2_snapshot:
+        step2_data = Step2Snapshot.model_validate(session.step2_snapshot)
+    else:
+        step2_data, _ = resolve_shared_step2_for_session(db, session)
+    if step2_data is None:
+        raise AppError("STEP2_REQUIRED", "Estimator inputs are required before calculation", 400)
+    return _prepare_step2_for_calculation(db, session, step2_data, merge_attachments=False)
+
+
+def _build_calculation_response(
+    db: Session,
+    session: CalculationSession,
+    step1: Step1Snapshot,
+    step2_data: Step2Snapshot,
+) -> CalculateSessionResponse:
     charges = aggregate_work_charges(step1, step2_data.works, step2=step2_data)
     single_work = len(step2_data.works) == 1
     work_skills = collect_work_skills(step2_data.works, step1.trade_name)
@@ -601,7 +599,6 @@ def calculate_session(
 
     matched = resolve_calculation_rule(db, session.client_id, session.trade_id, None)
     rule = matched.rule if matched else None
-    from decimal import Decimal
 
     vat_rate = rule.vat_rate if rule else Decimal("20")
     formula_source = rule.formula_source if rule else None
@@ -699,7 +696,6 @@ def calculate_session(
             formula_source=formula_source,
             xlsx_formula_version=xlsx_formula_version,
         )
-        skill_group_results = []
         aggregated_summary_payload = AggregatedQuoteSummary.model_validate(
             aggregated_quote_summary(
                 aggregated,
@@ -730,22 +726,7 @@ def calculate_session(
     client_view["work_count"] = len(step2_data.works)
     notes = build_internal_notes_from_breakdown(session, breakdown)
 
-    session.ui_state = SessionUiState(
-        current_step=3,
-        max_reachable_step=3,
-        last_result=CalculateSessionResponse(
-            breakdown=breakdown,
-            work_breakdowns=work_results,
-            aggregated_summary=aggregated_summary_payload,
-            skill_group_breakdowns=skill_group_results,
-            internal_view=internal_view,
-            internal_notes=notes.get("internal_notes"),
-            client_view=client_view,
-        ).model_dump(mode="json"),
-    ).model_dump(mode="json")
-    db.flush()
-
-    result = CalculateSessionResponse(
+    return CalculateSessionResponse(
         breakdown=breakdown,
         work_breakdowns=work_results,
         aggregated_summary=aggregated_summary_payload,
@@ -754,6 +735,68 @@ def calculate_session(
         internal_notes=notes.get("internal_notes"),
         client_view=client_view,
     )
+
+
+def compute_calculation_response_for_session(
+    db: Session,
+    session: CalculationSession,
+) -> CalculateSessionResponse:
+    """Run full quote calculation for display/PDF without persisting ui_state."""
+    step2_data = _resolve_step2_data_for_calculation_preview(db, session)
+    step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+    return _build_calculation_response(db, session, step1, step2_data)
+
+
+def calculate_session(
+    db: Session,
+    *,
+    session_id: UUID,
+    session_token: str,
+    step2: Step2Snapshot | None = None,
+    idempotency_key: str | None = None,
+) -> CalculateSessionResponse:
+    from app.services.quote_work_snapshot_service import (
+        normalize_shared_work_blocks,
+        resolve_shared_step2_for_session,
+        save_shared_step2,
+        sync_session_step2_from_shared,
+    )
+
+    request_body = {"step2": step2.model_dump(mode="json") if step2 else None}
+    if idempotency_key:
+        replay = check_idempotency(db, key=idempotency_key, request_hash=hash_payload(request_body))
+        if replay is not None:
+            return CalculateSessionResponse.model_validate(replay.payload)
+
+    session = get_session_by_token(db, session_id, session_token)
+    assert_session_editable(session)
+    if step2 is not None:
+        shared_step2, _ = resolve_shared_step2_for_session(db, session)
+        step2_data = normalize_shared_work_blocks(_merge_incoming_step2_with_shared(step2, shared_step2))
+        save_shared_step2(db, session, step2_data)
+    else:
+        step2_data, _ = resolve_shared_step2_for_session(db, session)
+    step2_data = _merge_shared_quote_attachments(db, session, step2_data)
+    if step2_data is not None:
+        step2_data = normalize_shared_work_blocks(step2_data)
+    if step2_data is None:
+        raise AppError("STEP2_REQUIRED", "Estimator inputs are required before calculation", 400)
+    sync_session_step2_from_shared(db, session, step2_data)
+    step2_data = _prepare_step2_for_calculation(db, session, step2_data)
+    result = _build_calculation_response(
+        db,
+        session,
+        Step1Snapshot.model_validate(session.step1_snapshot),
+        step2_data,
+    )
+
+    session.ui_state = SessionUiState(
+        current_step=3,
+        max_reachable_step=3,
+        last_result=result.model_dump(mode="json"),
+    ).model_dump(mode="json")
+    db.flush()
+
     if idempotency_key:
         store_idempotency(
             db,

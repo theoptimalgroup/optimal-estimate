@@ -21,6 +21,7 @@ from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnaps
 from app.services.calculation_session_service import _build_dashboard_quote_item_from_session
 from app.services.work_quote_review_fallback_service import (
     UNAVAILABLE_INTERNAL_NOTES,
+    build_preview_calculation_last_result,
     build_standard_preview_work_breakdown,
     resolve_work_quote_review_display,
     stored_work_internal_notes,
@@ -363,3 +364,77 @@ def test_client_views_do_not_use_dashboard_fallback():
 
     source = open(client_quote_service.__file__).read()
     assert "work_quote_review_fallback_service" not in source
+
+
+def test_preview_calculation_last_result_builds_full_payload(preview_db):
+    session = _session_with_works(preview_db)
+    payload = build_preview_calculation_last_result(preview_db, session)
+    assert payload is not None
+    assert payload["breakdown"]["final_total"] is not None
+    assert len(payload["work_breakdowns"]) == 2
+    notes = payload["work_breakdowns"][0]["internal_notes"] or ""
+    assert "BUDGET:" in notes
+
+
+def test_pdf_context_uses_preview_when_last_result_stale(preview_db):
+    from app.services.pdf_calculation_context_service import build_pdf_calculation_context
+
+    session = _session_with_works(preview_db)
+    before_ui = dict(session.ui_state or {})
+    ctx = build_pdf_calculation_context(preview_db, session, view_type="optimal")
+    assert ctx.source == "preview"
+    assert len(ctx.work_breakdowns) == 2
+    assert ctx.breakdown.final_total is not None
+    assert session.ui_state == before_ui
+    notes = ctx.work_breakdowns[1].internal_notes or ""
+    assert "CC:" in notes
+    assert "28.80" in notes
+
+
+def test_pdf_preview_mixed_trade_cc_total(preview_db):
+    from app.services.parking_charge_service import allocate_parking_cc_to_work_blocks, calculate_cc_total
+    from app.services.pdf_calculation_context_service import build_pdf_calculation_context
+
+    session = _session_with_works(preview_db)
+    step2 = Step2Snapshot.model_validate(session.step2_snapshot)
+    ctx = build_pdf_calculation_context(preview_db, session, view_type="optimal")
+    assert calculate_cc_total(step2, step2.works) == Decimal("57.60")
+    allocations = allocate_parking_cc_to_work_blocks(step2, step2.works)
+    assert sum(item.cc_total for item in allocations) == Decimal("57.60")
+    assert ctx.work_breakdowns[0].internal_notes
+    assert ctx.work_breakdowns[1].internal_notes
+    assert "28.80" in (ctx.work_breakdowns[1].internal_notes or "")
+
+
+def test_pdf_internal_notes_include_xlsx_sections(preview_db):
+    from app.services.pdf_calculation_context_service import build_pdf_calculation_context
+
+    session = _session_with_works(preview_db)
+    ctx = build_pdf_calculation_context(preview_db, session, view_type="optimal")
+    combined = ctx.internal_notes or ctx.breakdown.internal_notes or ""
+    assert "PROFIT ON JOB:" in combined or any(
+        "PROFIT ON JOB:" in (item.internal_notes or "")
+        for item in ctx.work_breakdowns
+    )
+
+
+def test_pdf_client_context_hides_internal_notes(preview_db):
+    from app.services.calculation_session_pdf_service import render_session_quote_pdf
+
+    session = _session_with_works(preview_db)
+    session.status = "draft"
+    session.locked = False
+    session.submitted_at = None
+    preview_db.commit()
+    content, _, media_type = render_session_quote_pdf(
+        preview_db,
+        session_id=session.id,
+        session_token=session.session_token,
+        read_only=True,
+        show_internal_notes=False,
+    )
+    assert len(content) > 0
+    if media_type != "application/pdf":
+        html = content.decode("utf-8")
+        assert "PROFIT ON JOB:" not in html
+        assert "TOTAL COST TO OPTIMAL:" not in html

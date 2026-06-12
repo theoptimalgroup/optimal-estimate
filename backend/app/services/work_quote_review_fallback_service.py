@@ -179,3 +179,25 @@ def resolve_work_quote_review_display(
         materials_subtotal = preview.materials_subtotal
 
     return internal_notes, labour_subtotal, materials_subtotal
+
+
+def build_preview_calculation_last_result(
+    db: Session,
+    session: CalculationSession,
+) -> dict | None:
+    """Build a display-only last_result payload for PDF/Quote Review without mutating ui_state."""
+    try:
+        from app.services.calculation_session_service import compute_calculation_response_for_session
+
+        result = compute_calculation_response_for_session(db, session)
+    except Exception:
+        logger.exception("Preview calculation failed for session=%s", session.id)
+        return None
+
+    payload = result.model_dump(mode="json")
+    breakdown = payload.get("breakdown") or {}
+    if breakdown.get("final_total") is None:
+        return None
+    if not payload.get("work_breakdowns"):
+        return None
+    return payload
