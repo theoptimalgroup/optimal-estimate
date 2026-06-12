@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { AzureSignOutButton } from "@/components/auth/azure-sign-out-button";
 import { DevAuthStatus } from "@/components/auth/dev-auth-status";
@@ -11,14 +11,52 @@ import { CompanyLogo } from "@/components/ui/company-logo";
 import { RoleBadge } from "@/components/ui/role-badge";
 import { useCurrentUser } from "@/lib/auth/auth-context";
 import { isAzureAuth } from "@/lib/auth/auth-config";
-import { getNavigationForRole } from "@/lib/auth/navigation";
+import { ENGINEER_NAV, getNavigationForRole } from "@/lib/auth/navigation";
 import { isNavItemActive } from "@/lib/auth/navigation-active";
-import { getPageTitle, withNavIcons } from "@/lib/auth/navigation-icons";
+import { getPageTitle, withNavIcons, type NavItemWithIcon } from "@/lib/auth/navigation-icons";
 import { cn } from "@/lib/utils";
 
 type AppShellProps = {
   children: ReactNode;
 };
+
+function navItemTestId(label: string): string {
+  return `nav-item-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
+function SidebarNavLink({
+  item,
+  active,
+  onNavigate,
+}: {
+  item: NavItemWithIcon;
+  active: boolean;
+  onNavigate: () => void;
+}) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      data-testid={navItemTestId(item.label)}
+      className={cn(
+        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+        active
+          ? "border border-blue-200 bg-blue-50 text-blue-700"
+          : "border border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+      )}
+    >
+      <Icon
+        className={cn(
+          "size-[18px] shrink-0",
+          active ? "text-blue-600" : "text-slate-400",
+        )}
+        aria-hidden
+      />
+      <span className="truncate">{item.label}</span>
+    </Link>
+  );
+}
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
@@ -30,6 +68,29 @@ export function AppShell({ children }: AppShellProps) {
   const pageTitle = getPageTitle(pathname, navItems);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const engineerHrefSet = useMemo(() => new Set(ENGINEER_NAV.map((item) => item.href)), []);
+
+  const { primaryNavItems, engineerNavItems } = useMemo(() => {
+    if (role !== "manager") {
+      return { primaryNavItems: navWithIcons, engineerNavItems: [] as NavItemWithIcon[] };
+    }
+    return {
+      primaryNavItems: navWithIcons.filter((item) => !engineerHrefSet.has(item.href)),
+      engineerNavItems: navWithIcons.filter((item) => engineerHrefSet.has(item.href)),
+    };
+  }, [engineerHrefSet, navWithIcons, role]);
+
+  const closeMobileNav = () => setMobileOpen(false);
+
+  const renderNavItem = (item: NavItemWithIcon) => (
+    <SidebarNavLink
+      key={`${item.label}-${item.href}`}
+      item={item}
+      active={isNavItemActive(pathname, item.href, navItems)}
+      onNavigate={closeMobileNav}
+    />
+  );
+
   return (
     <div className="flex min-h-screen bg-slate-50" data-testid="app-shell">
       {showSidebar ? (
@@ -39,7 +100,7 @@ export function AppShell({ children }: AppShellProps) {
               type="button"
               aria-label="Close navigation"
               className="fixed inset-0 z-40 bg-slate-900/30 lg:hidden"
-              onClick={() => setMobileOpen(false)}
+              onClick={closeMobileNav}
             />
           ) : null}
 
@@ -50,46 +111,38 @@ export function AppShell({ children }: AppShellProps) {
             )}
           >
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-5">
-              <div className="min-w-0 space-y-2">
+              <div className="min-w-0 space-y-2.5">
                 <CompanyLogo className="h-8" priority />
-                <p className="text-xs font-medium text-slate-500">Optimal Estimate</p>
+                <p className="text-sm font-bold leading-tight tracking-tight text-slate-900">Optimal Estimate</p>
               </div>
               <button
                 type="button"
                 className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden"
                 aria-label="Close sidebar"
-                onClick={() => setMobileOpen(false)}
+                onClick={closeMobileNav}
               >
                 <X className="size-5" />
               </button>
             </div>
 
             <nav
-              className="flex-1 space-y-1.5 overflow-y-auto px-3 py-4"
+              className="flex-1 space-y-1 overflow-y-auto px-3 py-4"
               aria-label="Main navigation"
               data-testid="app-shell-nav"
             >
-              {navWithIcons.map((item) => {
-                const active = isNavItemActive(pathname, item.href, navItems);
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={`${item.label}-${item.href}`}
-                    href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    data-testid={`nav-item-${item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-                    className={cn(
-                      "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                      active
-                        ? "border border-blue-200 bg-blue-50 text-blue-700"
-                        : "border border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900",
-                    )}
+              {primaryNavItems.map(renderNavItem)}
+
+              {engineerNavItems.length > 0 ? (
+                <div className="pt-3">
+                  <p
+                    className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400"
+                    data-testid="nav-section-engineer-work"
                   >
-                    <Icon className={cn("size-4 shrink-0", active ? "text-blue-600" : "text-slate-400")} />
-                    {item.label}
-                  </Link>
-                );
-              })}
+                    Engineer Work
+                  </p>
+                  <div className="space-y-1">{engineerNavItems.map(renderNavItem)}</div>
+                </div>
+              ) : null}
             </nav>
           </aside>
         </>
