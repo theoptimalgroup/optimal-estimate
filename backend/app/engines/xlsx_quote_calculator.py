@@ -556,6 +556,22 @@ def _comms_line(client_name: str, client_fee_pct: Decimal, *, using_fallback_rul
     return f"{display_name} Comms @ {format_commission_pct(client_fee_pct)}"
 
 
+def _charge_context_note_lines(notes_context: InternalNotesContext | None) -> list[str]:
+    if notes_context is None:
+        return []
+    lines: list[str] = []
+    if notes_context.parking_summary.strip():
+        lines.append(notes_context.parking_summary.strip())
+    if notes_context.cc_summary.strip():
+        lines.append(notes_context.cc_summary.strip())
+    if notes_context.duration_days.strip() or notes_context.duration_hours.strip():
+        lines.append(
+            f"Duration: {notes_context.duration_days.strip() or '0'} days, "
+            f"{notes_context.duration_hours.strip() or '0'} hours"
+        )
+    return lines
+
+
 def build_internal_notes_hourly(
     *,
     client_name: str,
@@ -612,6 +628,7 @@ def build_internal_notes_hourly(
                 result.labour_charge + result.materials_charge,
                 result.profit_gbp,
             ),
+            *_charge_context_note_lines(notes_context),
             "EXTERNAL DELIVERY:",
             parking_line,
             labour_only_line,
@@ -695,6 +712,7 @@ def build_internal_notes_daily(
                 result.profit_gbp,
             ),
             "",
+            *_charge_context_note_lines(notes_context),
             "EXTERNAL DELIVERY:",
             parking_line,
             labour_only_line,

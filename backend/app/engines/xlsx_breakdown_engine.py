@@ -58,13 +58,19 @@ def _material_input_total(material_items: list[MaterialInput]) -> Decimal:
 def _parking_input_cost(charges: ChargeInput | None) -> Decimal:
     if not charges or not charges.parking_required:
         return Decimal("0")
-    # Vehicle count multiplies parking (same rule as work_parking_raw / quote_parking_raw).
-    vehicles = Decimal(max(1, charges.parking_vehicles or 1))
-    if charges.parking_type == "hourly" and charges.parking_rate_per_hour and charges.parking_hours:
-        return round_money(charges.parking_rate_per_hour * charges.parking_hours * vehicles)
-    if charges.parking_fixed_amount is not None:
-        return round_money(charges.parking_fixed_amount * vehicles)
-    return Decimal("0")
+    from app.services.parking_charge_service import calculate_parking_charge
+
+    if charges.parking_amount_override is not None:
+        return round_money(charges.parking_amount_override)
+    vehicles = max(1, charges.parking_vehicles or 1)
+    return calculate_parking_charge(
+        charges.parking_type,
+        rate_per_day=charges.parking_fixed_amount or Decimal("0"),
+        rate_per_hour=charges.parking_rate_per_hour or Decimal("0"),
+        days=charges.parking_duration_days,
+        hours=charges.parking_duration_hours or charges.parking_hours or Decimal("0"),
+        vehicles=vehicles,
+    )
 
 
 def _congestion_input_cost(charges: ChargeInput | None) -> Decimal:

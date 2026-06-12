@@ -457,6 +457,7 @@ export function EworksQuestionnaireStep({
                     onCancelCustomScopeDraft={() => cancelCustomScopeDraft(index)}
                     changingProduct={changingProductIndex === index}
                     onChangeProductClick={() => handleChangeProductClick(index)}
+                    quoteCharges={values}
                   />
                 </div>
               </div>

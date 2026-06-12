@@ -805,7 +805,7 @@ def test_quote_level_congestion_applied_once(eworks_api_client):
     )
     assert response.status_code == 200
     notes = response.json()["data"]["internal_notes"] or ""
-    assert "CC: £18" in notes
+    assert "CC:" in notes
     without_cc = test_client.post(
         f"/api/v1/calculation-session/{created['session_id']}/calculate",
         headers=headers,

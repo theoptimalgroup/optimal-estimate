@@ -140,6 +140,25 @@ export function supplierMaterialsTotal(supplier: MaterialSupplier): number {
   return linksTotal + (Number(supplier.delivery_charge) || 0);
 }
 
+export const HOURS_PER_DAY = 8;
+
+export function durationToHours(days: number, hours: number): number {
+  return days * HOURS_PER_DAY + hours;
+}
+
+export function hoursToDays(hours: number): number {
+  return hours / HOURS_PER_DAY;
+}
+
+export function decomposeDurationHours(totalHours: number): { days: number; hours: number } {
+  if (totalHours <= 0) {
+    return { days: 0, hours: 0 };
+  }
+  const wholeDays = Math.floor(totalHours / HOURS_PER_DAY);
+  const remainder = totalHours - wholeDays * HOURS_PER_DAY;
+  return { days: wholeDays, hours: remainder };
+}
+
 export function formatCurrency(amount: number): string {
   return `£${amount.toFixed(2)}`;
 }
@@ -361,19 +380,22 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
 }
 
 function validateQuoteCharges(data: z.infer<typeof quoteChargesFieldsSchema>, ctx: z.RefinementCtx) {
-  if (data.parking_required && data.parking_type === "hourly") {
-    if (!data.parking_hours || data.parking_hours <= 0) {
-      ctx.addIssue({ code: "custom", message: "Parking hours required for hourly parking", path: ["parking_hours"] });
-    }
-    if (!data.parking_rate_per_hour || data.parking_rate_per_hour <= 0) {
+  if (data.parking_required) {
+    if (data.parking_type === "hourly") {
+      if (!data.parking_rate_per_hour || data.parking_rate_per_hour <= 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Rate per hour is required for Per Hour parking",
+          path: ["parking_rate_per_hour"],
+        });
+      }
+    } else if (!data.parking_fixed_amount || data.parking_fixed_amount <= 0) {
       ctx.addIssue({
         code: "custom",
-        message: "Parking rate required for hourly parking",
-        path: ["parking_rate_per_hour"],
+        message: "Rate per day is required for Per Day parking",
+        path: ["parking_fixed_amount"],
       });
     }
-  }
-  if (data.parking_required) {
     const vehicles = toNumericValue(data.parking_vehicles);
     if (vehicles === undefined || vehicles < 1 || !Number.isInteger(vehicles)) {
       ctx.addIssue({
@@ -471,6 +493,126 @@ export type MaterialOrderRow = z.infer<typeof materialOrderRowSchema>;
 export type MaterialLinkRow = z.infer<typeof materialLinkRowSchema>;
 export type MaterialSupplierFormValues = z.infer<typeof materialSupplierSchema>;
 export type AttachmentMeta = z.infer<typeof attachmentMetaSchema>;
+
+export function workDurationComponents(work: Pick<WorkBlockFormValues, "engineers_required" | "engineers_needed" | "engineer_time_unit" | "engineer_time_value">): {
+  days: number;
+  hours: number;
+} {
+  if (!work.engineers_required) {
+    return { days: 0, hours: 0 };
+  }
+  const engineers = Number(work.engineers_needed) || 1;
+  const duration = Number(work.engineer_time_value) || 0;
+  if (work.engineer_time_unit === "days") {
+    return { days: engineers * duration, hours: 0 };
+  }
+  return { days: 0, hours: engineers * duration };
+}
+
+export function worksCombinedDuration(works: WorkBlockFormValues[]): { days: number; hours: number; totalHours: number } {
+  const totalHours = works.reduce((sum, work) => {
+    const { days, hours } = workDurationComponents(work);
+    return sum + durationToHours(days, hours);
+  }, 0);
+  const decomposed = decomposeDurationHours(totalHours);
+  return { ...decomposed, totalHours };
+}
+
+export function calculateParkingCharge(
+  parkingType: "fixed" | "hourly",
+  {
+    ratePerDay,
+    ratePerHour,
+    days,
+    hours,
+    vehicles,
+  }: { ratePerDay: number; ratePerHour: number; days: number; hours: number; vehicles: number },
+): number {
+  const vehicleCount = Math.max(1, vehicles || 1);
+  const totalHours = durationToHours(days, hours);
+  if (parkingType === "hourly") {
+    return ratePerHour * totalHours * vehicleCount;
+  }
+  return ratePerDay * hoursToDays(totalHours) * vehicleCount;
+}
+
+export function calculateQuoteParkingTotal(
+  charges: Pick<
+    QuestionnaireFormValues,
+    "parking_required" | "parking_type" | "parking_fixed_amount" | "parking_rate_per_hour" | "parking_vehicles"
+  >,
+  works: WorkBlockFormValues[],
+): number {
+  if (!charges.parking_required) return 0;
+  const { totalHours } = worksCombinedDuration(works);
+  const decomposed = decomposeDurationHours(totalHours);
+  return calculateParkingCharge(charges.parking_type, {
+    ratePerDay: Number(charges.parking_fixed_amount) || 0,
+    ratePerHour: Number(charges.parking_rate_per_hour) || 0,
+    days: decomposed.days,
+    hours: decomposed.hours,
+    vehicles: Number(charges.parking_vehicles) || 1,
+  });
+}
+
+export function ccChargeableDays(totalHours: number): number {
+  if (totalHours <= 0) return 0;
+  return Math.ceil(totalHours / HOURS_PER_DAY);
+}
+
+export function calculateCcTotal(
+  charges: Pick<QuestionnaireFormValues, "congestion_required" | "congestion_amount">,
+  works: WorkBlockFormValues[],
+): number {
+  if (!charges.congestion_required) return 0;
+  const rate = Number(charges.congestion_amount) || 0;
+  if (rate <= 0) return 0;
+  const { totalHours } = worksCombinedDuration(works);
+  const days = ccChargeableDays(totalHours);
+  if (days <= 0) return 0;
+  return rate * days;
+}
+
+export function calculateWorkParkingTotal(
+  work: WorkBlockFormValues,
+  charges: Pick<
+    QuestionnaireFormValues,
+    "parking_required" | "parking_type" | "parking_fixed_amount" | "parking_rate_per_hour" | "parking_vehicles"
+  >,
+): number {
+  if (!charges.parking_required) return 0;
+  const { days, hours } = workDurationComponents(work);
+  return calculateParkingCharge(charges.parking_type, {
+    ratePerDay: Number(charges.parking_fixed_amount) || 0,
+    ratePerHour: Number(charges.parking_rate_per_hour) || 0,
+    days,
+    hours,
+    vehicles: Number(charges.parking_vehicles) || 1,
+  });
+}
+
+export function calculateWorkCcTotal(
+  work: WorkBlockFormValues,
+  charges: Pick<QuestionnaireFormValues, "congestion_required" | "congestion_amount">,
+): number {
+  if (!charges.congestion_required) return 0;
+  const rate = Number(charges.congestion_amount) || 0;
+  if (rate <= 0) return 0;
+  const { days, hours } = workDurationComponents(work);
+  const totalHours = durationToHours(days, hours);
+  const chargeableDays = ccChargeableDays(totalHours);
+  if (chargeableDays <= 0) return 0;
+  return rate * chargeableDays;
+}
+
+export function workCcChargeableDays(work: WorkBlockFormValues): number {
+  const { days, hours } = workDurationComponents(work);
+  return ccChargeableDays(durationToHours(days, hours));
+}
+
+export function formatDurationParts(days: number, hours: number): string {
+  return `${days} days / ${hours} hours`;
+}
 
 /** Stable numeric defaults for autosave while the user is mid-edit. */
 function persistenceNumeric(value: unknown, fallback: number): number {

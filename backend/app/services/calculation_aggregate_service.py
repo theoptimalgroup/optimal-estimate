@@ -17,15 +17,23 @@ from app.schemas.calculation import (
     LineBreakdown,
     MaterialInput,
 )
-from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnapshot, aggregate_work_charges, flatten_supplier_links
+from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot, WorkBlockSnapshot, aggregate_work_charges, flatten_supplier_links, quote_parking_raw
 from app.services.eworks_link_service import collect_work_skills, resolve_skill_trade, work_skill_name
 from app.services.eworks_questionnaire_service import (
     build_material_items,
     format_links_and_quantity,
     work_block_to_step2_snapshot,
 )
-
-HOURS_PER_DAY = Decimal("8")
+from app.services.parking_charge_service import (
+    HOURS_PER_DAY,
+    build_work_internal_notes_context,
+    calculate_cc_total,
+    calculate_cc_total_days,
+    format_cc_summary,
+    format_parking_summary,
+    works_combined_duration_decomposed,
+    works_combined_duration_hours,
+)
 
 
 def round_to_half(value: Decimal) -> Decimal:
@@ -116,7 +124,11 @@ def aggregate_work_blocks(works: list[WorkBlockSnapshot]) -> AggregatedWorkInput
     )
 
 
-def build_combined_internal_notes_context(step1: Step1Snapshot, works: list[WorkBlockSnapshot]) -> InternalNotesContext:
+def build_combined_internal_notes_context(
+    step1: Step1Snapshot,
+    works: list[WorkBlockSnapshot],
+    step2: Step2Snapshot | None = None,
+) -> InternalNotesContext:
     link_parts: list[str] = []
     best_engineers: list[str] = []
     for block in works:
@@ -126,10 +138,35 @@ def build_combined_internal_notes_context(step1: Step1Snapshot, works: list[Work
             link_parts.append(formatted)
         if block.best_engineer and block.best_engineer.strip():
             best_engineers.append(block.best_engineer.strip())
-    return InternalNotesContext(
+    context = InternalNotesContext(
         links_and_quantity=" / ".join(link_parts),
         who_quoted=(step1.engineer_name or "").strip(),
         best_engineer=" / ".join(dict.fromkeys(best_engineers)),
+    )
+    if step2 is None:
+        return context
+    combined_days, combined_hours = works_combined_duration_decomposed(works)
+    parking_total = quote_parking_raw(step2, works)
+    parking_summary = format_parking_summary(
+        step2,
+        days=combined_days,
+        hours=combined_hours,
+        parking_total=parking_total,
+    )
+    cc_total = calculate_cc_total(step2, works)
+    cc_summary = format_cc_summary(
+        step2,
+        days=combined_days,
+        hours=combined_hours,
+        cc_total=cc_total,
+    )
+    return context.model_copy(
+        update={
+            "duration_days": str(combined_days.normalize()),
+            "duration_hours": str(combined_hours.normalize()),
+            "parking_summary": parking_summary,
+            "cc_summary": cc_summary,
+        }
     )
 
 
@@ -301,7 +338,7 @@ def build_mixed_skill_combined_breakdown(
                 labour_items=labour,
                 material_items=[],
                 charges=None,
-                internal_notes_context=build_combined_internal_notes_context(step1, group_works),
+                internal_notes_context=build_combined_internal_notes_context(step1, group_works, step2),
             ),
         )
         skill_parts.append((skill, breakdown))
@@ -324,7 +361,7 @@ def build_mixed_skill_combined_breakdown(
             labour_items=materials_labour,
             material_items=build_combined_material_inputs(step1, step2),
             charges=charges,
-            internal_notes_context=build_combined_internal_notes_context(step1, step2.works),
+            internal_notes_context=build_combined_internal_notes_context(step1, step2.works, step2),
         ),
     )
 
@@ -378,9 +415,11 @@ def aggregated_quote_summary(
     work_count: int,
     *,
     skills: list[str] | None = None,
+    step2: Step2Snapshot | None = None,
+    works: list[WorkBlockSnapshot] | None = None,
 ) -> dict[str, object]:
     skill_list = skills or []
-    return {
+    summary: dict[str, object] = {
         "work_count": work_count,
         "labour_type": aggregated.labour_type,
         "quoted_engineer_hours": aggregated.hours if aggregated.labour_type == "hourly" else None,
@@ -392,3 +431,11 @@ def aggregated_quote_summary(
         "skills": skill_list,
         "subtitle": format_aggregated_quote_subtitle(aggregated, work_count, skills=skill_list),
     }
+    if step2 is not None and works:
+        combined_days, combined_hours = works_combined_duration_decomposed(works)
+        summary["combined_duration_days"] = combined_days
+        summary["combined_duration_hours"] = combined_hours
+        summary["combined_parking_total"] = quote_parking_raw(step2, works)
+        summary["combined_cc_total"] = calculate_cc_total(step2, works)
+        summary["combined_cc_days"] = calculate_cc_total_days(step2, works)
+    return summary

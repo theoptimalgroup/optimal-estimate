@@ -37,6 +37,10 @@ class InternalNotesContext(BaseModel):
     links_and_quantity: str = ""
     who_quoted: str = ""
     best_engineer: str = ""
+    duration_days: str = ""
+    duration_hours: str = ""
+    parking_summary: str = ""
+    cc_summary: str = ""
 
 
 class ChargeInput(BaseModel):
@@ -46,6 +50,9 @@ class ChargeInput(BaseModel):
     parking_hours: Decimal | None = None
     parking_fixed_amount: Decimal | None = None
     parking_vehicles: int = 1
+    parking_duration_days: Decimal = Decimal("0")
+    parking_duration_hours: Decimal = Decimal("0")
+    parking_amount_override: Decimal | None = None
     congestion_required: bool = False
     congestion_amount: Decimal = Decimal("0")
     ulez_required: bool = False

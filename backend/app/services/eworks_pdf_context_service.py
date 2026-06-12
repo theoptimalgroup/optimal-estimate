@@ -264,30 +264,59 @@ def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) ->
     }
 
 
-def _charges_fields(step2: Step2Snapshot) -> list[dict[str, str]]:
+def _parking_type_display(parking_type: str | None) -> str:
+    from app.services.parking_charge_service import format_parking_type_label
+
+    return format_parking_type_label(parking_type)
+
+
+def _charges_fields(step2: Step2Snapshot, works: list[WorkBlockSnapshot] | None = None) -> list[dict[str, str]]:
+    from app.services.parking_charge_service import (
+        calculate_cc_total,
+        cc_chargeable_days,
+        decompose_duration_hours,
+        quote_parking_raw,
+        works_combined_duration_hours,
+    )
+
+    work_blocks = works or step2.works
+    combined_hours = works_combined_duration_hours(work_blocks) if work_blocks else Decimal("0")
+    duration_days, duration_hours = decompose_duration_hours(combined_hours)
+
     fields = [
         {"label": "Parking required", "value": "Yes" if step2.parking_required else "No"},
     ]
+    if duration_days > 0 or duration_hours > 0:
+        fields.append(
+            {
+                "label": "Combined duration",
+                "value": f"{_display(duration_days)} days / {_display(duration_hours)} hours",
+            }
+        )
     if step2.parking_required:
         parking_type = (step2.parking_type or "fixed").strip().lower()
-        fields.append({"label": "Parking type", "value": _display(step2.parking_type or "fixed")})
+        fields.append({"label": "Parking type", "value": _parking_type_display(step2.parking_type)})
         fields.append({"label": "Number of vehicles", "value": _display(max(1, step2.parking_vehicles or 1))})
         if parking_type == "hourly":
-            fields.extend(
-                [
-                    {"label": "Parking rate per hour (£)", "value": _money(step2.parking_rate_per_hour)},
-                    {"label": "Parking hours", "value": _display(step2.parking_hours)},
-                ]
-            )
+            fields.append({"label": "Rate per hour (£)", "value": _money(step2.parking_rate_per_hour)})
         else:
-            fields.append({"label": "Parking fixed amount (£)", "value": _money(step2.parking_fixed_amount)})
+            fields.append({"label": "Rate per day (£)", "value": _money(step2.parking_fixed_amount)})
+        fields.append({"label": "Parking total", "value": _money(quote_parking_raw(step2, work_blocks))})
         maps_url = _google_maps_url(step2.parking_latitude, step2.parking_longitude)
         if maps_url:
             fields.append({"label": "GPS snapshot", "value": maps_url})
     fields.extend(
         [
             {"label": "Congestion charge", "value": "Yes" if step2.congestion_required else "No"},
-            {"label": "Congestion amount (£)", "value": _money(step2.congestion_amount)},
+        ]
+    )
+    if step2.congestion_required:
+        fields.append({"label": "CC charge per day (£)", "value": _money(step2.congestion_amount)})
+        cc_days = cc_chargeable_days(combined_hours)
+        fields.append({"label": "CC days", "value": _display(cc_days)})
+        fields.append({"label": "CC total", "value": _money(calculate_cc_total(step2, work_blocks))})
+    fields.extend(
+        [
             {"label": "Travel charge (£)", "value": _money(step2.travel_charge)},
             {"label": "Other charge (£)", "value": _money(step2.other_charge)},
             {"label": "Other charge notes", "value": _display(step2.other_charge_reason)},
@@ -441,7 +470,7 @@ def build_eworks_estimate_pdf_context(
 
     work_forms = [_work_form_page(block, index=i + 1, trade_name=step1.trade_name) for i, block in enumerate(works)]
     estimation_fields = _estimation_form_fields(step1)
-    charges_fields = _charges_fields(step2)
+    charges_fields = _charges_fields(step2, step2.works)
     # Legacy keys retained for tests and compatibility.
     header_parts = [part for part in (step1.engineer_name, step1.quote_number, step1.job_number) if part]
 

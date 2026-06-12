@@ -13,6 +13,11 @@ export type DashboardWorkItem = {
   display_label?: string | null;
   labour_subtotal?: number | string | null;
   materials_subtotal?: number | string | null;
+  parking_subtotal?: number | string | null;
+  cc_subtotal?: number | string | null;
+  cc_chargeable_days?: number | null;
+  duration_days?: number | string | null;
+  duration_hours?: number | string | null;
   internal_notes?: string | null;
   attachments: AttachmentMeta[];
   details?: WorkBlockSnapshot | null;

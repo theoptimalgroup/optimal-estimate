@@ -13,6 +13,10 @@ import {
   eworksInputClass,
 } from "@/components/eworks-ui";
 import type { QuestionnaireFormValues } from "@/lib/eworks-calculate-schema";
+import {
+  formatDurationParts,
+  worksCombinedDuration,
+} from "@/lib/eworks-calculate-schema";
 import { useState, type InputHTMLAttributes } from "react";
 
 function NumericInput({
@@ -75,6 +79,8 @@ export function EworksAdditionalChargesForm({ control, register, setValue, error
   const [capturingGps, setCapturingGps] = useState(false);
 
   const hasParkingGps = values.parking_latitude != null && values.parking_longitude != null;
+  const combinedDuration = worksCombinedDuration(values.works);
+  const showDurationSummary = values.parking_required || values.congestion_required;
 
   const captureParkingGps = () => {
     setGpsError(null);
@@ -122,6 +128,17 @@ export function EworksAdditionalChargesForm({ control, register, setValue, error
     >
       <h3 className="text-sm font-semibold text-slate-900">Additional Charges</h3>
 
+      {showDurationSummary && (
+        <p className="mt-3 text-xs text-slate-600" data-testid="parking-duration-helper">
+          Parking and CC duration are calculated from each work block. 1 day = 8 hours.
+        </p>
+      )}
+      {showDurationSummary && (
+        <p className="mt-2 text-sm text-slate-700" data-testid="combined-duration-summary">
+          Combined duration: {formatDurationParts(combinedDuration.days, combinedDuration.hours)}
+        </p>
+      )}
+
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <Controller
           name="parking_required"
@@ -143,48 +160,33 @@ export function EworksAdditionalChargesForm({ control, register, setValue, error
             <EworksLabel>
               Parking type
               <select className={eworksInputClass()} {...register("parking_type")}>
-                <option value="fixed">Fixed</option>
-                <option value="hourly">Hourly</option>
+                <option value="fixed">Per Day</option>
+                <option value="hourly">Per Hour</option>
               </select>
             </EworksLabel>
             {values.parking_type === "hourly" ? (
-              <>
-                <EworksLabel>
-                  Rate per hour (£)
-                  <Controller
-                    name="parking_rate_per_hour"
-                    control={control}
-                    render={({ field, fieldState }) => (
-                      <>
-                        <NumericInput field={field} hasError={!!fieldState.error} />
-                        <EworksFieldError message={fieldState.error?.message} />
-                      </>
-                    )}
-                  />
-                </EworksLabel>
-                <EworksLabel>
-                  Hours
-                  <Controller
-                    name="parking_hours"
-                    control={control}
-                    render={({ field, fieldState }) => (
-                      <>
-                        <NumericInput field={field} hasError={!!fieldState.error} />
-                        <EworksFieldError message={fieldState.error?.message} />
-                      </>
-                    )}
-                  />
-                </EworksLabel>
-              </>
+              <EworksLabel>
+                Rate per hour (£)
+                <Controller
+                  name="parking_rate_per_hour"
+                  control={control}
+                  render={({ field, fieldState }) => (
+                    <>
+                      <NumericInput field={field} hasError={!!fieldState.error} data-testid="parking-rate-per-hour" />
+                      <EworksFieldError message={fieldState.error?.message} />
+                    </>
+                  )}
+                />
+              </EworksLabel>
             ) : (
               <EworksLabel>
-                Parking amount (£)
+                Rate per day (£)
                 <Controller
                   name="parking_fixed_amount"
                   control={control}
                   render={({ field, fieldState }) => (
                     <>
-                      <NumericInput field={field} hasError={!!fieldState.error} />
+                      <NumericInput field={field} hasError={!!fieldState.error} data-testid="parking-rate-per-day" />
                       <EworksFieldError message={fieldState.error?.message} />
                     </>
                   )}
@@ -218,6 +220,9 @@ export function EworksAdditionalChargesForm({ control, register, setValue, error
                 )}
               />
             </EworksLabel>
+            <p className="text-xs text-slate-600 sm:col-span-2" data-testid="parking-total-helper">
+              Parking total is calculated from each work block duration.
+            </p>
             <div className="space-y-3 sm:col-span-2" data-testid="quote-parking-gps">
               <p className="text-sm font-semibold text-slate-900">GPS snapshot</p>
               <div className="flex flex-wrap gap-2">
@@ -275,19 +280,24 @@ export function EworksAdditionalChargesForm({ control, register, setValue, error
           )}
         />
         {values.congestion_required && (
-          <EworksLabel data-testid="quote-congestion-amount">
-            Congestion amount (£)
-            <Controller
-              name="congestion_amount"
-              control={control}
-              render={({ field, fieldState }) => (
-                <>
-                  <NumericInput field={field} hasError={!!fieldState.error} />
-                  <EworksFieldError message={fieldState.error?.message} />
-                </>
-              )}
-            />
-          </EworksLabel>
+          <>
+            <EworksLabel data-testid="quote-congestion-amount">
+              CC charge per day (£)
+              <Controller
+                name="congestion_amount"
+                control={control}
+                render={({ field, fieldState }) => (
+                  <>
+                    <NumericInput field={field} hasError={!!fieldState.error} data-testid="cc-charge-amount" />
+                    <EworksFieldError message={fieldState.error?.message} />
+                  </>
+                )}
+              />
+            </EworksLabel>
+            <p className="text-xs text-slate-600 sm:col-span-2" data-testid="cc-total-helper">
+              Congestion Charge is fixed per day and is calculated from work duration. It is not prorated by hours.
+            </p>
+          </>
         )}
 
         <EworksLabel>

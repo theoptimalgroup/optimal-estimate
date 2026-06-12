@@ -25,7 +25,7 @@ import {
 } from "@/lib/attachment-context";
 import { cleanRichTextForTextarea } from "@/lib/html-text";
 import type { AttachmentMeta, MaterialSupplierFormValues, ProductOption, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
-import { defaultMaterialSuppliers, formatCurrency, formatSupplierDisplayName, grandTotalMaterials, computeProductTotalPrice, shelfMaterialLineTotal, shelfMaterialsTotal, supplierMaterialsSubtotal, supplierMaterialsTotal, workBlockHasProductContext } from "@/lib/eworks-calculate-schema";
+import { defaultMaterialSuppliers, formatCurrency, formatDurationParts, formatSupplierDisplayName, grandTotalMaterials, computeProductTotalPrice, calculateWorkCcTotal, calculateWorkParkingTotal, shelfMaterialLineTotal, shelfMaterialsTotal, supplierMaterialsSubtotal, supplierMaterialsTotal, workBlockHasProductContext, workCcChargeableDays, workDurationComponents } from "@/lib/eworks-calculate-schema";
 import { VoiceDictationButton } from "@/components/voice/VoiceDictationButton";
 import { getAttachmentUrl, rewordScope } from "@/lib/eworks-session";
 import { withRegisterChange } from "@/lib/form-register";
@@ -104,6 +104,16 @@ type Props = {
   onCancelCustomScopeDraft?: () => void;
   changingProduct: boolean;
   onChangeProductClick: () => void;
+  quoteCharges?: Pick<
+    QuestionnaireFormValues,
+    | "parking_required"
+    | "parking_type"
+    | "parking_fixed_amount"
+    | "parking_rate_per_hour"
+    | "parking_vehicles"
+    | "congestion_required"
+    | "congestion_amount"
+  >;
 };
 
 const WORK_TABS = ["Product", "Scope", "Materials", "Labour"] as const;
@@ -632,8 +642,18 @@ export function EworksWorkBlockForm({
   onCancelCustomScopeDraft,
   changingProduct,
   onChangeProductClick,
+  quoteCharges,
 }: Props) {
   const values = watch(`works.${workIndex}`);
+  const workDuration = workDurationComponents(values);
+  const workParkingTotal =
+    quoteCharges?.parking_required ? calculateWorkParkingTotal(values, quoteCharges) : 0;
+  const workCcTotal = quoteCharges?.congestion_required ? calculateWorkCcTotal(values, quoteCharges) : 0;
+  const workCcDays = quoteCharges?.congestion_required ? workCcChargeableDays(values) : 0;
+  const showWorkChargeSummary =
+    quoteCharges != null &&
+    (quoteCharges.parking_required || quoteCharges.congestion_required) &&
+    values.engineers_required;
   const workErrors = errors.works?.[workIndex];
   const suppliers = values.materials_to_order;
   const shelfRows = values.shelf_materials_rows;
@@ -1340,6 +1360,24 @@ export function EworksWorkBlockForm({
                     )}
                   />
                 </EworksLabel>
+              </div>
+            )}
+            {showWorkChargeSummary && (
+              <div
+                className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+                data-testid={`work-charge-summary-${workIndex}`}
+              >
+                <p data-testid={`work-duration-${workIndex}`}>
+                  Work duration: {formatDurationParts(workDuration.days, workDuration.hours)}
+                </p>
+                {quoteCharges?.parking_required ? (
+                  <p data-testid={`work-parking-total-${workIndex}`}>Parking: {formatCurrency(workParkingTotal)}</p>
+                ) : null}
+                {quoteCharges?.congestion_required ? (
+                  <p data-testid={`work-cc-total-${workIndex}`}>
+                    CC: {formatCurrency(workCcTotal)} ({workCcDays} chargeable day{workCcDays === 1 ? "" : "s"})
+                  </p>
+                ) : null}
               </div>
             )}
           </div>

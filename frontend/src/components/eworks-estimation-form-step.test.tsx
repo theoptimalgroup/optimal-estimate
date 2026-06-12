@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { useForm } from "react-hook-form";
 
 import { EworksEstimationFormStep } from "@/components/eworks-estimation-form-step";
-import { defaultQuestionnaireValues, type QuestionnaireFormValues } from "@/lib/eworks-calculate-schema";
+import { defaultQuestionnaireValues, defaultWorkBlockValues, type QuestionnaireFormValues } from "@/lib/eworks-calculate-schema";
 import type { FromLinkResponse } from "@/lib/eworks-session";
 
 const baseStep1: FromLinkResponse["step1"] = {
@@ -146,19 +146,36 @@ describe("EworksEstimationFormStep", () => {
     expect(text).not.toContain("Waste disposal charge");
   });
 
-  it("shows quote-level parking vehicle count and GPS snapshot fields", () => {
+  it("does not show a parking total field in Additional Charges", () => {
     const doc = renderStep(baseStep1, baseResolved, {
       parking_required: true,
-      parking_type: "hourly",
-      parking_rate_per_hour: 10,
-      parking_hours: 2,
-      parking_vehicles: 2,
+      parking_type: "fixed",
+      parking_fixed_amount: 126,
+      works: [
+        {
+          ...defaultWorkBlockValues(baseStep1.trade_name),
+          engineers_required: true,
+          engineers_needed: 1,
+          engineer_time_unit: "hours",
+          engineer_time_value: 4,
+        },
+      ],
     });
 
-    expect(doc.querySelector('[data-testid="quote-parking-vehicles"]')).not.toBeNull();
-    expect(doc.querySelector('[data-testid="quote-parking-gps"]')).not.toBeNull();
-    expect(doc.body.textContent).toContain("Number of vehicles");
-    expect(doc.body.textContent).toContain("GPS snapshot");
-    expect(doc.querySelector('[data-testid="quote-parking-notes"]')).not.toBeNull();
+    expect(doc.querySelector('[data-testid="parking-total"]')).toBeNull();
+    expect(doc.querySelector('[data-testid="parking-total-helper"]')).not.toBeNull();
+  });
+
+  it("shows CC charge per day without a CC total field", () => {
+    const doc = renderStep(baseStep1, baseResolved, {
+      congestion_required: true,
+      congestion_amount: 28.8,
+    });
+    const text = doc.body.textContent ?? "";
+
+    expect(text).toContain("CC charge per day");
+    expect(text).toContain("Congestion Charge is fixed per day");
+    expect(doc.querySelector('[data-testid="cc-total"]')).toBeNull();
+    expect(doc.querySelector('[data-testid="cc-total-helper"]')).not.toBeNull();
   });
 });

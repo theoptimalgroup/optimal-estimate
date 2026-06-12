@@ -399,6 +399,23 @@ export function WorkSection({
             <p className="text-slate-600">
               Materials / Parking / CC: <span className="font-semibold text-slate-900">{money(work.materials_subtotal)}</span>
             </p>
+            <p className="text-slate-600" data-testid={`work-parking-total-${work.work_index}`}>
+              Parking: <span className="font-semibold text-slate-900">{money(work.parking_subtotal)}</span>
+            </p>
+            <p className="text-slate-600" data-testid={`work-cc-total-${work.work_index}`}>
+              CC: <span className="font-semibold text-slate-900">{money(work.cc_subtotal)}</span>
+              {work.cc_chargeable_days != null && work.cc_chargeable_days > 0 ? (
+                <span className="text-slate-600"> ({work.cc_chargeable_days} day{work.cc_chargeable_days === 1 ? "" : "s"})</span>
+              ) : null}
+            </p>
+            {(work.duration_days != null || work.duration_hours != null) && (
+              <p className="text-slate-600 md:col-span-2" data-testid={`work-duration-${work.work_index}`}>
+                Duration:{" "}
+                <span className="font-semibold text-slate-900">
+                  {work.duration_days ?? 0} days / {work.duration_hours ?? 0} hours
+                </span>
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">

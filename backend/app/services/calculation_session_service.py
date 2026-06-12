@@ -55,6 +55,11 @@ from app.services.calculation_aggregate_service import (
     build_skill_group_labour_inputs,
     group_works_by_skill,
 )
+from app.services.parking_charge_service import (
+    allocate_parking_cc_to_work_blocks,
+    build_work_internal_notes_context,
+    charge_input_for_allocation,
+)
 from app.services.calculation_service import preview_calculation
 from app.services.calculation_view_service import (
     build_client_view_from_session,
@@ -86,6 +91,7 @@ from app.services.calculation_session_revision_service import (
     list_session_version_history,
 )
 from app.services.quote_acceptance_helpers import staff_acceptance_from_session
+from app.services.work_quote_review_fallback_service import resolve_work_quote_review_display
 from app.engines.rules_engine import resolve_calculation_rule
 
 
@@ -602,6 +608,8 @@ def calculate_session(
     xlsx_formula_version = settings.xlsx_formula_version if rule and rule.formula_source == "xlsx" else None
 
     work_results: list[WorkBreakdownResult] = []
+    charge_allocations = allocate_parking_cc_to_work_blocks(step2_data, step2_data.works)
+    allocation_by_index = {item.work_index: item for item in charge_allocations}
     for index, block in enumerate(step2_data.works):
         work_trade = resolve_skill_trade(db, block.skill_required, fallback_trade_name=step1.trade_name)
         work_step2 = work_block_to_step2_snapshot(block, trade_name=step1.trade_name)
@@ -611,7 +619,12 @@ def calculate_session(
             trade_id=work_trade.id,
             include_charges=False,
         )
-        # Work breakdowns include labour and materials only; additional charges are quote-level.
+        allocation = allocation_by_index.get(index)
+        work_charges = (
+            charge_input_for_allocation(step2_data, allocation)
+            if allocation is not None
+            else ChargeInput()
+        )
         breakdown = preview_calculation(
             db,
             _eworks_preview_request(
@@ -621,8 +634,10 @@ def calculate_session(
                 trade_id=work_trade.id,
                 labour_items=labour,
                 material_items=materials,
-                charges=ChargeInput(),
-                internal_notes_context=build_internal_notes_context(step1, block),
+                charges=work_charges,
+                internal_notes_context=build_work_internal_notes_context(
+                    step1, block, step2_data, allocation
+                ),
             ),
         )
         work_results.append(
@@ -653,14 +668,20 @@ def calculate_session(
                 labour_items=labour,
                 material_items=materials,
                 charges=combined_charges,
-                internal_notes_context=build_combined_internal_notes_context(step1, step2_data.works),
+                internal_notes_context=build_combined_internal_notes_context(step1, step2_data.works, step2_data),
             ),
         )
         aggregated_summary_payload = (
             None
             if single_work
             else AggregatedQuoteSummary.model_validate(
-                aggregated_quote_summary(aggregated, len(step2_data.works), skills=work_skills)
+                aggregated_quote_summary(
+                    aggregated,
+                    len(step2_data.works),
+                    skills=work_skills,
+                    step2=step2_data,
+                    works=step2_data.works,
+                )
             )
         )
     else:
@@ -680,7 +701,13 @@ def calculate_session(
         )
         skill_group_results = []
         aggregated_summary_payload = AggregatedQuoteSummary.model_validate(
-            aggregated_quote_summary(aggregated, len(step2_data.works), skills=work_skills)
+            aggregated_quote_summary(
+                aggregated,
+                len(step2_data.works),
+                skills=work_skills,
+                step2=step2_data,
+                works=step2_data.works,
+            )
         )
 
     primary_step2 = work_block_to_step2_snapshot(step2_data.works[0], trade_name=step1.trade_name)
@@ -824,6 +851,11 @@ def _build_dashboard_work_item(
     labour_subtotal,
     materials_subtotal,
     work_internal_notes,
+    parking_subtotal=None,
+    cc_subtotal=None,
+    cc_chargeable_days=None,
+    duration_days=None,
+    duration_hours=None,
 ) -> DashboardWorkItem:
     product_name, product_code = _resolve_work_product_fields(db, block)
     return DashboardWorkItem(
@@ -841,6 +873,11 @@ def _build_dashboard_work_item(
         ),
         labour_subtotal=labour_subtotal,
         materials_subtotal=materials_subtotal,
+        parking_subtotal=parking_subtotal,
+        cc_subtotal=cc_subtotal,
+        cc_chargeable_days=cc_chargeable_days,
+        duration_days=duration_days,
+        duration_hours=duration_hours,
         internal_notes=work_internal_notes,
         attachments=block.attachments,
         details=block,
@@ -867,30 +904,25 @@ def _build_dashboard_quote_item_from_session(db: Session, session: CalculationSe
         summary_breakdown = _dashboard_quote_summary_breakdown(breakdown)
 
     works: list[DashboardWorkItem] = []
+    charge_allocations = allocate_parking_cc_to_work_blocks(step2, step2.works)
+    allocation_by_index = {item.work_index: item for item in charge_allocations}
     for index, block in enumerate(step2.works):
         work_result = breakdown_map.get(index, {})
         work_bd = work_result.get("breakdown") or {}
-
-        # For single-work quotes with XLSX formula, parking/CC are folded into the
-        # combined materials bucket.  The per-work breakdown intentionally omits
-        # quote-level charges (computed with an empty ChargeInput), so it reflects
-        # only raw materials.  Use the combined (quote-level) breakdown to ensure
-        # the work card subtotal matches the Quote Summary.
-        if len(step2.works) == 1 and last_result:
-            combined_bd = last_result.get("breakdown") or {}
-            labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(combined_bd)
-            if labour_subtotal is None and materials_subtotal is None:
-                labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_bd)
-        else:
-            labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_bd)
-
-        # For single-work quotes, the combined internal notes already include
-        # quote-level parking/CC in the BUDGET line.  The per-work notes are built
-        # without charges, so they would show Parking: £0.  Always prefer the
-        # combined notes for single-work quotes so every display path is consistent.
-        work_internal_notes = work_result.get("internal_notes")
-        if len(step2.works) == 1:
-            work_internal_notes = internal_notes or work_internal_notes
+        labour_subtotal, materials_subtotal = _work_subtotals_from_breakdown(work_bd)
+        allocation = allocation_by_index.get(index)
+        work_internal_notes, labour_subtotal, materials_subtotal = resolve_work_quote_review_display(
+            db,
+            session,
+            step1,
+            step2,
+            block,
+            work_index=index,
+            work_result=work_result,
+            allocation=allocation,
+            labour_subtotal=labour_subtotal,
+            materials_subtotal=materials_subtotal,
+        )
         works.append(
             _build_dashboard_work_item(
                 db,
@@ -899,6 +931,11 @@ def _build_dashboard_quote_item_from_session(db: Session, session: CalculationSe
                 labour_subtotal=labour_subtotal,
                 materials_subtotal=materials_subtotal,
                 work_internal_notes=work_internal_notes,
+                parking_subtotal=allocation.parking_total if allocation else None,
+                cc_subtotal=allocation.cc_total if allocation else None,
+                cc_chargeable_days=allocation.cc_chargeable_days if allocation else None,
+                duration_days=allocation.duration_days if allocation else None,
+                duration_hours=allocation.duration_hours if allocation else None,
             )
         )
 
@@ -912,7 +949,7 @@ def _build_dashboard_quote_item_from_session(db: Session, session: CalculationSe
         submitted_at=session.submitted_at,
         final_total=final_total,
         internal_notes=internal_notes,
-        additional_charges=quote_additional_charge_lines(step2),
+        additional_charges=quote_additional_charge_lines(step2, step2.works),
         breakdown=summary_breakdown,
         works=works,
         acceptance=staff_acceptance_from_session(session),
@@ -1623,12 +1660,16 @@ def _preview_internal_notes_for_works(
     *,
     session: CalculationSession,
     step1: Step1Snapshot,
+    step2: Step2Snapshot,
     blocks: list[WorkBlockSnapshot],
     skill: str,
 ) -> str:
     trade = resolve_skill_trade(db, skill, fallback_trade_name=step1.trade_name)
     if len(blocks) == 1:
         block = blocks[0]
+        work_index = step2.works.index(block)
+        allocation_items = allocate_parking_cc_to_work_blocks(step2, step2.works)
+        allocation = next((item for item in allocation_items if item.work_index == work_index), None)
         work_step2 = work_block_to_step2_snapshot(block, trade_name=step1.trade_name)
         labour, materials, _ = step2_to_calculation_inputs(
             step1,
@@ -1636,7 +1677,7 @@ def _preview_internal_notes_for_works(
             trade_id=trade.id,
             include_charges=False,
         )
-        work_charges = ChargeInput()
+        work_charges = charge_input_for_allocation(step2, allocation) if allocation else ChargeInput()
         breakdown = preview_calculation(
             db,
             _eworks_preview_request(
@@ -1647,14 +1688,14 @@ def _preview_internal_notes_for_works(
                 labour_items=labour,
                 material_items=materials,
                 charges=work_charges,
-                internal_notes_context=build_internal_notes_context(step1, block),
+                internal_notes_context=build_work_internal_notes_context(step1, block, step2, allocation),
             ),
         )
         return breakdown.internal_notes or ""
 
     labour, materials, combined_charges, _ = build_combined_calculation_inputs(
         step1,
-        Step2Snapshot(works=blocks),
+        step2.model_copy(update={"works": blocks}),
         trade_id=trade.id,
     )
     breakdown = preview_calculation(
@@ -1667,7 +1708,7 @@ def _preview_internal_notes_for_works(
             labour_items=labour,
             material_items=materials,
             charges=combined_charges,
-            internal_notes_context=build_combined_internal_notes_context(step1, blocks),
+            internal_notes_context=build_combined_internal_notes_context(step1, blocks, step2),
         ),
     )
     return breakdown.internal_notes or ""
@@ -1719,6 +1760,7 @@ def combine_selected_work_internal_notes(
             db,
             session=session,
             step1=step1,
+            step2=step2,
             blocks=blocks,
             skill=skill,
         )

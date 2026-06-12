@@ -146,23 +146,27 @@ def calculate_charges(charges: ChargeInput | None) -> ChargeResult:
     breakdown: list[tuple[str, str, Decimal]] = []
     parking_total = Decimal("0")
     if charges.parking_required:
-        # Parking cost multiplies by vehicle count (same rule as work_parking_raw / quote_parking_raw).
-        vehicles = Decimal(max(1, charges.parking_vehicles or 1))
-        if charges.parking_type == "hourly":
-            rate = charges.parking_rate_per_hour or Decimal("0")
-            hours = charges.parking_hours or Decimal("0")
-            parking_total = round_money(rate * hours * vehicles)
-            vehicle_note = f" × {int(vehicles)} vehicles" if vehicles > 1 else ""
-            breakdown.append(("Parking", f"{rate} × {hours}{vehicle_note}", parking_total))
-        elif charges.parking_type == "fixed":
-            base = charges.parking_fixed_amount or Decimal("0")
-            parking_total = round_money(base * vehicles)
-            vehicle_note = f" × {int(vehicles)} vehicles" if vehicles > 1 else ""
-            breakdown.append(("Parking", f"Fixed {base}{vehicle_note}", parking_total))
+        from app.services.parking_charge_service import calculate_parking_charge, format_parking_type_label
+
+        vehicles = max(1, charges.parking_vehicles or 1)
+        if charges.parking_amount_override is not None:
+            parking_total = round_money(charges.parking_amount_override)
+            breakdown.append(("Parking", f"{format_parking_type_label(charges.parking_type)} allocated", parking_total))
         elif charges.parking_type == "included":
             breakdown.append(("Parking", "Included", Decimal("0")))
         elif charges.parking_type == "not_chargeable":
             breakdown.append(("Parking", "Not chargeable", Decimal("0")))
+        else:
+            parking_total = calculate_parking_charge(
+                charges.parking_type,
+                rate_per_day=charges.parking_fixed_amount or Decimal("0"),
+                rate_per_hour=charges.parking_rate_per_hour or Decimal("0"),
+                days=charges.parking_duration_days,
+                hours=charges.parking_duration_hours or charges.parking_hours or Decimal("0"),
+                vehicles=vehicles,
+            )
+            label = format_parking_type_label(charges.parking_type)
+            breakdown.append(("Parking", label, parking_total))
 
     congestion_total = round_money(charges.congestion_amount) if charges.congestion_required else Decimal("0")
     if charges.congestion_required:

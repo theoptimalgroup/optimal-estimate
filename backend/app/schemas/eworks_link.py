@@ -449,6 +449,11 @@ class AggregatedQuoteSummary(BaseModel):
     mixed_skills: bool = False
     skills: list[str] = Field(default_factory=list)
     subtitle: str
+    combined_duration_days: Decimal | None = None
+    combined_duration_hours: Decimal | None = None
+    combined_parking_total: Decimal | None = None
+    combined_cc_total: Decimal | None = None
+    combined_cc_days: int | None = None
 
 
 class CalculateSessionResponse(BaseModel):
@@ -483,29 +488,52 @@ class DashboardWorkItem(BaseModel):
     display_label: str | None = None
     labour_subtotal: Decimal | None = None
     materials_subtotal: Decimal | None = None
+    parking_subtotal: Decimal | None = None
+    cc_subtotal: Decimal | None = None
+    cc_chargeable_days: int | None = None
+    duration_days: Decimal | None = None
+    duration_hours: Decimal | None = None
     internal_notes: str | None = None
     attachments: list[SessionAttachmentMeta] = Field(default_factory=list)
     details: WorkBlockSnapshot | None = None
 
 
-def quote_additional_charge_lines(step2: Step2Snapshot) -> list[str]:
-    """Format quote-level additional charges for review surfaces. Work-level charges are ignored."""
+def quote_additional_charge_lines(step2: Step2Snapshot, works: list[WorkBlockSnapshot] | None = None) -> list[str]:
+    """Format quote-level additional charges for review surfaces."""
+    from app.services.parking_charge_service import (
+        calculate_cc_total,
+        decompose_duration_hours,
+        format_combined_cc_review_lines,
+        format_parking_summary,
+        format_parking_type_label,
+        works_combined_duration_hours,
+    )
+
     lines: list[str] = []
+    work_blocks = works or step2.works
+    combined_hours = works_combined_duration_hours(work_blocks) if work_blocks else Decimal("0")
+    duration_days, duration_hours = decompose_duration_hours(combined_hours)
+    if duration_days > 0 or duration_hours > 0:
+        lines.append(f"Combined duration: {duration_days.normalize()} days, {duration_hours.normalize()} hours")
     if step2.parking_required:
-        vehicles = max(1, step2.parking_vehicles or 1)
-        vehicle_suffix = f" × {vehicles} vehicles" if vehicles > 1 else ""
-        if (step2.parking_type or "fixed").strip().lower() == "hourly":
-            lines.append(
-                f"Parking: £{step2.parking_rate_per_hour or 0}/hr × {step2.parking_hours or 0} hrs{vehicle_suffix}"
-            )
+        parking_total = quote_parking_raw(step2, work_blocks)
+        summary = format_parking_summary(
+            step2,
+            days=duration_days,
+            hours=duration_hours,
+            parking_total=parking_total,
+        )
+        if summary:
+            lines.append(summary)
         else:
-            lines.append(f"Parking: £{step2.parking_fixed_amount or 0}{vehicle_suffix}")
+            label = format_parking_type_label(step2.parking_type)
+            lines.append(f"Parking ({label}): £{parking_total}")
         if step2.parking_latitude is not None and step2.parking_longitude is not None:
             lines.append(
                 f"GPS snapshot: https://www.google.com/maps?q={step2.parking_latitude},{step2.parking_longitude}"
             )
     if step2.congestion_required and step2.congestion_amount > 0:
-        lines.append(f"Congestion: £{step2.congestion_amount}")
+        lines.extend(format_combined_cc_review_lines(step2, work_blocks))
     if step2.travel_charge > 0:
         lines.append(f"Travel: £{step2.travel_charge}")
     if step2.other_charge > 0:
@@ -625,28 +653,45 @@ def step2_to_calculation_inputs(
     return [labour], materials, charges
 
 
-def quote_parking_raw(step2: Step2Snapshot) -> Decimal:
-    """Raw quote-level parking cost, including vehicle multiplier (same rule as work_parking_raw)."""
+def quote_parking_raw(step2: Step2Snapshot, works: list[WorkBlockSnapshot] | None = None) -> Decimal:
+    """Raw quote-level parking cost from grouped work durations (1 day = 8 hours)."""
     if not step2.parking_required:
         return Decimal("0")
-    vehicles = max(1, step2.parking_vehicles or 1)
-    if step2.parking_type == "hourly" and step2.parking_rate_per_hour and step2.parking_hours:
-        return step2.parking_rate_per_hour * step2.parking_hours * Decimal(vehicles)
-    if step2.parking_fixed_amount:
-        return step2.parking_fixed_amount * Decimal(vehicles)
-    return Decimal("0")
+    from app.services.parking_charge_service import calculate_parking_total
+
+    work_blocks = works or step2.works
+    if not work_blocks:
+        combined_hours = step2.parking_hours or Decimal("0")
+        if combined_hours <= 0:
+            return Decimal("0")
+        from app.services.parking_charge_service import calculate_parking_charge
+
+        return calculate_parking_charge(
+            step2.parking_type,
+            rate_per_day=step2.parking_fixed_amount or Decimal("0"),
+            rate_per_hour=step2.parking_rate_per_hour or Decimal("0"),
+            days=Decimal("0"),
+            hours=combined_hours,
+            vehicles=step2.parking_vehicles or 1,
+        )
+    return calculate_parking_total(step2, work_blocks)
 
 
-def work_parking_raw(block: WorkBlockSnapshot) -> Decimal:
-    """Raw parking cost for one work block, including vehicle multiplier."""
-    if not block.parking_required:
+def work_parking_raw(block: WorkBlockSnapshot, *, step2: Step2Snapshot | None = None) -> Decimal:
+    """Raw parking for one work block using quote parking settings and work duration."""
+    if step2 is None or not step2.parking_required:
         return Decimal("0")
-    vehicles = max(1, block.parking_vehicles or 1)
-    if block.parking_type == "hourly" and block.parking_rate_per_hour and block.parking_hours:
-        return block.parking_rate_per_hour * block.parking_hours * Decimal(vehicles)
-    if block.parking_fixed_amount:
-        return block.parking_fixed_amount * Decimal(vehicles)
-    return Decimal("0")
+    from app.services.parking_charge_service import calculate_parking_charge, work_duration_components
+
+    days, hours = work_duration_components(block)
+    return calculate_parking_charge(
+        step2.parking_type,
+        rate_per_day=step2.parking_fixed_amount or Decimal("0"),
+        rate_per_hour=step2.parking_rate_per_hour or Decimal("0"),
+        days=days,
+        hours=hours,
+        vehicles=step2.parking_vehicles or 1,
+    )
 
 
 def aggregate_work_charges(
@@ -655,29 +700,20 @@ def aggregate_work_charges(
     *,
     step2: Step2Snapshot | None = None,
 ) -> ChargeInput:
-    """Return quote-level additional charges from the Step2 snapshot.
+    """Return quote-level additional charges from the Step2 snapshot and work durations."""
+    from app.services.parking_charge_service import charge_input_for_combined
 
-    Additional charges are quote-level only. Work-level charges are intentionally not supported.
-    Legacy work-level charge fields on WorkBlockSnapshot entries are ignored.
-    ULEZ and waste disposal fields on Step2Snapshot are ignored (hidden from UI).
-    """
-    _ = works  # retained for call-site compatibility; work blocks no longer contribute charges
     snapshot = step2 or Step2Snapshot()
     congestion_required = snapshot.congestion_required or step1.congestion_required
     congestion_amount = snapshot.congestion_amount if snapshot.congestion_amount > 0 else step1.congestion_amount
     travel = snapshot.travel_charge if snapshot.travel_charge > 0 else step1.travel
-    return ChargeInput(
-        parking_required=snapshot.parking_required,
-        parking_type=snapshot.parking_type if snapshot.parking_required else None,
-        parking_rate_per_hour=snapshot.parking_rate_per_hour,
-        parking_hours=snapshot.parking_hours,
-        parking_fixed_amount=snapshot.parking_fixed_amount,
-        parking_vehicles=max(1, snapshot.parking_vehicles or 1),
-        congestion_required=congestion_required,
-        congestion_amount=congestion_amount,
-        travel_charge=travel,
-        other_charge=snapshot.other_charge,
-        other_charge_reason=snapshot.other_charge_reason,
+    combined = charge_input_for_combined(snapshot, works)
+    return combined.model_copy(
+        update={
+            "congestion_required": congestion_required,
+            "congestion_amount": congestion_amount,
+            "travel_charge": travel,
+        }
     )
 
 
