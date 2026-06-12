@@ -20,8 +20,10 @@ from app.models.calculation_session import CalculationSession
 from app.models.calculation_session_version import CalculationSessionVersion
 from app.models.client import Client
 from app.models.client_alias import ClientAlias
-from app.models.eworks_sync import EworksQuote
+from app.models.eworks_sync import EworksJob, EworksJobAppointment, EworksQuote, EworksQuoteAppointment
 from app.models.quote_assignment import EworksQuoteAssignment
+from app.models.quote_work_attachment import QuoteWorkAttachment
+from app.models.quote_work_snapshot import QuoteWorkSnapshot
 from app.models.rate_rule import RateRule
 from app.models.support import AuditLog
 from app.models.trade import Trade
@@ -46,6 +48,11 @@ def db_session():
         CalculationSessionVersion.__table__,
         EworksQuote.__table__,
         EworksQuoteAssignment.__table__,
+        EworksJob.__table__,
+        EworksJobAppointment.__table__,
+        EworksQuoteAppointment.__table__,
+        QuoteWorkSnapshot.__table__,
+        QuoteWorkAttachment.__table__,
     ]:
         table.create(engine)
 
@@ -227,7 +234,13 @@ def _submit_assignment_estimate(api_client, assignment_id: int, *, role: str) ->
     return session_id, token
 
 
-def _add_quote(session, *, quote_id: int = 9001, quote_ref: str = "Q-9001") -> EworksQuote:
+def _add_quote(
+    session,
+    *,
+    quote_id: int = 9001,
+    quote_ref: str = "Q-9001",
+    for_engineer: bool = False,
+) -> EworksQuote:
     quote = EworksQuote(
         eworks_quote_id=quote_id,
         quote_ref=quote_ref,
@@ -235,6 +248,8 @@ def _add_quote(session, *, quote_id: int = 9001, quote_ref: str = "Q-9001") -> E
         description="Rewire",
         quote_date="2026-01-01",
         expiry_date="2026-04-01",
+        status="1" if for_engineer else None,
+        tags="Booked" if for_engineer else None,
         raw_payload={"site_address": "10 High Street", "secret_token": "hidden"},
     )
     session.add(quote)
@@ -251,17 +266,41 @@ def test_manager_can_list_assignees(mock_settings, api_client, db_session):
     emails = {item["email"] for item in resp.json()["data"]}
     assert "estimator@optimal.example" in emails
     assert "engineer@optimal.example" in emails
-    assert "manager@optimal.example" not in emails
+    assert "manager@optimal.example" in emails
     assert "client@optimal.example" not in emails
 
 
 @patch("app.auth.dependencies.settings")
-def test_assignees_endpoint_returns_estimator_engineer_only(mock_settings, api_client):
+def test_assignees_endpoint_returns_estimator_engineer_manager(mock_settings, api_client):
     _patch_dev_user(mock_settings, role="manager")
     resp = api_client.get("/api/v1/quote-assignments/assignees")
     roles = {item["role"] for item in resp.json()["data"]}
-    assert roles <= {"estimator", "engineer"}
+    assert roles <= {"estimator", "engineer", "manager"}
     assert "password_hash" not in resp.text
+
+
+@patch("app.auth.dependencies.settings")
+def test_assignees_filtered_by_engineer_type(mock_settings, api_client):
+    _patch_dev_user(mock_settings, role="manager")
+    resp = api_client.get("/api/v1/quote-assignments/assignees", params={"assignment_type": "engineer"})
+    assert resp.status_code == 200
+    roles = {item["role"] for item in resp.json()["data"]}
+    assert roles <= {"engineer", "manager"}
+    assert "estimator" not in roles
+    emails = {item["email"] for item in resp.json()["data"]}
+    assert "manager@optimal.example" in emails
+    assert "engineer@optimal.example" in emails
+
+
+@patch("app.auth.dependencies.settings")
+def test_assignees_filtered_by_estimator_type(mock_settings, api_client):
+    _patch_dev_user(mock_settings, role="manager")
+    resp = api_client.get("/api/v1/quote-assignments/assignees", params={"assignment_type": "estimator"})
+    assert resp.status_code == 200
+    roles = {item["role"] for item in resp.json()["data"]}
+    assert roles <= {"estimator"}
+    assert "manager" not in roles
+    assert "engineer" not in roles
 
 
 @patch("app.auth.dependencies.settings")
@@ -426,7 +465,7 @@ def test_estimator_sees_own_assignments(mock_settings, api_client, db_session):
 
 @patch("app.auth.dependencies.settings")
 def test_engineer_sees_own_assignments(mock_settings, api_client, db_session):
-    quote = _add_quote(db_session, quote_id=9008, quote_ref="Q-9008")
+    quote = _add_quote(db_session, quote_id=9008, quote_ref="Q-9008", for_engineer=True)
     engineer = db_session.users["engineer"]  # type: ignore[attr-defined]
 
     _patch_dev_user(mock_settings, role="manager")
@@ -663,7 +702,7 @@ def test_engineer_cannot_start_estimator_assignment(mock_settings, api_client, d
 
 
 @patch("app.auth.dependencies.settings")
-def test_manager_and_client_blocked_from_start_estimate(mock_settings, api_client, db_session):
+def test_manager_blocked_from_start_estimator_assignment(mock_settings, api_client, db_session):
     quote = _add_quote(db_session, quote_id=9205, quote_ref="Q-9205")
     estimator = db_session.users["estimator"]  # type: ignore[attr-defined]
 
@@ -949,7 +988,7 @@ def test_public_start_audit_created_without_tokens(mock_settings, api_client, db
 @patch("app.auth.dependencies.settings")
 def test_engineer_submit_updates_assignment_status(mock_settings, api_client, db_session):
     _add_trade_default_rate_rule(db_session)
-    quote = _add_quote(db_session, quote_id=9401, quote_ref="Q22122")
+    quote = _add_quote(db_session, quote_id=9401, quote_ref="Q22122", for_engineer=True)
     engineer = db_session.users["engineer"]  # type: ignore[attr-defined]
 
     _patch_dev_user(mock_settings, role="manager")
@@ -1002,6 +1041,144 @@ def test_estimator_submit_updates_assignment_status(mock_settings, api_client, d
 
     _patch_dev_user(mock_settings, role="estimator")
     _submit_assignment_estimate(api_client, assignment_id, role="estimator")
+    db_session.expire_all()
+
+    row = db_session.get(EworksQuoteAssignment, assignment_id)
+    assert row is not None
+    assert row.status == "submitted"
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_can_be_assigned_as_engineer(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    quote = _add_quote(db_session, quote_id=9501, quote_ref="Q-9501")
+    manager = db_session.users["manager"]  # type: ignore[attr-defined]
+
+    resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(manager.id),
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["assignment_type"] == "engineer"
+    assert resp.json()["data"]["assigned_user_email"] == manager.email
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_cannot_be_assigned_as_estimator(mock_settings, api_client, db_session):
+    _patch_dev_user(mock_settings, role="manager")
+    quote = _add_quote(db_session, quote_id=9502, quote_ref="Q-9502")
+    manager = db_session.users["manager"]  # type: ignore[attr-defined]
+
+    resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "estimator",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(manager.id),
+        },
+    )
+    assert resp.status_code == 400
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_sees_own_engineer_assignments(mock_settings, api_client, db_session):
+    quote = _add_quote(db_session, quote_id=9503, quote_ref="Q-9503", for_engineer=True)
+    manager = db_session.users["manager"]  # type: ignore[attr-defined]
+    engineer = db_session.users["engineer"]  # type: ignore[attr-defined]
+
+    _patch_dev_user(mock_settings, role="manager")
+    api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(manager.id),
+        },
+    )
+    other_quote = _add_quote(db_session, quote_id=9504, quote_ref="Q-9504", for_engineer=True)
+    api_client.post(
+        f"/api/v1/eworks-sync/quotes/{other_quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(engineer.id),
+        },
+    )
+
+    resp = api_client.get("/api/v1/quote-assignments/my")
+    assert resp.status_code == 200
+    items = resp.json()["data"]
+    assert len(items) == 1
+    assert items[0]["quote_ref"] == "Q-9503"
+    assert items[0]["assignment_type"] == "engineer"
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_can_start_assigned_engineer_estimate(mock_settings, api_client, db_session):
+    _add_trade_default_rate_rule(db_session)
+    quote = _add_quote(db_session, quote_id=9505, quote_ref="Q-9505")
+    manager = db_session.users["manager"]  # type: ignore[attr-defined]
+
+    _patch_dev_user(mock_settings, role="manager")
+    create_resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(manager.id),
+        },
+    )
+    assignment_id = create_resp.json()["data"]["id"]
+
+    start_resp = api_client.post(f"/api/v1/quote-assignments/{assignment_id}/start-estimate")
+    assert start_resp.status_code == 200
+    assert start_resp.json()["data"]["session_id"]
+    assert start_resp.json()["data"]["session_token"]
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_cannot_start_other_engineers_assignment(mock_settings, api_client, db_session):
+    _add_trade_default_rate_rule(db_session)
+    quote = _add_quote(db_session, quote_id=9506, quote_ref="Q-9506")
+    engineer = db_session.users["engineer"]  # type: ignore[attr-defined]
+
+    _patch_dev_user(mock_settings, role="manager")
+    create_resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(engineer.id),
+        },
+    )
+    assignment_id = create_resp.json()["data"]["id"]
+
+    start_resp = api_client.post(f"/api/v1/quote-assignments/{assignment_id}/start-estimate")
+    assert start_resp.status_code == 403
+
+
+@patch("app.auth.dependencies.settings")
+def test_manager_submit_updates_engineer_assignment_status(mock_settings, api_client, db_session):
+    _add_trade_default_rate_rule(db_session)
+    quote = _add_quote(db_session, quote_id=9507, quote_ref="Q-9507")
+    manager = db_session.users["manager"]  # type: ignore[attr-defined]
+
+    _patch_dev_user(mock_settings, role="manager")
+    create_resp = api_client.post(
+        f"/api/v1/eworks-sync/quotes/{quote.id}/assignments",
+        json={
+            "assignment_type": "engineer",
+            "assignee_kind": "registered",
+            "assigned_user_id": str(manager.id),
+        },
+    )
+    assignment_id = create_resp.json()["data"]["id"]
+
+    _submit_assignment_estimate(api_client, assignment_id, role="manager")
     db_session.expire_all()
 
     row = db_session.get(EworksQuoteAssignment, assignment_id)

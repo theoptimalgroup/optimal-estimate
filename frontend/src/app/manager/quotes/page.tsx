@@ -27,7 +27,6 @@ import {
   getSafeJobDetail,
   getSafeQuoteDetail,
   listJobAttachments,
-  listQuoteAttachments,
   formatEworksSyncError,
   listSyncedJobs,
   listSyncedQuotes,
@@ -199,8 +198,6 @@ export default function ManagerQuotesPage() {
   const [quoteDetail, setQuoteDetail] = useState<EworksQuoteSafeDetail | null>(null);
   const [quoteDetailLoading, setQuoteDetailLoading] = useState(false);
   const [quoteDetailError, setQuoteDetailError] = useState<string | null>(null);
-  const [quoteAttachments, setQuoteAttachments] = useState<EworksAttachmentSafe[]>([]);
-  const [quoteAttachmentsLoading, setQuoteAttachmentsLoading] = useState(false);
 
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [jobDetail, setJobDetail] = useState<EworksJobSafeDetail | null>(null);
@@ -288,22 +285,15 @@ export default function ManagerQuotesPage() {
   const openQuoteDetail = useCallback(async (id: number) => {
     setSelectedQuoteId(id);
     setQuoteDetail(null);
-    setQuoteAttachments([]);
     setQuoteDetailError(null);
     setQuoteDetailLoading(true);
-    setQuoteAttachmentsLoading(true);
     try {
-      const [detail, attachments] = await Promise.all([
-        getSafeQuoteDetail(id),
-        listQuoteAttachments(id),
-      ]);
+      const detail = await getSafeQuoteDetail(id);
       setQuoteDetail(detail);
-      setQuoteAttachments(attachments);
     } catch (e: unknown) {
       setQuoteDetailError(e instanceof Error ? e.message : "Failed to load quote details");
     } finally {
       setQuoteDetailLoading(false);
-      setQuoteAttachmentsLoading(false);
     }
   }, []);
 
@@ -504,14 +494,11 @@ export default function ManagerQuotesPage() {
         <QuoteDetailModal
           detail={quoteDetail}
           quoteId={selectedQuoteId}
-          attachments={quoteAttachments}
-          attachmentsLoading={quoteAttachmentsLoading}
           loading={quoteDetailLoading}
           error={quoteDetailError}
           onClose={() => {
             setSelectedQuoteId(null);
             setQuoteDetail(null);
-            setQuoteAttachments([]);
             setQuoteDetailError(null);
           }}
         />

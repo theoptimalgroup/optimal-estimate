@@ -275,7 +275,12 @@ def revise_estimate(
     session=Depends(_require_session_token),
     actor: OptionalStaffUser = None,
 ):
-    if actor is not None and actor.role not in {UserRole.ADMIN, UserRole.ESTIMATOR, UserRole.ENGINEER}:
+    if actor is not None and actor.role not in {
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.ESTIMATOR,
+        UserRole.ENGINEER,
+    }:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     try:
         owner_user_id = UUID(str(actor.id)) if actor is not None else None

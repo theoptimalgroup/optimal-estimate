@@ -112,7 +112,11 @@ export function QuoteAssignmentSection({
     [initialAssignments, manualAssignments],
   );
 
-  const filteredAssignees = assignees.filter((user) => user.role === assignmentType);
+  const filteredAssignees = assignees.filter((user) =>
+    assignmentType === "engineer"
+      ? user.role === "engineer" || user.role === "manager"
+      : user.role === "estimator",
+  );
 
   const activeAssignments = assignments.filter((item) => isActiveAssignment(item.status));
   const cancelledAssignments = assignments.filter((item) => !isActiveAssignment(item.status));

@@ -18,7 +18,7 @@ router = APIRouter(prefix="/engineer", tags=["engineer"])
 @router.get("/jobs/assigned")
 def list_engineer_assigned_jobs(
     db: DbSession,
-    _user: AuthenticatedUser = Depends(require_roles(UserRole.ENGINEER)),
+    _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)),
 ):
     items = list_assigned_jobs_for_engineer(db, _user)
     return success_response(
@@ -39,7 +39,7 @@ def _require_session_token(
 def read_engineer_session(
     session_id: UUID,
     db: DbSession,
-    _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.ENGINEER)),
+    _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)),
     session_token: str = Depends(_require_session_token),
 ):
     try:
@@ -54,7 +54,7 @@ def save_engineer_site_visit(
     session_id: UUID,
     payload: EngineerSiteVisitUpdate,
     db: DbSession,
-    _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.ENGINEER)),
+    _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)),
     session_token: str = Depends(_require_session_token),
 ):
     try:

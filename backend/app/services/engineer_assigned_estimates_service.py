@@ -196,7 +196,7 @@ def _list_appointment_estimate_assignments(db: Session, user: AuthenticatedUser)
 
 
 def list_assigned_estimates_for_engineer(db: Session, user: AuthenticatedUser) -> list[dict[str, Any]]:
-    if user.role != UserRole.ENGINEER:
+    if user.role not in {UserRole.ENGINEER, UserRole.MANAGER}:
         return []
     manual_items = _list_manual_engineer_assignments(db, user)
     appointment_items = _list_appointment_estimate_assignments(db, user)

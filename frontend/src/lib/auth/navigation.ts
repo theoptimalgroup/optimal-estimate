@@ -31,6 +31,13 @@ const ESTIMATOR_NAV: NavItem[] = [
   { label: "Approvals", href: "/estimator/approvals" },
 ];
 
+export const ENGINEER_NAV: NavItem[] = [
+  { label: "Assigned Estimates", href: "/engineer/assigned-estimates" },
+  { label: "Assigned Jobs", href: "/engineer/assigned-jobs" },
+  { label: "Submitted Estimates", href: "/engineer/submitted-estimates" },
+  { label: "Submitted Jobs", href: "/engineer/submitted-jobs" },
+];
+
 const MANAGER_NAV: NavItem[] = [
   { label: "Dashboard", href: "/manager/dashboard" },
   { label: "Sales Pipeline", href: "/manager/processed-dashboard" },
@@ -39,13 +46,7 @@ const MANAGER_NAV: NavItem[] = [
   { label: "Quote Review", href: "/manager/review" },
   { label: "Reports", href: "/manager/reports" },
   { label: "Clients", href: "/manager/clients" },
-];
-
-const ENGINEER_NAV: NavItem[] = [
-  { label: "Assigned Estimates", href: "/engineer/assigned-estimates" },
-  { label: "Assigned Jobs", href: "/engineer/assigned-jobs" },
-  { label: "Submitted Estimates", href: "/engineer/submitted-estimates" },
-  { label: "Submitted Jobs", href: "/engineer/submitted-jobs" },
+  ...ENGINEER_NAV,
 ];
 
 export function getNavigationForRole(role: UserRole | null): NavItem[] {

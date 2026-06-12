@@ -355,8 +355,6 @@ function CustomFieldsSummarySection({
 export function QuoteDetailModal({
   detail,
   quoteId,
-  attachments,
-  attachmentsLoading,
   loading,
   error,
   onClose,
@@ -364,8 +362,6 @@ export function QuoteDetailModal({
 }: {
   detail: EworksQuoteSafeDetail | null;
   quoteId: number | null;
-  attachments: EworksAttachmentSafe[];
-  attachmentsLoading: boolean;
   loading: boolean;
   error: string | null;
   onClose: () => void;
@@ -533,12 +529,6 @@ export function QuoteDetailModal({
               </SectionCard>
 
               <ItemsTable items={detail.items} />
-
-              <AttachmentsSection
-                attachments={attachments}
-                loading={attachmentsLoading}
-                parentLabel="quote"
-              />
 
               <LinkedEstimateSection linked={detail.linked_estimate} />
             </>

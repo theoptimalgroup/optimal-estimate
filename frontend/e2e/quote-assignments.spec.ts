@@ -118,6 +118,13 @@ const MOCK_ASSIGNEES = [
     role: "engineer",
     is_active: true,
   },
+  {
+    id: "33333333-3333-3333-3333-333333333333",
+    name: "Manager One",
+    email: "manager@example.com",
+    role: "manager",
+    is_active: true,
+  },
 ];
 
 const MOCK_REGISTERED_ASSIGNMENT = {
@@ -300,6 +307,40 @@ test.describe("Quote assignments", () => {
     await page.getByTestId("external-assignee-email").fill("external@example.com");
     await page.getByTestId("submit-assignment-button").click();
     await expect(page.getByTestId("copy-assignment-link-2")).toBeVisible();
+  });
+
+  test("engineer assignment dropdown shows engineers and managers", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    const assignmentsState = { items: [] as unknown[] };
+    await mockManagerQuotesWithAssignments(page, assignmentsState);
+
+    await page.goto("/manager/quotes");
+    await page.getByTestId("quote-view-1").click();
+    await page.getByTestId("open-assignment-form").click();
+    await page.getByTestId("assignment-type-select").selectOption("engineer");
+
+    const options = page.getByTestId("assignee-user-select").locator("option");
+    const labels = await options.allTextContents();
+    expect(labels.some((label) => label.includes("Engineer One"))).toBe(true);
+    expect(labels.some((label) => label.includes("Manager One"))).toBe(true);
+    expect(labels.some((label) => label.includes("Estimator One"))).toBe(false);
+  });
+
+  test("estimator assignment dropdown shows estimators only", async ({ page }) => {
+    await mockAuthMe(page, "manager");
+    const assignmentsState = { items: [] as unknown[] };
+    await mockManagerQuotesWithAssignments(page, assignmentsState);
+
+    await page.goto("/manager/quotes");
+    await page.getByTestId("quote-view-1").click();
+    await page.getByTestId("open-assignment-form").click();
+    await page.getByTestId("assignment-type-select").selectOption("estimator");
+
+    const options = page.getByTestId("assignee-user-select").locator("option");
+    const labels = await options.allTextContents();
+    expect(labels.some((label) => label.includes("Estimator One"))).toBe(true);
+    expect(labels.some((label) => label.includes("Manager One"))).toBe(false);
+    expect(labels.some((label) => label.includes("Engineer One"))).toBe(false);
   });
 
   test("estimator dashboard shows assigned quote", async ({ page }) => {

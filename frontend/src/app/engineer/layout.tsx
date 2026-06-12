@@ -5,7 +5,7 @@ import { AppShell } from "@/components/layout/app-shell";
 
 export default function EngineerLayout({ children }: { children: React.ReactNode }) {
   return (
-    <RequireRole allowedRoles={["admin", "engineer"]}>
+    <RequireRole allowedRoles={["admin", "manager", "engineer"]}>
       <AppShell>{children}</AppShell>
     </RequireRole>
   );

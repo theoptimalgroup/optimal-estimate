@@ -207,10 +207,12 @@ test.describe("engineer assignments page", () => {
     await expect(page.getByRole("heading", { name: "Assigned Estimates", level: 1 })).toBeVisible();
   });
 
-  test("manager is blocked from engineer assigned estimates", async ({ page }) => {
+  test("manager can access engineer assigned estimates", async ({ page }) => {
     await mockAuthMe(page, "manager");
+    await mockEngineerAssignments(page);
     await page.goto("/engineer/assigned-estimates");
-    await expect(page.getByTestId("require-role-forbidden")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Assigned Estimates", level: 1 })).toBeVisible();
+    await expect(page.getByTestId("require-role-forbidden")).toHaveCount(0);
   });
 });
 

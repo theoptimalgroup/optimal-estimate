@@ -248,6 +248,10 @@ test.describe("navigation UX", () => {
     await expect(page.getByTestId("nav-item-quotes")).toBeVisible();
     await expect(page.getByTestId("nav-item-quote-review")).toBeVisible();
     await expect(page.getByTestId("nav-item-clients")).toBeVisible();
+    await expect(page.getByTestId("nav-item-assigned-estimates")).toBeVisible();
+    await expect(page.getByTestId("nav-item-assigned-jobs")).toBeVisible();
+    await expect(page.getByTestId("nav-item-submitted-estimates")).toBeVisible();
+    await expect(page.getByTestId("nav-item-submitted-jobs")).toBeVisible();
   });
 
   test("engineer sidebar shows all job navigation items", async ({ page }) => {

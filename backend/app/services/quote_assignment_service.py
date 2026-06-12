@@ -165,7 +165,7 @@ def _can_user_start_appointment(
         return False
     if user.role == UserRole.ADMIN:
         return True
-    if user.role != UserRole.ENGINEER:
+    if user.role not in {UserRole.ENGINEER, UserRole.MANAGER}:
         return False
     user_id = _as_uuid(user.id)
     registered_user_id = assignee.get("registered_user_id")
@@ -616,21 +616,33 @@ def _validate_assignee_user(db: Session, user_id: UUID | str, assignment_type: s
     user = db.query(User).filter(User.id == user_uuid, User.is_active.is_(True)).one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="Assigned user not found")
-    expected_role = UserRole.ESTIMATOR.value if assignment_type == "estimator" else UserRole.ENGINEER.value
-    if user.role != expected_role:
+    if assignment_type == "engineer":
+        allowed_roles = {UserRole.ENGINEER.value, UserRole.MANAGER.value}
+    elif assignment_type == "estimator":
+        allowed_roles = {UserRole.ESTIMATOR.value}
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid assignment_type={assignment_type}")
+    if user.role not in allowed_roles:
+        expected = " or ".join(sorted(allowed_roles))
         raise HTTPException(
             status_code=400,
-            detail=f"Assigned user must have role {expected_role} for assignment_type={assignment_type}",
+            detail=f"Assigned user must have role {expected} for assignment_type={assignment_type}",
         )
     return user
 
 
-def list_assignable_users(db: Session) -> list[dict[str, Any]]:
+def list_assignable_users(db: Session, assignment_type: str | None = None) -> list[dict[str, Any]]:
+    if assignment_type == "engineer":
+        roles = [UserRole.ENGINEER.value, UserRole.MANAGER.value]
+    elif assignment_type == "estimator":
+        roles = [UserRole.ESTIMATOR.value]
+    else:
+        roles = [UserRole.ESTIMATOR.value, UserRole.ENGINEER.value, UserRole.MANAGER.value]
     rows = (
         db.query(User)
         .filter(
             User.is_active.is_(True),
-            User.role.in_([UserRole.ESTIMATOR.value, UserRole.ENGINEER.value]),
+            User.role.in_(roles),
         )
         .order_by(User.full_name.asc(), User.email.asc())
         .all()
@@ -978,7 +990,7 @@ def list_assignments_for_user(db: Session, user: AuthenticatedUser) -> list[dict
             .order_by(EworksQuoteAssignment.assigned_at.desc())
             .all()
         )
-    elif user.role == UserRole.ENGINEER:
+    elif user.role in {UserRole.ENGINEER, UserRole.MANAGER}:
         from app.services.engineer_assigned_estimates_service import list_assigned_estimates_for_engineer
 
         return list_assigned_estimates_for_engineer(db, user)
@@ -1083,7 +1095,7 @@ def update_assignment_status(
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         if current_user.role == UserRole.ESTIMATOR and row.assignment_type != "estimator":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        if current_user.role == UserRole.ENGINEER and row.assignment_type != "engineer":
+        if current_user.role in {UserRole.ENGINEER, UserRole.MANAGER} and row.assignment_type != "engineer":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     before = _serialize_assignment(row)
@@ -1155,7 +1167,7 @@ def _can_user_start_assignment(user: AuthenticatedUser | None, row: EworksQuoteA
         return False
     if user.role == UserRole.ESTIMATOR and row.assignment_type == "estimator":
         return True
-    if user.role == UserRole.ENGINEER and row.assignment_type == "engineer":
+    if user.role in {UserRole.ENGINEER, UserRole.MANAGER} and row.assignment_type == "engineer":
         return True
     return False
 
@@ -1165,8 +1177,8 @@ def _assert_user_can_start_assignment(user: AuthenticatedUser, row: EworksQuoteA
         raise HTTPException(status_code=410, detail="Assignment has been cancelled")
     if row.assignee_kind != "registered":
         raise HTTPException(status_code=403, detail="Only registered assignments can start an estimate")
-    if user.role == UserRole.MANAGER:
-        raise HTTPException(status_code=403, detail="Managers cannot start assignments")
+    if user.role == UserRole.MANAGER and row.assignment_type != "engineer":
+        raise HTTPException(status_code=403, detail="Managers can only start engineer assignments")
     if user.role == UserRole.CLIENT:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     if not _can_user_start_assignment(user, row):

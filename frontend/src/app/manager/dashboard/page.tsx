@@ -25,8 +25,6 @@ import {
 } from "@/lib/manager-dashboard";
 import {
   getSafeQuoteDetail,
-  listQuoteAttachments,
-  type EworksAttachmentSafe,
   type EworksQuoteSafeDetail,
 } from "@/lib/eworks-sync";
 
@@ -41,8 +39,6 @@ export default function ManagerDashboardPage() {
   const [quoteDetail, setQuoteDetail] = useState<EworksQuoteSafeDetail | null>(null);
   const [quoteDetailLoading, setQuoteDetailLoading] = useState(false);
   const [quoteDetailError, setQuoteDetailError] = useState<string | null>(null);
-  const [quoteAttachments, setQuoteAttachments] = useState<EworksAttachmentSafe[]>([]);
-  const [quoteAttachmentsLoading, setQuoteAttachmentsLoading] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -71,22 +67,15 @@ export default function ManagerDashboardPage() {
   const openQuoteDetail = useCallback(async (id: number) => {
     setSelectedQuoteId(id);
     setQuoteDetail(null);
-    setQuoteAttachments([]);
     setQuoteDetailError(null);
     setQuoteDetailLoading(true);
-    setQuoteAttachmentsLoading(true);
     try {
-      const [detail, attachments] = await Promise.all([
-        getSafeQuoteDetail(id),
-        listQuoteAttachments(id),
-      ]);
+      const detail = await getSafeQuoteDetail(id);
       setQuoteDetail(detail);
-      setQuoteAttachments(attachments);
     } catch (e: unknown) {
       setQuoteDetailError(e instanceof Error ? e.message : "Failed to load quote details");
     } finally {
       setQuoteDetailLoading(false);
-      setQuoteAttachmentsLoading(false);
     }
   }, []);
 
@@ -252,14 +241,11 @@ export default function ManagerDashboardPage() {
         <QuoteDetailModal
           detail={quoteDetail}
           quoteId={selectedQuoteId}
-          attachments={quoteAttachments}
-          attachmentsLoading={quoteAttachmentsLoading}
           loading={quoteDetailLoading}
           error={quoteDetailError}
           onClose={() => {
             setSelectedQuoteId(null);
             setQuoteDetail(null);
-            setQuoteAttachments([]);
             setQuoteDetailError(null);
           }}
         />

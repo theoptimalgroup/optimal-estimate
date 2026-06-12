@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.auth.dependencies import AuthenticatedUser, require_roles
 from app.core.exceptions import success_response
@@ -35,16 +35,19 @@ router = APIRouter(prefix="/quote-assignments", tags=["quote-assignments"])
 @router.get("/assignees")
 def list_assignees(
     db: DbSession,
+    assignment_type: str | None = Query(default=None),
     _user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    items = list_assignable_users(db)
+    items = list_assignable_users(db, assignment_type=assignment_type)
     return success_response([AssigneeUserRead.model_validate(item).model_dump() for item in items])
 
 
 @router.get("/my")
 def list_my_assignments(
     db: DbSession,
-    user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.ESTIMATOR, UserRole.ENGINEER)),
+    user: AuthenticatedUser = Depends(
+        require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.ESTIMATOR, UserRole.ENGINEER)
+    ),
 ):
     items = list_assignments_for_user(db, user)
     return success_response(
@@ -57,7 +60,9 @@ def list_my_assignments(
 def start_assignment_estimate_endpoint(
     assignment_id: int,
     db: DbSession,
-    user: AuthenticatedUser = Depends(require_roles(UserRole.ADMIN, UserRole.ESTIMATOR, UserRole.ENGINEER)),
+    user: AuthenticatedUser = Depends(
+        require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.ESTIMATOR, UserRole.ENGINEER)
+    ),
 ):
     data = start_assignment_estimate(db, assignment_id, user)
     data.pop("created", None)
