@@ -19,9 +19,12 @@ from app.schemas.eworks_link import (
 )
 from sqlalchemy.orm import Session
 
-from app.schemas.eworks_link import Step1Snapshot, Step2Snapshot
 from app.services.eworks_link_service import work_skill_name
-from app.services.eworks_questionnaire_service import format_time_frame
+from app.services.eworks_questionnaire_service import (
+    calculate_off_shelf_materials_total,
+    format_time_frame,
+    off_shelf_material_line_total,
+)
 from app.services.pdf_calculation_context_service import (
     build_combined_internal_notes_for_pdf,
     build_work_internal_calculation_note,
@@ -116,6 +119,30 @@ def _supplier_material_sections(suppliers: list[MaterialSupplier]) -> list[dict[
             "subtotal": "—",
         }
     ]
+
+
+def _shelf_material_table_rows(rows: list[MaterialOrderRow]) -> dict[str, object]:
+    table: list[dict[str, str]] = []
+    for row in rows:
+        link = (row.link or "").strip()
+        quantity = _display(row.quantity)
+        cost = _money(row.cost)
+        line_total_value = off_shelf_material_line_total(row)
+        if not link and line_total_value <= 0:
+            continue
+        table.append(
+            {
+                "link": link or "—",
+                "quantity": quantity,
+                "cost": cost,
+                "line_total": _money(line_total_value),
+            }
+        )
+    total = calculate_off_shelf_materials_total(rows)
+    return {
+        "rows": table or [{"link": "—", "quantity": "—", "cost": "—", "line_total": "—"}],
+        "total": _money(total) if total > 0 else "—",
+    }
 
 
 def _material_table_rows(rows: list[MaterialOrderRow]) -> list[dict[str, str]]:
@@ -221,7 +248,7 @@ def _work_form_page(block: WorkBlockSnapshot, *, index: int, trade_name: str) ->
         "scope": scope_plain,
         "scope_html": scope_html,
         "material_suppliers": _supplier_material_sections(suppliers),
-        "shelf_materials_rows": _material_table_rows(block.shelf_materials_rows),
+        "shelf_materials": _shelf_material_table_rows(block.shelf_materials_rows),
         "skill_required": _display(block.skill_required or trade_name),
         "best_engineer": _display(block.best_engineer),
         "subcontractors": _display(block.subcontractors),

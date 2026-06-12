@@ -36,6 +36,7 @@ export type MaterialOrderRow = {
   link?: string | null;
   quantity: number | string;
   cost: number | string;
+  line_total?: number | string;
 };
 
 export type MaterialLinkRow = {

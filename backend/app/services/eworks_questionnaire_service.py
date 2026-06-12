@@ -113,6 +113,26 @@ def apply_questionnaire_defaults(step2: Step2Snapshot, *, trade_name: str, defau
     return data
 
 
+def off_shelf_material_line_total(row: MaterialLinkRow | MaterialOrderRow) -> Decimal:
+    """Line total for off-shelf materials: quantity × cost per item."""
+    quantity = row.quantity if row.quantity > 0 else Decimal("0")
+    return quantity * row.cost
+
+
+def calculate_off_shelf_materials_total(rows: list[MaterialOrderRow]) -> Decimal:
+    """Section total for off-shelf materials."""
+    return sum((off_shelf_material_line_total(row) for row in rows), Decimal("0"))
+
+
+def enrich_off_shelf_material_rows(rows: list[MaterialOrderRow]) -> list[MaterialOrderRow]:
+    """Attach computed line_total to each off-shelf row for snapshots."""
+    enriched: list[MaterialOrderRow] = []
+    for row in rows:
+        line_total = off_shelf_material_line_total(row)
+        enriched.append(row.model_copy(update={"line_total": line_total}))
+    return enriched
+
+
 def _append_supplier_materials(
     items: list[tuple[str, Decimal, Decimal, Decimal]],
     suppliers: list[MaterialSupplier],
@@ -145,7 +165,7 @@ def build_material_items(step2: Step2Snapshot) -> list[tuple[str, Decimal, Decim
         if row.cost <= 0:
             continue
         quantity = row.quantity if row.quantity > 0 else Decimal("1")
-        unit_cost = row.cost / quantity
+        unit_cost = row.cost
         label = f"Shelf material {index}"
         if row.link:
             label = row.link[:120]

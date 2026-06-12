@@ -12,6 +12,8 @@ import {
   migrateLegacyMaterialRows,
   normalizeSharedWorkBlocks,
   questionnaireToStep2,
+  shelfMaterialLineTotal,
+  shelfMaterialsCostTotal,
   shelfMaterialsTotal,
   step2ToQuestionnaire,
   supplierMaterialsSubtotal,
@@ -293,6 +295,33 @@ describe("materials subtotals", () => {
         { link: "Plug", quantity: 1, cost: 20 },
       ]),
     ).toBe(45);
+  });
+
+  it("calculates off-shelf line total as quantity times cost per item", () => {
+    expect(shelfMaterialLineTotal({ quantity: 10, cost: 10 })).toBe(100);
+  });
+
+  it("stores section total in shelfMaterialsCostTotal for snapshots", () => {
+    const rows = [{ link: "1sdvas", quantity: 10, cost: 10 }];
+    expect(shelfMaterialsCostTotal(rows)).toBe(100);
+  });
+
+  it("supplier materials-to-order calculation still uses quantity times cost per item", () => {
+    expect(
+      supplierMaterialsTotal({
+        supplier_name: "A",
+        delivery_charge: 5,
+        links: [{ link: "Item", quantity: 2, cost: 60 }],
+      }),
+    ).toBe(125);
+  });
+
+  it("snapshot includes off-shelf line_total and section_total", () => {
+    const work = defaultWorkBlockValues("Electrician");
+    work.shelf_materials_rows = [{ link: "1sdvas", quantity: 10, cost: 10 }];
+    const snapshot = workBlockToSnapshot(work);
+    expect(snapshot.shelf_materials_rows?.[0]?.line_total).toBe(100);
+    expect(Number(snapshot.shelf_materials_cost)).toBe(100);
   });
 
   it("calculates grand total materials", () => {

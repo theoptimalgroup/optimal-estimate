@@ -462,19 +462,22 @@
           <tr>
             <th>Item</th>
             <th style="width: 18%;">Quantity</th>
-            <th style="width: 18%;">Cost</th>
+            <th style="width: 18%;">Cost per item</th>
+            <th style="width: 18%;">Line total</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in work.shelf_materials_rows %}
+          {% for row in work.shelf_materials.rows %}
           <tr>
             <td>{{ row.link }}</td>
             <td>{{ row.quantity }}</td>
             <td>{{ row.cost }}</td>
+            <td>{{ row.line_total }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
+      <p class="supplier-summary">Off-shelf materials total: {{ work.shelf_materials.total }}</p>
 
       <div class="field-grid">
         <div class="field-row">

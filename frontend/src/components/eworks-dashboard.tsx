@@ -6,7 +6,7 @@ import { EworksButton, EworksSectionTitle, cn } from "@/components/eworks-ui";
 import type { DashboardQuoteItem, DashboardWorkItem } from "@/lib/dashboard";
 import type { AttachmentMeta } from "@/lib/eworks-calculate-schema";
 import type { MaterialOrderRow, MaterialSupplier, WorkBlockSnapshot } from "@/lib/eworks-session";
-import { formatSupplierDisplayName, migrateLegacyMaterialRows } from "@/lib/eworks-calculate-schema";
+import { formatSupplierDisplayName, migrateLegacyMaterialRows, shelfMaterialLineTotal, shelfMaterialsTotal } from "@/lib/eworks-calculate-schema";
 import { cleanRichTextForTextarea } from "@/lib/html-text";
 import { getAttachmentUrl } from "@/lib/eworks-session";
 import { formatProductLabel, formatWorkLabel, scopePreview } from "@/lib/work-label";
@@ -114,30 +114,25 @@ function DetailRow({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-function ReadOnlyMaterialTable({
-  title,
-  linkLabel,
-  rows,
-}: {
-  title: string;
-  linkLabel: string;
-  rows?: MaterialOrderRow[];
-}) {
+function ReadOnlyShelfMaterials({ rows }: { rows?: MaterialOrderRow[] }) {
   const visibleRows = (rows ?? []).filter(
     (row) => hasText(row.link) || hasNumber(row.quantity) || hasNumber(row.cost),
   );
   if (visibleRows.length === 0) return null;
 
+  const sectionTotal = shelfMaterialsTotal(visibleRows);
+
   return (
     <div className="space-y-2">
-      <EworksSectionTitle title={title} />
+      <EworksSectionTitle title="Materials bought off the Shelf and Cost" />
       <div className="overflow-x-auto rounded-lg border border-slate-200">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
             <tr>
-              <th className="px-3 py-2 font-medium">{linkLabel}</th>
+              <th className="px-3 py-2 font-medium">Item</th>
               <th className="px-3 py-2 font-medium">Quantity</th>
-              <th className="px-3 py-2 font-medium">Cost</th>
+              <th className="px-3 py-2 font-medium">Cost per item</th>
+              <th className="px-3 py-2 font-medium">Line total</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
@@ -146,11 +141,15 @@ function ReadOnlyMaterialTable({
                 <td className="px-3 py-2 text-slate-900">{row.link || "—"}</td>
                 <td className="px-3 py-2 text-slate-900">{row.quantity ?? "—"}</td>
                 <td className="px-3 py-2 text-slate-900">{money(row.cost)}</td>
+                <td className="px-3 py-2 text-slate-900">{money(shelfMaterialLineTotal(row))}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <p className="text-sm font-semibold text-slate-900" data-testid="off-shelf-materials-total">
+        Off-shelf materials total: {money(sectionTotal)}
+      </p>
     </div>
   );
 }
@@ -242,7 +241,7 @@ function WorkDetailsReadonly({ details }: { details: WorkBlockSnapshot }) {
       )}
 
       <ReadOnlySupplierMaterials suppliers={details.materials_to_order} />
-      <ReadOnlyMaterialTable title="Materials bought off the Shelf and Cost" linkLabel="Item" rows={details.shelf_materials_rows} />
+      <ReadOnlyShelfMaterials rows={details.shelf_materials_rows} />
 
       <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         <DetailRow label="Skill required" value={details.skill_required} />

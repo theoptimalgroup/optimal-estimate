@@ -7,7 +7,8 @@ export const materialOrderRowSchema = z
   .object({
     link: z.string().optional(),
     quantity: z.number({ error: "Enter quantity" }).min(0, "Quantity must be 0 or greater"),
-    cost: z.number({ error: "Enter cost" }).min(0, "Cost must be 0 or greater"),
+    cost: z.number({ error: "Enter cost per item" }).min(0, "Cost must be 0 or greater"),
+    line_total: z.number().optional(),
   })
   .superRefine((row, ctx) => {
     const link = (row.link ?? "").trim();
@@ -147,12 +148,14 @@ export function supplierMaterialsSubtotal(suppliers: MaterialSupplier[] | undefi
   return (suppliers ?? []).reduce((sum, supplier) => sum + supplierMaterialsTotal(supplier), 0);
 }
 
+export function shelfMaterialLineTotal(row: { quantity?: unknown; cost?: unknown }): number {
+  const qty = Number(row.quantity) || 0;
+  const cost = Number(row.cost) || 0;
+  return qty * cost;
+}
+
 export function shelfMaterialsTotal(rows: WorkBlockFormValues["shelf_materials_rows"] | undefined): number {
-  return (rows ?? []).reduce((sum, row) => {
-    const qty = Number(row.quantity) || 0;
-    const cost = Number(row.cost) || 0;
-    return sum + qty * cost;
-  }, 0);
+  return (rows ?? []).reduce((sum, row) => sum + shelfMaterialLineTotal(row), 0);
 }
 
 export function grandTotalMaterials(
@@ -680,8 +683,13 @@ export function shelfRowsFromLegacy(
   return [{ link: "", quantity: 0, cost: 0 }];
 }
 
+export function enrichShelfMaterialRow(row: { link?: string | null; quantity?: unknown; cost?: unknown }) {
+  const normalized = normalizeMaterialRow(row);
+  return { ...normalized, line_total: shelfMaterialLineTotal(normalized) };
+}
+
 export function shelfMaterialsCostTotal(rows: MaterialOrderRow[]): number {
-  return rows.reduce((sum, row) => sum + Number(row.cost ?? 0), 0);
+  return shelfMaterialsTotal(rows);
 }
 
 export type ProductOption = {
@@ -847,7 +855,7 @@ export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapsho
     ),
     scope_from_product: Boolean(work.scope_from_product),
     materials_to_order: work.materials_to_order.map(normalizeMaterialSupplier),
-    shelf_materials_rows: work.shelf_materials_rows.map(normalizeMaterialRow),
+    shelf_materials_rows: work.shelf_materials_rows.map(enrichShelfMaterialRow),
     shelf_materials: work.shelf_materials_rows
       .map((row) => row.link?.trim())
       .filter(Boolean)

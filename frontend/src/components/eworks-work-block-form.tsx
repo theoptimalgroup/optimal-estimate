@@ -25,7 +25,7 @@ import {
 } from "@/lib/attachment-context";
 import { cleanRichTextForTextarea } from "@/lib/html-text";
 import type { AttachmentMeta, MaterialSupplierFormValues, ProductOption, QuestionnaireFormValues, WorkBlockFormValues } from "@/lib/eworks-calculate-schema";
-import { defaultMaterialSuppliers, formatCurrency, formatSupplierDisplayName, grandTotalMaterials, computeProductTotalPrice, shelfMaterialsTotal, supplierMaterialsSubtotal, supplierMaterialsTotal, workBlockHasProductContext } from "@/lib/eworks-calculate-schema";
+import { defaultMaterialSuppliers, formatCurrency, formatSupplierDisplayName, grandTotalMaterials, computeProductTotalPrice, shelfMaterialLineTotal, shelfMaterialsTotal, supplierMaterialsSubtotal, supplierMaterialsTotal, workBlockHasProductContext } from "@/lib/eworks-calculate-schema";
 import { VoiceDictationButton } from "@/components/voice/VoiceDictationButton";
 import { getAttachmentUrl, rewordScope } from "@/lib/eworks-session";
 import { withRegisterChange } from "@/lib/form-register";
@@ -196,7 +196,7 @@ type MaterialRowsSectionProps = {
 };
 
 const materialRowGridClass =
-  "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_4.5rem] lg:items-center lg:gap-3 lg:px-3 lg:py-2.5";
+  "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_4.5rem] lg:items-center lg:gap-3 lg:px-3 lg:py-2.5";
 
 function MaterialRowsSection({
   workIndex,
@@ -210,14 +210,15 @@ function MaterialRowsSection({
 }: MaterialRowsSectionProps) {
   return (
     <EworksTableShell>
-      <div className="hidden bg-slate-100 px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-700 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_4.5rem] lg:gap-3">
+      <div className="hidden bg-slate-100 px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-700 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_4.5rem] lg:gap-3">
         <span>{labelColumn}</span>
         <span>Quantity</span>
-        <span>Cost</span>
+        <span>Cost per item</span>
+        <span>Line total</span>
         <span />
       </div>
       <div className="divide-y divide-black/10">
-        {rows.map((_, index) => (
+        {rows.map((row, index) => (
           <div key={index} className={cn("grid grid-cols-1 gap-3 p-3", materialRowGridClass)}>
             <div className="min-w-0 w-full">
               <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-black lg:hidden">
@@ -250,7 +251,7 @@ function MaterialRowsSection({
               </div>
               <div className="min-w-0">
                 <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-black lg:hidden">
-                  Cost
+                  Cost per item
                 </span>
                 <Controller
                   name={`works.${workIndex}.${table}.${index}.cost` as FieldPath<QuestionnaireFormValues>}
@@ -263,6 +264,17 @@ function MaterialRowsSection({
                     />
                   )}
                 />
+              </div>
+              <div className="min-w-0">
+                <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-black lg:hidden">
+                  Line total
+                </span>
+                <p
+                  className="min-h-[44px] rounded-lg bg-slate-50 px-3 py-2.5 text-sm font-semibold tabular-nums text-slate-900 lg:min-h-[40px] lg:py-2"
+                  data-testid={`shelf-line-total-${workIndex}-${index}`}
+                >
+                  {formatCurrency(shelfMaterialLineTotal(row))}
+                </p>
               </div>
             </div>
             <div className="flex items-center lg:justify-end">
@@ -1216,7 +1228,7 @@ export function EworksWorkBlockForm({
               testId={`supplier-materials-subtotal-${workIndex}`}
             />
             <MaterialsSummaryRow
-              label="Shelf Materials Subtotal"
+              label="Off-shelf materials total"
               amount={shelfMaterialsTotal(shelfRows)}
               testId={`shelf-materials-subtotal-${workIndex}`}
             />

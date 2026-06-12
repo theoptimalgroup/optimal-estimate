@@ -55,7 +55,8 @@ class EworksLinkPayload(BaseModel):
 class MaterialOrderRow(BaseModel):
     link: str | None = None
     quantity: Decimal = Decimal("0")
-    cost: Decimal = Decimal("0")
+    cost: Decimal = Decimal("0")  # cost per item
+    line_total: Decimal | None = None
 
 
 class MaterialLinkRow(BaseModel):
