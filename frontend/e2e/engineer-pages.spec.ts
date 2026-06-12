@@ -183,6 +183,26 @@ test.describe("engineer estimate pages", () => {
     await expect(page.locator("body")).not.toContainText("in_progress");
   });
 
+  test("manager assigned as engineer sees assignment card", async ({ page }) => {
+    const managerAssignment = {
+      ...MOCK_ACTIVE_ASSIGNMENT,
+      id: 7,
+      assigned_user_id: "dev-manager",
+      assigned_user_email: "manager@example.com",
+      assigned_user_name: "Manager One",
+      status: "assigned",
+      has_calculation_session: false,
+      calculation_session_id: null,
+    };
+    await mockAuthMe(page, "manager");
+    await mockMyAssignments(page, [managerAssignment]);
+    await page.goto("/engineer/assigned-estimates");
+
+    await expect(page.getByTestId("engineer-assignment-7")).toBeVisible();
+    await expect(page.getByTestId("engineer-assignment-action-7")).toHaveText("Start Estimate");
+    await expect(page.getByTestId("engineer-no-assignments")).toHaveCount(0);
+  });
+
   test("submitted estimates shows submitted assignments only", async ({ page }) => {
     await mockAuthMe(page, "engineer");
     await mockMyAssignments(page, [MOCK_ACTIVE_ASSIGNMENT, MOCK_SUBMITTED_ASSIGNMENT]);

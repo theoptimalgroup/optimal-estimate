@@ -608,7 +608,20 @@ def _as_uuid(value: UUID | str | None) -> UUID | None:
         return None
     if isinstance(value, UUID):
         return value
-    return UUID(str(value))
+    try:
+        return UUID(str(value))
+    except ValueError:
+        return None
+
+
+def assignment_assigned_to_user(row: EworksQuoteAssignment, user: AuthenticatedUser) -> bool:
+    """True when the assignment is assigned to the authenticated user by id or email."""
+    user_id = _as_uuid(user.id)
+    if user_id is not None and row.assigned_user_id == user_id:
+        return True
+    if row.assigned_user_email and user.email:
+        return _normalize_email(row.assigned_user_email) == _normalize_email(user.email)
+    return False
 
 
 def _validate_assignee_user(db: Session, user_id: UUID | str, assignment_type: str) -> User:
@@ -1091,7 +1104,7 @@ def update_assignment_status(
         raise HTTPException(status_code=404, detail="Assignment not found")
 
     if current_user.role not in {UserRole.ADMIN, UserRole.MANAGER}:
-        if row.assigned_user_id != _as_uuid(current_user.id):
+        if not assignment_assigned_to_user(row, current_user):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         if current_user.role == UserRole.ESTIMATOR and row.assignment_type != "estimator":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -1163,7 +1176,7 @@ def _can_user_start_assignment(user: AuthenticatedUser | None, row: EworksQuoteA
         return False
     if user.role == UserRole.ADMIN:
         return True
-    if row.assigned_user_id != _as_uuid(user.id):
+    if not assignment_assigned_to_user(row, user):
         return False
     if user.role == UserRole.ESTIMATOR and row.assignment_type == "estimator":
         return True

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.auth.types import AuthenticatedUser
@@ -117,16 +118,23 @@ def _build_assignee_from_quote_appointment(
 
 
 def _list_manual_engineer_assignments(db: Session, user: AuthenticatedUser) -> list[dict[str, Any]]:
+    normalized_email = _normalize_email(user.email)
     user_id = _as_uuid(user.id)
-    if user_id is None:
+    assignee_filters = []
+    if user_id is not None:
+        assignee_filters.append(EworksQuoteAssignment.assigned_user_id == user_id)
+    if normalized_email:
+        assignee_filters.append(func.lower(EworksQuoteAssignment.assigned_user_email) == normalized_email)
+    if not assignee_filters:
         return []
+
     rows = (
         db.query(EworksQuoteAssignment, EworksQuote)
         .join(EworksQuote, EworksQuote.id == EworksQuoteAssignment.synced_quote_id)
         .filter(
-            EworksQuoteAssignment.assigned_user_id == user_id,
             EworksQuoteAssignment.assignment_type == "engineer",
             EworksQuoteAssignment.status != "cancelled",
+            or_(*assignee_filters),
         )
         .order_by(EworksQuoteAssignment.assigned_at.desc())
         .all()
@@ -134,7 +142,6 @@ def _list_manual_engineer_assignments(db: Session, user: AuthenticatedUser) -> l
     return [
         _serialize_assignment(assignment, quote=quote, current_user=user, db=db)
         for assignment, quote in rows
-        if _quote_qualifies_for_assigned_estimates(quote)
     ]
 
 

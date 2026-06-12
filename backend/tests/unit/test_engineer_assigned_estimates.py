@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -459,7 +459,7 @@ def test_processed_rejected_accepted_converted_quote_linked_appointment_excluded
     assert items == []
 
 
-def test_manual_assignment_on_non_draft_hidden(db_session):
+def test_manual_assignment_on_non_draft_appears(db_session):
     quote = EworksQuote(
         eworks_quote_id=29310,
         quote_ref="Q-MANUAL-NON-DRAFT",
@@ -488,7 +488,9 @@ def test_manual_assignment_on_non_draft_hidden(db_session):
 
     items = list_assigned_estimates_for_engineer(db_session, user)
 
-    assert items == []
+    assert len(items) == 1
+    assert items[0]["quote_ref"] == "Q-MANUAL-NON-DRAFT"
+    assert items[0]["source"] == "manual"
 
 
 def test_quote_level_appointment_on_non_draft_hidden(db_session):
@@ -520,3 +522,156 @@ def test_quote_level_appointment_on_non_draft_hidden(db_session):
     items = list_assigned_estimates_for_engineer(db_session, user)
 
     assert items == []
+
+
+def _manager_user(db_session) -> AuthenticatedUser:
+    now = datetime.now(timezone.utc)
+    manager = User(
+        id=uuid4(),
+        email="manager@optimal.example",
+        full_name="Manager User",
+        password_hash=get_password_hash("manager12345"),
+        role=UserRole.MANAGER.value,
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(manager)
+    db_session.commit()
+    return AuthenticatedUser(
+        id=str(manager.id),
+        email=manager.email,
+        name=manager.full_name,
+        role=UserRole.MANAGER,
+        is_active=True,
+        auth_provider="dev",
+    )
+
+
+def test_manager_manual_engineer_assignment_appears_without_draft_booked(db_session):
+    manager = _manager_user(db_session)
+    quote = EworksQuote(
+        eworks_quote_id=29320,
+        quote_ref="Q-MGR-MANUAL",
+        customer_name="Manager Customer",
+        status="2",
+        tags="Must Attend",
+    )
+    db_session.add(quote)
+    db_session.flush()
+    db_session.add(
+        EworksQuoteAssignment(
+            synced_quote_id=quote.id,
+            eworks_quote_id=quote.eworks_quote_id,
+            quote_ref=quote.quote_ref,
+            assigned_user_id=UUID(str(manager.id)),
+            assigned_user_email=manager.email,
+            assigned_user_name=manager.name,
+            assignment_type="engineer",
+            assignee_kind="registered",
+            status="assigned",
+        )
+    )
+    db_session.commit()
+
+    items = list_assigned_estimates_for_engineer(db_session, manager)
+
+    assert len(items) == 1
+    assert items[0]["quote_ref"] == "Q-MGR-MANUAL"
+    assert items[0]["assignment_type"] == "engineer"
+    assert items[0]["can_start_estimate"] is True
+
+
+def test_manager_does_not_see_other_engineer_manual_assignments(db_session):
+    manager = _manager_user(db_session)
+    engineer = db_session.query(User).filter(User.email == "vitor.santo@theoptimalgroup.co.uk").one()
+    quote = EworksQuote(
+        eworks_quote_id=29321,
+        quote_ref="Q-OTHER-ENG",
+        customer_name="Other Customer",
+        status="1",
+        tags=BOOKED_TAG,
+    )
+    db_session.add(quote)
+    db_session.flush()
+    db_session.add(
+        EworksQuoteAssignment(
+            synced_quote_id=quote.id,
+            eworks_quote_id=quote.eworks_quote_id,
+            quote_ref=quote.quote_ref,
+            assigned_user_id=engineer.id,
+            assigned_user_email=engineer.email,
+            assigned_user_name=engineer.full_name,
+            assignment_type="engineer",
+            assignee_kind="registered",
+            status="assigned",
+        )
+    )
+    db_session.commit()
+
+    items = list_assigned_estimates_for_engineer(db_session, manager)
+
+    assert items == []
+
+
+def test_manager_does_not_see_estimator_manual_assignments(db_session):
+    manager = _manager_user(db_session)
+    quote = EworksQuote(
+        eworks_quote_id=29322,
+        quote_ref="Q-MGR-EST",
+        customer_name="Estimator Customer",
+        status="1",
+        tags=BOOKED_TAG,
+    )
+    db_session.add(quote)
+    db_session.flush()
+    db_session.add(
+        EworksQuoteAssignment(
+            synced_quote_id=quote.id,
+            eworks_quote_id=quote.eworks_quote_id,
+            quote_ref=quote.quote_ref,
+            assigned_user_id=UUID(str(manager.id)),
+            assigned_user_email=manager.email,
+            assigned_user_name=manager.name,
+            assignment_type="estimator",
+            assignee_kind="registered",
+            status="assigned",
+        )
+    )
+    db_session.commit()
+
+    items = list_assigned_estimates_for_engineer(db_session, manager)
+
+    assert items == []
+
+
+def test_manager_manual_assignment_matches_by_email(db_session):
+    manager = _manager_user(db_session)
+    quote = EworksQuote(
+        eworks_quote_id=29323,
+        quote_ref="Q-MGR-EMAIL",
+        customer_name="Email Match Customer",
+        status="2",
+        tags="urgent",
+    )
+    db_session.add(quote)
+    db_session.flush()
+    db_session.add(
+        EworksQuoteAssignment(
+            synced_quote_id=quote.id,
+            eworks_quote_id=quote.eworks_quote_id,
+            quote_ref=quote.quote_ref,
+            assigned_user_id=None,
+            assigned_user_email="Manager@Optimal.Example",
+            assigned_user_name=manager.name,
+            assignment_type="engineer",
+            assignee_kind="registered",
+            status="assigned",
+        )
+    )
+    db_session.commit()
+
+    items = list_assigned_estimates_for_engineer(db_session, manager)
+
+    assert len(items) == 1
+    assert items[0]["quote_ref"] == "Q-MGR-EMAIL"

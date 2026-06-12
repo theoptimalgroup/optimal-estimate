@@ -1086,7 +1086,7 @@ def test_manager_cannot_be_assigned_as_estimator(mock_settings, api_client, db_s
 
 @patch("app.auth.dependencies.settings")
 def test_manager_sees_own_engineer_assignments(mock_settings, api_client, db_session):
-    quote = _add_quote(db_session, quote_id=9503, quote_ref="Q-9503", for_engineer=True)
+    quote = _add_quote(db_session, quote_id=9503, quote_ref="Q-9503")
     manager = db_session.users["manager"]  # type: ignore[attr-defined]
     engineer = db_session.users["engineer"]  # type: ignore[attr-defined]
 
@@ -1099,7 +1099,7 @@ def test_manager_sees_own_engineer_assignments(mock_settings, api_client, db_ses
             "assigned_user_id": str(manager.id),
         },
     )
-    other_quote = _add_quote(db_session, quote_id=9504, quote_ref="Q-9504", for_engineer=True)
+    other_quote = _add_quote(db_session, quote_id=9504, quote_ref="Q-9504")
     api_client.post(
         f"/api/v1/eworks-sync/quotes/{other_quote.id}/assignments",
         json={
