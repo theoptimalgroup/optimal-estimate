@@ -29,8 +29,14 @@ def build_internal_view_from_session(
     session: CalculationSession,
     breakdown: CalculationBreakdown,
     step2: Step2Snapshot,
+    *,
+    db=None,
 ) -> dict:
     step1 = Step1Snapshot.model_validate(session.step1_snapshot)
+    if db is not None:
+        from app.services.eworks_site_address_service import resolve_step1_for_display
+
+        step1 = resolve_step1_for_display(db, session, step1)
     calc = _breakdown_to_dict(breakdown)
     return {
         "session_id": str(session.id),

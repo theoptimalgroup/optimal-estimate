@@ -77,21 +77,9 @@ def _quote_processed_at(quote: EworksQuote) -> datetime:
 
 
 def _extract_site_address(quote: EworksQuote) -> str | None:
-    raw = quote.raw_payload if isinstance(quote.raw_payload, dict) else {}
-    parts: list[str] = []
-    for key in ("site_address", "address", "address_1", "Address_1"):
-        val = raw.get(key)
-        if val and str(val).strip():
-            parts.append(str(val).strip())
-    site = raw.get("site") or raw.get("Site")
-    if isinstance(site, dict):
-        for key in ("address", "address_1", "site_address", "name"):
-            val = site.get(key)
-            if val and str(val).strip():
-                parts.append(str(val).strip())
-    if parts:
-        return ", ".join(dict.fromkeys(parts))
-    return None
+    from app.services.eworks_site_address_service import extract_site_address_from_quote
+
+    return extract_site_address_from_quote(quote)
 
 
 def _days_between(start: datetime, end: datetime) -> int:

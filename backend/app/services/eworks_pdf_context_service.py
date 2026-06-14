@@ -19,6 +19,7 @@ from app.schemas.eworks_link import (
 )
 from sqlalchemy.orm import Session
 
+from app.services.eworks_site_address_service import is_missing_or_placeholder_address
 from app.services.eworks_link_service import work_skill_name
 from app.services.eworks_questionnaire_service import (
     calculate_off_shelf_materials_total,
@@ -47,6 +48,13 @@ def _display(value: object | None) -> str:
         return "—"
     text = str(value).strip()
     return text if text else "—"
+
+
+def _display_property_address(value: object | None) -> str:
+    text = str(value).strip() if value is not None else ""
+    if not text or is_missing_or_placeholder_address(text):
+        return "—"
+    return text
 
 
 def _format_date(value: date | None) -> str:
@@ -186,7 +194,7 @@ def _estimation_form_fields(step1: Step1Snapshot, *, estimated_by_name: str) -> 
         {"label": "Estimated By", "value": _display(estimated_by_name)},
         {"label": "Quote Number", "value": _display(step1.quote_number)},
         {"label": "Job Number", "value": _display(step1.job_number)},
-        {"label": "Property Address", "value": _display(step1.property_address)},
+        {"label": "Property Address", "value": _display_property_address(step1.property_address)},
         {"label": "Congestion Charge", "value": "Yes" if step1.congestion_required else "No"},
         {"label": "Parking Notes", "value": _display(step1.parking_notes)},
         {"label": "Total Time for job", "value": _display(step1.total_time_for_job)},
@@ -532,7 +540,7 @@ def build_eworks_estimate_pdf_context(
             "final_total": _money(calc.get("final_total", breakdown.final_total)),
         },
         "header_line": " ".join(header_parts),
-        "property_address": step1.property_address,
+        "property_address": _display_property_address(step1.property_address),
         "client_manager_line": (
             f"{step1.client_name} {step1.property_manager_name} (Property Manager)"
             if step1.property_manager_name
@@ -661,7 +669,7 @@ def build_all_trades_pdf_context(
         "quote_number": step1.quote_number,
         "job_number": step1.job_number,
         "client_name": _display(step1.client_name),
-        "property_address": _display(step1.property_address),
+        "property_address": _display_property_address(step1.property_address),
         "engineer_name": _display(resolved_estimated_by),
         "estimated_by_name": _display(resolved_estimated_by),
         "all_trades_works": all_trades_works,

@@ -103,6 +103,9 @@ def build_pdf_calculation_context(
 
     step1 = Step1Snapshot.model_validate(session.step1_snapshot)
     step2 = Step2Snapshot.model_validate(session.step2_snapshot)
+    from app.services.eworks_site_address_service import resolve_step1_for_display
+
+    step1 = resolve_step1_for_display(db, session, step1)
     breakdown = CalculationBreakdown.model_validate(last_result["breakdown"])
     work_breakdowns = [
         WorkBreakdownResult.model_validate(item) for item in last_result.get("work_breakdowns") or []

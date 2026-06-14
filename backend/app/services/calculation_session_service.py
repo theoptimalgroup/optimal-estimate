@@ -595,6 +595,9 @@ def _build_calculation_response(
     from app.services.pdf_estimator_identity_service import resolve_estimated_by_for_pdf
 
     who_quoted = resolve_estimated_by_for_pdf(db, session, step1)
+    from app.services.eworks_site_address_service import resolve_step1_for_display
+
+    step1 = resolve_step1_for_display(db, session, step1)
     charges = aggregate_work_charges(step1, step2_data.works, step2=step2_data)
     single_work = len(step2_data.works) == 1
     work_skills = collect_work_skills(step2_data.works, step1.trade_name)
@@ -717,7 +720,7 @@ def _build_calculation_response(
     )
     primary_step2 = primary_step2.model_copy(update={"scope": combined_scope})
 
-    internal_view = build_internal_view_from_session(session, breakdown, primary_step2)
+    internal_view = build_internal_view_from_session(session, breakdown, primary_step2, db=db)
     internal_view["work_breakdowns"] = [
         {
             "work_index": item.work_index,
@@ -2151,11 +2154,14 @@ def render_combined_works_pdf(
     generated_at = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
 
     report_notes = _build_report_notes(step1)
+    from app.services.eworks_site_address_service import resolve_display_property_address
+
+    display_address = resolve_display_property_address(db, session, step1)
     context = {
         "quote_number": step1.quote_number,
         "job_number": step1.job_number,
         "client_name": step1.client_name,
-        "property_address": step1.property_address or "",
+        "property_address": display_address,
         "engineer_name": estimated_by_name,
         "estimated_by_name": estimated_by_name,
         "trade_name": step1.trade_name,
@@ -2196,6 +2202,10 @@ def reopen_submitted_session(db: Session, *, session_id: UUID) -> ReopenQuoteRes
         raise AppError("SESSION_NOT_FOUND", "Quote session not found", 404)
     if session.status != "submitted":
         raise AppError("SESSION_NOT_SUBMITTED", "Only submitted quotes can be reopened for editing", 409)
+
+    from app.services.eworks_site_address_service import maybe_refresh_step1_property_address
+
+    maybe_refresh_step1_property_address(db, session)
 
     session.status = "in_progress"
     session.locked = False

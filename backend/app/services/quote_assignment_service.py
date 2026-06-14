@@ -31,6 +31,7 @@ from app.services.eworks_link_service import find_session_by_idempotency_key, pa
 from app.services.eworks_questionnaire_service import apply_questionnaire_defaults
 from app.services.manager_dashboard_service import extract_all_tags
 from app.services.eworks_sync_service import lookup_customer_name_by_id
+from app.services.eworks_site_address_service import extract_site_address_from_quote
 from app.utils.html_text import html_to_plain_text
 
 ASSIGNMENT_STATUSES = frozenset({"assigned", "in_progress", "submitted", "cancelled"})
@@ -50,9 +51,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _quote_summary(quote: EworksQuote) -> dict[str, Any]:
-    address = None
-    if isinstance(quote.raw_payload, dict):
-        address = quote.raw_payload.get("site_address") or quote.raw_payload.get("address")
+    address = extract_site_address_from_quote(quote)
     description = html_to_plain_text(quote.description) or None
     return {
         "synced_quote_id": quote.id,
@@ -1198,12 +1197,10 @@ def _assert_user_can_start_assignment(user: AuthenticatedUser, row: EworksQuoteA
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 
-def _quote_site_address(quote: EworksQuote) -> str:
-    summary = _quote_summary(quote)
-    address = summary.get("site_address")
-    if isinstance(address, str) and address.strip():
-        return address.strip()
-    return "Address not specified"
+def _quote_site_address(db: Session, quote: EworksQuote) -> str:
+    from app.services.eworks_site_address_service import resolve_site_address_for_quote
+
+    return resolve_site_address_for_quote(db, quote) or ""
 
 
 def _quote_expires_at(quote: EworksQuote) -> datetime:
@@ -1263,7 +1260,7 @@ def _create_calculation_session_for_assignment(
 
     quote_ref = quote.quote_ref or f"Q{quote.eworks_quote_id}"
     job_number = str(quote.eworks_quote_id)
-    property_address = _quote_site_address(quote)
+    property_address = _quote_site_address(db, quote)
     description = (quote.description or "").strip() or None
     scope_plain = html_to_plain_text(description) if description else None
     notes = (assignment.notes or "").strip() or None
@@ -1454,7 +1451,7 @@ def _create_calculation_session_for_appointment(
     quote_ref = quote.quote_ref or f"Q{quote.eworks_quote_id}"
     eworks_job_id = assignee.get("eworks_job_id")
     job_number = str(eworks_job_id) if eworks_job_id is not None else str(quote.eworks_quote_id)
-    property_address = _quote_site_address(quote)
+    property_address = _quote_site_address(db, quote)
     description = (quote.description or "").strip() or None
     scope_plain = html_to_plain_text(description) if description else None
 

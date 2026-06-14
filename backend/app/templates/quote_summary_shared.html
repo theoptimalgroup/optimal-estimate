@@ -300,7 +300,7 @@
   <div class="summary-title-wrap">
     <h1 class="summary-title">{{ document_title }}</h1>
   </div>
-  <p class="summary-address">{{ property_address or "—" }}</p>
+  <p class="summary-address">{% if property_address and property_address != "Address not specified" %}{{ property_address }}{% else %}—{% endif %}</p>
 
   <table class="summary-tables-layout" align="center">
     <tr>
@@ -320,7 +320,7 @@
           </tr>
           <tr>
             <td class="label">Site address</td>
-            <td class="value">{{ property_address or "—" }}</td>
+            <td class="value">{% if property_address and property_address != "Address not specified" %}{{ property_address }}{% else %}—{% endif %}</td>
           </tr>
           <tr>
             <td class="label">Property Manager</td>
