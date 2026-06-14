@@ -289,6 +289,47 @@ async function fillWorkBlock(
   await block.getByLabel("Duration").fill(duration);
 }
 
+async function fillSubcontractorWorkBlock(
+  page: import("@playwright/test").Page,
+  {
+    scope,
+    skill = "Scaffolder",
+    subcontractorName = "Danny Arnold Scaffolding",
+    labourCost = "1500",
+    guys = "3",
+    duration = "6",
+    workIndex = 0,
+    productLabel,
+  }: {
+    scope: string;
+    skill?: string;
+    subcontractorName?: string;
+    labourCost?: string;
+    guys?: string;
+    duration?: string;
+    workIndex?: number;
+    productLabel?: string;
+  },
+) {
+  await expandWorkBlock(page, workIndex);
+  if (productLabel) {
+    await selectProduct(page, productLabel, workIndex);
+  }
+  await selectWorkTab(page, "scope", workIndex);
+  await page.getByTestId(`work-scope-${workIndex}`).fill(scope);
+  await selectWorkTab(page, "labour", workIndex);
+  const block = page.getByTestId(`work-block-${workIndex}`);
+  await block.getByLabel("Skill Required").selectOption(skill);
+  await block.getByTestId(`work-labour-entry-type-${workIndex}`).selectOption("subcontractor");
+  await block.getByLabel("Subcontractor name").fill(subcontractorName);
+  await block.getByLabel("Subcontractor labour cost (£)").fill(labourCost);
+  await block.getByLabel("Units type").selectOption("Days");
+  await block.getByLabel("Number of guys").fill(guys);
+  await block.getByLabel("Duration").fill(duration);
+  await selectWorkTab(page, "materials", workIndex);
+  await block.getByPlaceholder("0.00").first().fill("3500");
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("eWorks calculate link flow", () => {
@@ -957,6 +998,41 @@ test.describe("eWorks calculate link flow", () => {
 
     await page.getByRole("button", { name: "Previous" }).click();
     await expect(page.getByTestId("additional-charges-section")).toHaveCount(1);
+  });
+
+  test("subcontractor labour entry persists subcontractor fields in step2 payload", async ({ page }) => {
+    await mockProductsApi(page);
+    const sessionId = `e2e-subcontractor-${Date.now()}`;
+    const sessionToken = `e2e-subcontractor-token-${Date.now()}`;
+    let savedStep2: Record<string, unknown> | null = null;
+    await mockQuestionnaireSessionRoutes(page, sessionId, sessionToken, "", 1, {}, (body) => {
+      if (body.step2) {
+        savedStep2 = body.step2 as Record<string, unknown>;
+      }
+    });
+    await page.goto(`${FRONTEND}/eworks/calculate?session_id=${sessionId}&token=${sessionToken}`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+    await expect(page.getByText("Step 2 of 3: Estimating Questionnaire")).toBeVisible({ timeout: 15000 });
+
+    await fillSubcontractorWorkBlock(page, {
+      scope: "Scaffold access for roof works.",
+      skill: "Carpenter",
+      productLabel: "Architrave repair",
+    });
+
+    await page.getByRole("button", { name: "Submit" }).click();
+    await expect(page.getByText("Step 3 of 3: Submitted")).toBeVisible({ timeout: 15000 });
+
+    expect(savedStep2).not.toBeNull();
+    const works = (savedStep2 as { works?: Array<Record<string, unknown>> }).works ?? [];
+    expect(works[0]?.labour_type).toBe("subcontractor");
+    expect(works[0]?.subcontractor_name).toBe("Danny Arnold Scaffolding");
+    expect(Number(works[0]?.subcontractor_labour_cost)).toBe(1500);
+    expect(works[0]?.subcontractor_units_type).toBe("Days");
+    expect(Number(works[0]?.engineers_needed)).toBe(3);
+    expect(Number(works[0]?.days)).toBe(6);
   });
 });
 

@@ -49,6 +49,8 @@ export const attachmentMetaSchema = z.object({
 });
 
 export type TimeUnit = "hours" | "days";
+export type SubcontractorUnitsType = "Hours" | "Days";
+export type LabourEntryType = "direct" | "subcontractor";
 
 function requiredNumber(label: string, min: number) {
   return z
@@ -236,7 +238,8 @@ function mergeParkingAccessNotes(
 }
 
 function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValues {
-  const engineersRequired = work.engineers_required !== false;
+  const labourEntryType: LabourEntryType = work.labour_entry_type === "subcontractor" ? "subcontractor" : "direct";
+  const engineersRequired = labourEntryType === "subcontractor" ? true : work.engineers_required !== false;
   return {
     ...work,
     scope: toStringValue(work.scope),
@@ -256,6 +259,15 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
     skill_required: toStringValue(work.skill_required),
     best_engineer: toStringValue(work.best_engineer),
     subcontractors: toStringValue(work.subcontractors),
+    labour_entry_type: labourEntryType,
+    subcontractor_name: toStringValue(work.subcontractor_name),
+    subcontractor_labour_cost: toNumericValue(work.subcontractor_labour_cost) ?? 0,
+    subcontractor_units_type:
+      work.subcontractor_units_type === "Days"
+        ? "Days"
+        : work.subcontractor_units_type === "Hours"
+          ? "Hours"
+          : undefined,
     other_notes: toStringValue(work.other_notes),
     findings: toStringValue(work.findings),
     materials_to_order: migrateLegacyMaterialRows(work.materials_to_order),
@@ -264,8 +276,13 @@ function normalizeWorkBlockValues(work: WorkBlockFormValues): WorkBlockFormValue
         ? work.shelf_materials_rows.map(normalizeMaterialRow)
         : [{ link: "", quantity: 0, cost: 0 }],
     engineers_required: engineersRequired,
-    labour_required: Boolean(work.labour_required),
-    engineers_needed: engineersRequired ? (toNumericValue(work.engineers_needed) as number) : 0,
+    labour_required: labourEntryType === "subcontractor" ? false : Boolean(work.labour_required),
+    engineers_needed:
+      labourEntryType === "subcontractor"
+        ? Math.max(1, toNumericValue(work.engineers_needed) ?? 1)
+        : engineersRequired
+          ? (toNumericValue(work.engineers_needed) as number)
+          : 0,
     engineer_time_unit: work.engineer_time_unit === "days" ? "days" : "hours",
     engineer_time_value: toNumericValue(work.engineer_time_value) as number,
     labour_needed: work.labour_required ? (toNumericValue(work.labour_needed) as number) : 0,
@@ -308,6 +325,48 @@ function validateWorkBlock(data: z.infer<typeof workBlockFieldsSchema>, ctx: z.R
       message: "Scope of works is required",
       path: [path("scope")],
     });
+  }
+
+  if (data.labour_entry_type === "subcontractor") {
+    if (!data.subcontractor_name?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Subcontractor name is required",
+        path: [path("subcontractor_name")],
+      });
+    }
+    const labourCost = toNumericValue(data.subcontractor_labour_cost);
+    if (labourCost === undefined || labourCost <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Subcontractor labour cost must be greater than 0",
+        path: [path("subcontractor_labour_cost")],
+      });
+    }
+    if (data.subcontractor_units_type !== "Hours" && data.subcontractor_units_type !== "Days") {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select Hours or Days",
+        path: [path("subcontractor_units_type")],
+      });
+    }
+    const guys = toNumericValue(data.engineers_needed);
+    if (guys === undefined || guys < 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Number of guys must be at least 1",
+        path: [path("engineers_needed")],
+      });
+    }
+    const duration = toNumericValue(data.engineer_time_value);
+    if (duration === undefined || duration <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Duration must be greater than 0",
+        path: [path("engineer_time_value")],
+      });
+    }
+    return;
   }
 
   if (!data.engineers_required) {
@@ -439,6 +498,10 @@ export const workBlockFieldsSchema = z.object({
   skill_required: z.string().min(1, "Select a skill"),
   best_engineer: z.string().optional(),
   subcontractors: z.string().optional(),
+  labour_entry_type: z.enum(["direct", "subcontractor"]),
+  subcontractor_name: z.string().optional(),
+  subcontractor_labour_cost: z.number().min(0).optional(),
+  subcontractor_units_type: z.enum(["Hours", "Days"]).optional(),
   engineers_required: z.boolean({ error: "Engineer needed is required" }),
   engineers_needed: z.number({ error: "Enter number of engineers" }).int().min(0),
   engineer_time_unit: z.enum(["hours", "days"]),
@@ -494,10 +557,28 @@ export type MaterialLinkRow = z.infer<typeof materialLinkRowSchema>;
 export type MaterialSupplierFormValues = z.infer<typeof materialSupplierSchema>;
 export type AttachmentMeta = z.infer<typeof attachmentMetaSchema>;
 
-export function workDurationComponents(work: Pick<WorkBlockFormValues, "engineers_required" | "engineers_needed" | "engineer_time_unit" | "engineer_time_value">): {
+export function workDurationComponents(
+  work: Pick<
+    WorkBlockFormValues,
+    | "labour_entry_type"
+    | "subcontractor_units_type"
+    | "engineers_required"
+    | "engineers_needed"
+    | "engineer_time_unit"
+    | "engineer_time_value"
+  >,
+): {
   days: number;
   hours: number;
 } {
+  if (work.labour_entry_type === "subcontractor") {
+    const duration = Number(work.engineer_time_value) || 0;
+    const people = Math.max(1, Number(work.engineers_needed) || 1);
+    if (work.subcontractor_units_type === "Days") {
+      return { days: duration * people, hours: 0 };
+    }
+    return { days: 0, hours: duration * people };
+  }
   if (!work.engineers_required) {
     return { days: 0, hours: 0 };
   }
@@ -673,6 +754,10 @@ export function defaultWorkBlockValues(tradeName: string): WorkBlockFormValues {
     skill_required: tradeName,
     best_engineer: "",
     subcontractors: "",
+    labour_entry_type: "direct",
+    subcontractor_name: "",
+    subcontractor_labour_cost: 0,
+    subcontractor_units_type: "Days",
     engineers_required: true,
     engineers_needed: 1,
     engineer_time_unit: "hours",
@@ -970,6 +1055,62 @@ export function mergeQuestionnaireWithSessionStep2(
 }
 
 export function workBlockToSnapshot(work: WorkBlockFormValues): WorkBlockSnapshot {
+  if (work.labour_entry_type === "subcontractor") {
+    const units = work.subcontractor_units_type ?? "Days";
+    const duration = persistenceNumeric(work.engineer_time_value, 1);
+    const people = persistenceNumeric(work.engineers_needed, 1);
+    const labourCost = persistenceNumeric(work.subcontractor_labour_cost, 0);
+    const subcontractorName = work.subcontractor_name?.trim() || "";
+    const customTitle = work.is_custom_scope ? work.custom_title?.trim() || null : null;
+    return {
+      scope: work.scope,
+      selected_product_id: work.is_custom_scope ? null : work.selected_product_id ?? null,
+      is_custom_scope: Boolean(work.is_custom_scope),
+      custom_title: customTitle,
+      eworks_item_id: work.is_custom_scope ? null : work.eworks_item_id ?? null,
+      product_name: work.is_custom_scope ? customTitle : work.product_name?.trim() || null,
+      product_code: work.product_code?.trim() || null,
+      product_quantity: persistenceNumeric(work.product_quantity, 1),
+      product_unit_price: persistenceNumeric(work.product_unit_price, 0),
+      product_total_price: computeProductTotalPrice(
+        persistenceNumeric(work.product_quantity, 1),
+        persistenceNumeric(work.product_unit_price, 0),
+      ),
+      scope_from_product: Boolean(work.scope_from_product),
+      materials_to_order: work.materials_to_order.map(normalizeMaterialSupplier),
+      shelf_materials_rows: work.shelf_materials_rows.map(enrichShelfMaterialRow),
+      shelf_materials: work.shelf_materials_rows
+        .map((row) => row.link?.trim())
+        .filter(Boolean)
+        .join("\n") || null,
+      shelf_materials_cost: shelfMaterialsCostTotal(work.shelf_materials_rows),
+      skill_required: work.skill_required,
+      best_engineer: work.best_engineer || null,
+      subcontractors: subcontractorName || work.subcontractors || null,
+      engineers_required: true,
+      engineers_needed: people,
+      engineer_time_unit: units === "Hours" ? "hours" : "days",
+      engineer_time_value: duration,
+      labour_required: false,
+      labour_needed: 0,
+      labour_time_value: 0,
+      time_frame: formatTimeFrame(units === "Hours" ? "hours" : "days", duration),
+      other_notes: work.other_notes || null,
+      findings: work.findings?.trim() || null,
+      attachments: work.attachments,
+      markup_value: persistenceNumeric(work.markup_value, 20),
+      engineers: people,
+      labourers: 0,
+      labourer_days: 0,
+      labour_type: "subcontractor",
+      hours: units === "Hours" ? duration : 0,
+      days: units === "Days" ? duration : 0,
+      subcontractor_name: subcontractorName || null,
+      subcontractor_labour_cost: labourCost,
+      subcontractor_units_type: units,
+    };
+  }
+
   const labourActive = work.labour_required && work.engineers_required && work.engineer_time_unit === "days";
   const primaryUnit = work.engineers_required ? work.engineer_time_unit : "days";
   const primaryValue = work.engineers_required
@@ -1082,9 +1223,11 @@ function cleanProductName(value: string | null | undefined): string {
 
 function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBlockFormValues {
   const parsedEngineerTime = parseTimeFrame(step2.time_frame);
-  const hasEngineers = (step2.engineers_needed ?? step2.engineers ?? 0) > 0;
-  const hasLabour = (step2.labourers ?? 0) > 0;
+  const isSubcontractor = step2.labour_type === "subcontractor";
+  const hasEngineers = isSubcontractor || (step2.engineers_needed ?? step2.engineers ?? 0) > 0;
+  const hasLabour = !isSubcontractor && (step2.labourers ?? 0) > 0;
   const labourerDays = Number(step2.labourer_days ?? 0);
+  const defaults = defaultWorkBlockValues(tradeName);
   return {
     scope: cleanEditableScope(step2.scope),
     selected_product_id: null,
@@ -1100,7 +1243,7 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
     materials_to_order:
       step2.materials_to_order && step2.materials_to_order.length > 0
         ? migrateLegacyMaterialRows(step2.materials_to_order)
-        : defaultWorkBlockValues(tradeName).materials_to_order,
+        : defaults.materials_to_order,
     shelf_materials_rows: shelfRowsFromLegacy(
       step2.shelf_materials_rows,
       step2.shelf_materials,
@@ -1109,30 +1252,49 @@ function legacyBlockFromStep2(step2: Step2Snapshot, tradeName: string): WorkBloc
     skill_required: step2.skill_required?.trim() || tradeName,
     best_engineer: step2.best_engineer ?? "",
     subcontractors: step2.subcontractors ?? "",
+    labour_entry_type: isSubcontractor ? "subcontractor" : "direct",
+    subcontractor_name: step2.subcontractor_name ?? step2.subcontractors ?? "",
+    subcontractor_labour_cost: Number(step2.subcontractor_labour_cost ?? 0),
+    subcontractor_units_type:
+      step2.subcontractor_units_type === "Hours" || step2.subcontractor_units_type === "Days"
+        ? step2.subcontractor_units_type
+        : step2.hours && Number(step2.hours) > 0
+          ? "Hours"
+          : "Days",
     engineers_required: hasEngineers,
     engineers_needed: hasEngineers ? Math.max(1, Number(step2.engineers_needed ?? step2.engineers ?? 1)) : 0,
-    engineer_time_unit: parsedEngineerTime.time_unit,
-    engineer_time_value: parsedEngineerTime.time_value,
+    engineer_time_unit: isSubcontractor
+      ? step2.subcontractor_units_type === "Days" || Number(step2.days) > 0
+        ? "days"
+        : "hours"
+      : parsedEngineerTime.time_unit,
+    engineer_time_value: isSubcontractor
+      ? Number(step2.days || step2.hours || step2.engineer_time_value || 1)
+      : parsedEngineerTime.time_value,
     labour_required: hasLabour,
     labour_needed: hasLabour ? Math.max(1, Number(step2.labourers ?? 0)) : 0,
     labour_time_value:
-      labourerDays > 0 ? labourerDays : hasLabour ? parsedEngineerTime.time_value : defaultWorkBlockValues(tradeName).labour_time_value,
+      labourerDays > 0 ? labourerDays : hasLabour ? parsedEngineerTime.time_value : defaults.labour_time_value,
     other_notes: step2.other_notes ?? "",
     attachments: step2.attachments ?? [],
-    markup_value: Number(step2.markup_value ?? defaultWorkBlockValues(tradeName).markup_value),
+    markup_value: Number(step2.markup_value ?? defaults.markup_value),
   };
 }
 
 function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlockFormValues {
+  const isSubcontractor = block.labour_type === "subcontractor";
   const parsedEngineerTime = block.engineer_time_unit
     ? {
         time_unit: (block.engineer_time_unit === "days" ? "days" : "hours") as TimeUnit,
         time_value: Number(block.engineer_time_value ?? 1.5),
       }
     : parseTimeFrame(block.time_frame);
-  const engineersRequired = Boolean(block.engineers_required ?? (block.engineers_needed ?? block.engineers ?? 0) > 0);
-  const hasLabour = Boolean(block.labour_required ?? (block.labourers ?? 0) > 0);
+  const engineersRequired = isSubcontractor
+    ? true
+    : Boolean(block.engineers_required ?? (block.engineers_needed ?? block.engineers ?? 0) > 0);
+  const hasLabour = !isSubcontractor && Boolean(block.labour_required ?? (block.labourers ?? 0) > 0);
   const labourerDays = Number(block.labourer_days ?? 0);
+  const defaults = defaultWorkBlockValues(tradeName);
   return {
     scope: cleanEditableScope(block.scope),
     selected_product_id:
@@ -1164,17 +1326,32 @@ function blockFromSnapshot(block: WorkBlockSnapshot, tradeName: string): WorkBlo
     skill_required: block.skill_required?.trim() || tradeName,
     best_engineer: block.best_engineer ?? "",
     subcontractors: block.subcontractors ?? "",
+    labour_entry_type: isSubcontractor ? "subcontractor" : "direct",
+    subcontractor_name: block.subcontractor_name ?? block.subcontractors ?? "",
+    subcontractor_labour_cost: Number(block.subcontractor_labour_cost ?? 0),
+    subcontractor_units_type:
+      block.subcontractor_units_type === "Hours" || block.subcontractor_units_type === "Days"
+        ? block.subcontractor_units_type
+        : block.hours && Number(block.hours) > 0
+          ? "Hours"
+          : "Days",
     engineers_required: engineersRequired,
     engineers_needed: engineersRequired ? Math.max(1, Number(block.engineers_needed ?? block.engineers ?? 1)) : 0,
-    engineer_time_unit: parsedEngineerTime.time_unit,
-    engineer_time_value: parsedEngineerTime.time_value,
+    engineer_time_unit: isSubcontractor
+      ? block.subcontractor_units_type === "Days" || Number(block.days) > 0
+        ? "days"
+        : "hours"
+      : parsedEngineerTime.time_unit,
+    engineer_time_value: isSubcontractor
+      ? Number(block.days || block.hours || block.engineer_time_value || 1)
+      : parsedEngineerTime.time_value,
     labour_required: hasLabour,
     labour_needed: hasLabour ? Math.max(1, Number(block.labour_needed ?? block.labourers ?? 1)) : 0,
     labour_time_value: hasLabour
       ? Number(block.labour_time_value ?? 1)
       : labourerDays > 0
         ? labourerDays
-        : defaultWorkBlockValues(tradeName).labour_time_value,
+        : defaults.labour_time_value,
     other_notes: block.other_notes ?? "",
     findings: block.findings ?? "",
     attachments: block.attachments ?? [],

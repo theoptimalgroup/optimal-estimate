@@ -234,7 +234,142 @@ class DailyQuoteResult:
     direct_labour_cost: Decimal
 
 
-def format_notes_profit(result: HourlyQuoteResult | DailyQuoteResult) -> str:
+@dataclass
+class SubcontractorQuoteResult:
+    labour_charge: Decimal
+    materials_charge: Decimal
+    cost_labour: Decimal
+    cost_materials: Decimal
+    profit_gbp: Decimal
+    profit_pct: Decimal
+    overhead_gbp: Decimal
+    client_fee_gbp: Decimal
+    charge_denominator: Decimal
+    direct_labour_cost: Decimal
+    selected_overhead_pct: Decimal
+    subcontractor_name: str
+    trade: str
+    units_type: str
+    people_count: int
+    duration: Decimal
+
+
+# Excel subcontractor overhead base always uses the long-job rate in the divisor.
+_SUBCONTRACTOR_OVERHEAD_BASE_PCT = Decimal("0.15")
+
+
+def _subcontractor_overhead_pct(
+    units_type: str,
+    duration: Decimal,
+    cfg: XlsxCalculationConfig,
+) -> Decimal:
+    if units_type == "Hours":
+        return cfg.hourly_overhead_pct
+    if duration <= Decimal("2"):
+        return cfg.daily_overhead_pct
+    return cfg.daily_overhead_long_job_pct
+
+
+def calculate_subcontractor_quote(
+    *,
+    subcontractor_name: str = "",
+    trade: str = "",
+    units_type: str,
+    people_count: int,
+    duration: Decimal,
+    labour_cost: Decimal,
+    materials: Decimal = Decimal("0"),
+    parking: Decimal = Decimal("0"),
+    congestion: Decimal = Decimal("0"),
+    client_fee_pct: Decimal = Decimal("0"),
+    client_name: str = "",
+    config: XlsxCalculationConfig | None = None,
+) -> SubcontractorQuoteResult:
+    if duration <= 0:
+        raise ValueError("Subcontractor duration must be greater than zero")
+    if units_type not in {"Hours", "Days"}:
+        raise ValueError("Subcontractor units_type must be 'Hours' or 'Days'")
+
+    cfg = config or DEFAULT_CONFIG
+    if client_name and client_name != cfg.client_name:
+        cfg = XlsxCalculationConfig(
+            client_fee_pct=cfg.client_fee_pct,
+            hourly_overhead_pct=cfg.hourly_overhead_pct,
+            daily_overhead_pct=cfg.daily_overhead_pct,
+            daily_overhead_long_job_pct=cfg.daily_overhead_long_job_pct,
+            labourer_hourly_cost=cfg.labourer_hourly_cost,
+            labourer_daily_cost=cfg.labourer_daily_cost,
+            material_charge_denominator=cfg.material_charge_denominator,
+            mround_increment=cfg.mround_increment,
+            oj_uplift_pct=cfg.oj_uplift_pct,
+            nhs_overhead_uplift_pct=cfg.nhs_overhead_uplift_pct,
+            eaf_flat_fee=cfg.eaf_flat_fee,
+            client_name=client_name,
+        )
+
+    fee = client_fee_pct if client_fee_pct is not None else cfg.client_fee_pct
+    mround_inc = cfg.mround_increment
+    material_denom = cfg.material_charge_denominator
+    selected_oh = _subcontractor_overhead_pct(units_type, duration, cfg)
+    oj_mult = cfg.oj_multiplier
+    nhs_mult = cfg.nhs_overhead_multiplier
+
+    overhead_base = labour_cost / (Decimal("1") - _SUBCONTRACTOR_OVERHEAD_BASE_PCT - material_denom)
+    overhead = round_money(overhead_base * selected_oh * nhs_mult)
+    pre_fee_labour_cost = round_money(labour_cost + overhead)
+
+    charge_denominator = Decimal("1") - fee - material_denom
+    labour_charge = (
+        mround(pre_fee_labour_cost / charge_denominator, mround_inc)
+        if charge_denominator
+        else pre_fee_labour_cost
+    )
+    mat_input = parking + congestion + materials
+    materials_charge = (
+        mround(mat_input / charge_denominator, mround_inc)
+        if mat_input > 0 and charge_denominator
+        else Decimal("0")
+    )
+
+    labour_charge = mround(labour_charge * oj_mult, mround_inc)
+    if mat_input > 0:
+        materials_charge = mround(materials_charge * oj_mult, mround_inc)
+
+    total_charge = labour_charge + materials_charge
+    client_fee_gbp = round_money(total_charge * fee)
+
+    cost_labour = round_money(
+        labour_cost
+        + overhead
+        + client_fee_gbp * (labour_charge / total_charge if total_charge else Decimal("0"))
+    )
+    cost_materials = round_money(
+        mat_input + client_fee_gbp * (materials_charge / total_charge if total_charge else Decimal("0"))
+    )
+    profit_gbp = round_money(total_charge - cost_labour - cost_materials)
+    profit_pct = round_money(profit_gbp / total_charge * Decimal("100")) if total_charge else Decimal("0")
+
+    return SubcontractorQuoteResult(
+        labour_charge=labour_charge,
+        materials_charge=materials_charge,
+        cost_labour=cost_labour,
+        cost_materials=cost_materials,
+        profit_gbp=profit_gbp,
+        profit_pct=profit_pct,
+        overhead_gbp=overhead,
+        client_fee_gbp=client_fee_gbp,
+        charge_denominator=charge_denominator,
+        direct_labour_cost=round_money(labour_cost),
+        selected_overhead_pct=selected_oh,
+        subcontractor_name=subcontractor_name,
+        trade=trade,
+        units_type=units_type,
+        people_count=people_count,
+        duration=duration,
+    )
+
+
+def format_notes_profit(result: HourlyQuoteResult | DailyQuoteResult | SubcontractorQuoteResult) -> str:
     """Display whole-pound profit in notes; mirrors Excel when component rounding differs."""
     rounded_profit = excel_round(result.profit_gbp)
     component_profit = (
@@ -720,4 +855,67 @@ def build_internal_notes_daily(
             *_daily_notes_footer_lines(client_name),
         ]
     )
+    return "\n".join(lines)
+
+
+def _format_subcontractor_breakdown_charge(value: Decimal) -> str:
+    """Manual workbook breakdown: blank after £ when the charge is zero."""
+    if value > 0:
+        return format_notes_amount(value)
+    return ""
+
+
+def build_internal_notes_subcontractor(
+    *,
+    client_name: str,
+    client_fee_pct: Decimal = Decimal("0"),
+    trade: str,
+    subcontractor_name: str,
+    people_count: int,
+    units_type: str,
+    duration: Decimal,
+    result: SubcontractorQuoteResult,
+    parking: Decimal,
+    congestion: Decimal,
+    materials_amount: Decimal,
+    notes_context: InternalNotesContext | None = None,
+    using_fallback_rule: bool = False,
+) -> str:
+    context = notes_context or InternalNotesContext()
+    oh_pct_display = int(result.selected_overhead_pct * Decimal("100"))
+    overhead_display = format_notes_pounds(result.overhead_gbp)
+    profit_display = format_notes_profit(result)
+    duration_display = format_notes_amount(duration)
+    important_info = context.important_info.strip() or _important_info_for_trade(trade)
+    charge_to_us = round_money(result.direct_labour_cost + materials_amount + parking + congestion)
+    total_cost = excel_round(result.cost_labour) + excel_round(result.cost_materials)
+    total_charge = excel_round(result.labour_charge + result.materials_charge)
+    breakdown_line = (
+        f"Labour: £{format_notes_amount(result.direct_labour_cost)}  /  "
+        f"Materials: £{format_notes_amount(materials_amount)}  /  "
+        f"Parking: £{_format_subcontractor_breakdown_charge(parking)}  /  "
+        f"CC: £{_format_subcontractor_breakdown_charge(congestion)}  / OH: £{overhead_display}"
+    )
+
+    lines = [
+        _label_line("PRODUCT:", context.product),
+        f"SUBBY CALCULATOR with O/H @ {oh_pct_display}%",
+        _comms_line(client_name, client_fee_pct, using_fallback_rule=using_fallback_rule),
+        important_info,
+        _label_line("LINK/S & QUANTITY:", context.links_and_quantity),
+        f"SUBCONTRACTOR:  {subcontractor_name}",
+        "WHO WILL PROVIDE MATERIALS:  Subcontractor",
+        f"SUBCONTRACTOR CHARGE TO US:  £{format_notes_amount(charge_to_us)}  /  Breakdown ⬇️",
+        breakdown_line,
+        f"{people_count}  {trade}  for  {duration_display}  {units_type}",
+        "",
+        f"TOTAL COST TO OPTIMAL:  £{format_notes_pounds(total_cost)}",
+        f"TOTAL CHARGE TO CLIENT:  £{format_notes_pounds(total_charge)}",
+        _profit_line(
+            profit_display,
+            result.profit_pct,
+            result.labour_charge + result.materials_charge,
+            result.profit_gbp,
+        ),
+    ]
     return "\n".join(lines)

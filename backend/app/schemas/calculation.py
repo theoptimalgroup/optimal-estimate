@@ -2,6 +2,8 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -19,6 +21,9 @@ class LabourInput(BaseModel):
     manual_rate: Decimal | None = None
     override_reason: str | None = None
     trade_id: UUID | None = None
+    subcontractor_name: str | None = None
+    subcontractor_labour_cost: Decimal | None = None
+    subcontractor_units_type: Literal["Hours", "Days"] | None = None
 
 
 class MaterialInput(BaseModel):

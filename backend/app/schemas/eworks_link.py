@@ -210,6 +210,9 @@ class WorkBlockSnapshot(BaseModel):
     hours: Decimal = Decimal("0")
     days: Decimal = Decimal("0")
     labourer_days: Decimal = Decimal("0")
+    subcontractor_name: str | None = None
+    subcontractor_labour_cost: Decimal | None = None
+    subcontractor_units_type: str | None = None
     material_name: str = "Materials"
     quantity: Decimal = Decimal("1")
     unit_cost: Decimal = Decimal("0")
@@ -282,6 +285,9 @@ class Step2Snapshot(BaseModel):
     hours: Decimal = Decimal("0")
     days: Decimal = Decimal("0")
     labourer_days: Decimal = Decimal("0")
+    subcontractor_name: str | None = None
+    subcontractor_labour_cost: Decimal | None = None
+    subcontractor_units_type: str | None = None
     material_name: str = "Materials"
     quantity: Decimal = Decimal("1")
     unit_cost: Decimal = Decimal("0")
@@ -610,15 +616,28 @@ def step2_to_calculation_inputs(
     from app.services.eworks_questionnaire_service import apply_questionnaire_defaults, build_material_items
 
     normalized = apply_questionnaire_defaults(step2, trade_name=step1.trade_name)
-    labour = LabourInput(
-        labour_type=normalized.labour_type,
-        number_of_engineers=normalized.engineers,
-        number_of_labourers=normalized.labourers,
-        hours_on_site=normalized.hours if normalized.labour_type == "hourly" else None,
-        days_on_site=normalized.days if normalized.labour_type in {"day", "half_day"} else None,
-        labourer_days=normalized.labourer_days if normalized.labour_type in {"day", "half_day"} else None,
-        trade_id=trade_id,
-    )
+    if normalized.labour_type == "subcontractor":
+        units = normalized.subcontractor_units_type or ("Hours" if normalized.hours > 0 else "Days")
+        labour = LabourInput(
+            labour_type="subcontractor",
+            number_of_engineers=normalized.engineers,
+            subcontractor_name=normalized.subcontractor_name or normalized.subcontractors,
+            subcontractor_labour_cost=normalized.subcontractor_labour_cost,
+            subcontractor_units_type=units,
+            hours_on_site=normalized.hours if units == "Hours" else None,
+            days_on_site=normalized.days if units == "Days" else None,
+            trade_id=trade_id,
+        )
+    else:
+        labour = LabourInput(
+            labour_type=normalized.labour_type,
+            number_of_engineers=normalized.engineers,
+            number_of_labourers=normalized.labourers,
+            hours_on_site=normalized.hours if normalized.labour_type == "hourly" else None,
+            days_on_site=normalized.days if normalized.labour_type in {"day", "half_day"} else None,
+            labourer_days=normalized.labourer_days if normalized.labour_type in {"day", "half_day"} else None,
+            trade_id=trade_id,
+        )
     materials: list[MaterialInput] = []
     for material_name, quantity, unit_cost, delivery_cost in build_material_items(normalized):
         materials.append(

@@ -163,7 +163,7 @@ def build_calculation_breakdown(
         rule
         and getattr(rule, "formula_source", "simplified") == "xlsx"
         and labour_items
-        and all(item.labour_type in ("hourly", "day") for item in labour_items)
+        and all(item.labour_type in ("hourly", "day", "subcontractor") for item in labour_items)
     ):
         from app.engines.xlsx_breakdown_engine import build_xlsx_calculation_breakdown
 

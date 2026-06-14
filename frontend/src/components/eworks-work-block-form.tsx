@@ -653,7 +653,7 @@ export function EworksWorkBlockForm({
   const showWorkChargeSummary =
     quoteCharges != null &&
     (quoteCharges.parking_required || quoteCharges.congestion_required) &&
-    values.engineers_required;
+    (values.engineers_required || values.labour_entry_type === "subcontractor");
   const workErrors = errors.works?.[workIndex];
   const suppliers = values.materials_to_order;
   const shelfRows = values.shelf_materials_rows;
@@ -825,7 +825,8 @@ export function EworksWorkBlockForm({
     );
   };
 
-  const showLabour = values.engineers_required && values.engineer_time_unit === "days";
+  const showLabour = values.labour_entry_type !== "subcontractor" && values.engineers_required && values.engineer_time_unit === "days";
+  const isSubcontractor = values.labour_entry_type === "subcontractor";
 
   const engineerTimeUnitField = register(fieldPath(workIndex, "engineer_time_unit"));
 
@@ -840,6 +841,18 @@ export function EworksWorkBlockForm({
   const clearLabour = () => {
     setValue(`works.${workIndex}.labour_required`, false, { shouldValidate: true });
     setValue(`works.${workIndex}.labour_needed`, 0, { shouldValidate: true });
+  };
+
+  const handleLabourEntryTypeChange = (entryType: "direct" | "subcontractor") => {
+    setValue(fieldPath(workIndex, "labour_entry_type"), entryType, { shouldValidate: true });
+    if (entryType === "subcontractor") {
+      setValue(fieldPath(workIndex, "engineers_required"), true, { shouldValidate: true });
+      setValue(fieldPath(workIndex, "labour_required"), false, { shouldValidate: true });
+      setValue(fieldPath(workIndex, "labour_needed"), 0, { shouldValidate: true });
+      if (!values.subcontractor_units_type) {
+        setValue(fieldPath(workIndex, "subcontractor_units_type"), "Days", { shouldValidate: true });
+      }
+    }
   };
 
   const appendScopeText = useCallback(
@@ -1281,12 +1294,99 @@ export function EworksWorkBlockForm({
               Best Engineer
               <EworksInput {...register(fieldPath(workIndex, "best_engineer"))} />
             </EworksLabel>
-            <EworksLabel>
-              Subcontractors
-              <EworksInput {...register(fieldPath(workIndex, "subcontractors"))} />
-            </EworksLabel>
+            {!isSubcontractor ? (
+              <EworksLabel>
+                Subcontractors
+                <EworksInput {...register(fieldPath(workIndex, "subcontractors"))} />
+              </EworksLabel>
+            ) : null}
           </div>
           <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <EworksLabel>
+              Labour type
+              <select
+                className={eworksInputClass(!!workErrors?.labour_entry_type)}
+                value={values.labour_entry_type ?? "direct"}
+                onChange={(event) => handleLabourEntryTypeChange(event.target.value as "direct" | "subcontractor")}
+                data-testid={`work-labour-entry-type-${workIndex}`}
+              >
+                <option value="direct">Direct (hourly / daily)</option>
+                <option value="subcontractor">Subcontractor</option>
+              </select>
+              <EworksFieldError message={workErrors?.labour_entry_type?.message} />
+            </EworksLabel>
+
+            {isSubcontractor ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <EworksLabel>
+                  Subcontractor name
+                  <EworksInput {...register(fieldPath(workIndex, "subcontractor_name"))} />
+                  <EworksFieldError message={workErrors?.subcontractor_name?.message} />
+                </EworksLabel>
+                <EworksLabel>
+                  Subcontractor labour cost (£)
+                  <Controller
+                    name={fieldPath(workIndex, "subcontractor_labour_cost")}
+                    control={control}
+                    render={({ field, fieldState }) => (
+                      <>
+                        <NumericInput field={field} hasError={!!fieldState.error} placeholder="Required" />
+                        <EworksFieldError message={fieldState.error?.message} />
+                      </>
+                    )}
+                  />
+                </EworksLabel>
+                <EworksLabel>
+                  Units type
+                  <select
+                    className={eworksInputClass(!!workErrors?.subcontractor_units_type)}
+                    {...register(fieldPath(workIndex, "subcontractor_units_type"))}
+                  >
+                    <option value="Hours">Hours</option>
+                    <option value="Days">Days</option>
+                  </select>
+                  <EworksFieldError message={workErrors?.subcontractor_units_type?.message} />
+                </EworksLabel>
+                <EworksLabel>
+                  Number of guys
+                  <Controller
+                    name={fieldPath(workIndex, "engineers_needed")}
+                    control={control}
+                    render={({ field, fieldState }) => (
+                      <>
+                        <NumericInput field={field} hasError={!!fieldState.error} placeholder="Required" />
+                        <EworksFieldError message={fieldState.error?.message} />
+                      </>
+                    )}
+                  />
+                </EworksLabel>
+                <EworksLabel>
+                  Duration
+                  <Controller
+                    name={fieldPath(workIndex, "engineer_time_value")}
+                    control={control}
+                    render={({ field, fieldState }) => (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <NumericInput field={field} hasError={!!fieldState.error} placeholder="Required" />
+                          <span className="shrink-0 text-sm text-slate-600">
+                            {values.subcontractor_units_type === "Hours"
+                              ? values.engineer_time_value === 1
+                                ? "hour"
+                                : "hours"
+                              : values.engineer_time_value === 1
+                                ? "day"
+                                : "days"}
+                          </span>
+                        </div>
+                        <EworksFieldError message={fieldState.error?.message} />
+                      </>
+                    )}
+                  />
+                </EworksLabel>
+              </div>
+            ) : (
+              <>
             <Controller
               name={fieldPath(workIndex, "engineers_required")}
               control={control}
@@ -1361,6 +1461,8 @@ export function EworksWorkBlockForm({
                   />
                 </EworksLabel>
               </div>
+            )}
+              </>
             )}
             {showWorkChargeSummary && (
               <div

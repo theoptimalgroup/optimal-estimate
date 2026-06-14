@@ -201,6 +201,34 @@ def build_skill_group_labour_inputs(
     *,
     trade_id: UUID,
 ) -> tuple[list[LabourInput], AggregatedWorkInputs]:
+    if len(group_works) == 1 and group_works[0].labour_type == "subcontractor":
+        block = group_works[0]
+        units = block.subcontractor_units_type or ("Hours" if block.hours > 0 else "Days")
+        duration = block.hours if units == "Hours" else block.days
+        aggregated = AggregatedWorkInputs(
+            labour_type="subcontractor",
+            engineers=block.engineers_needed or block.engineers,
+            hours=block.hours if units == "Hours" else Decimal("0"),
+            days=block.days if units == "Days" else Decimal("0"),
+            labourers=0,
+            labourer_days=Decimal("0"),
+            uses_mixed_units=False,
+            converted_from_hours=False,
+            total_engineer_hours=Decimal("0"),
+            total_labour_days=Decimal("0"),
+        )
+        labour = LabourInput(
+            labour_type="subcontractor",
+            number_of_engineers=aggregated.engineers,
+            subcontractor_name=block.subcontractor_name or block.subcontractors,
+            subcontractor_labour_cost=block.subcontractor_labour_cost,
+            subcontractor_units_type=units,
+            hours_on_site=duration if units == "Hours" else None,
+            days_on_site=duration if units == "Days" else None,
+            trade_id=trade_id,
+        )
+        return [labour], aggregated
+
     aggregated = aggregate_work_blocks(group_works)
     labour = LabourInput(
         labour_type=aggregated.labour_type,

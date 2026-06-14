@@ -9,11 +9,35 @@ from app.engines.xlsx_quote_calculator import (
     XlsxTradeRates,
     build_internal_notes_daily,
     build_internal_notes_hourly,
+    build_internal_notes_subcontractor,
     calculate_daily_quote,
     calculate_hourly_quote,
+    calculate_subcontractor_quote,
 )
 from app.models.rate_rule import RateRule
 from app.schemas.calculation import CalculationBreakdown, ChargeInput, InternalNotesContext, LabourInput, LineBreakdown, MaterialInput
+
+
+def _resolve_subcontractor_units(labour_item: LabourInput) -> tuple[str, Decimal]:
+    if labour_item.subcontractor_units_type:
+        units_type = labour_item.subcontractor_units_type
+        duration = (
+            labour_item.hours_on_site
+            if units_type == "Hours"
+            else labour_item.days_on_site
+        )
+    elif labour_item.days_on_site is not None and labour_item.days_on_site > 0:
+        units_type = "Days"
+        duration = labour_item.days_on_site
+    elif labour_item.hours_on_site is not None and labour_item.hours_on_site > 0:
+        units_type = "Hours"
+        duration = labour_item.hours_on_site
+    else:
+        raise ValueError("Subcontractor quote requires hours_on_site or days_on_site duration")
+
+    if duration is None or duration <= 0:
+        raise ValueError("Subcontractor duration must be greater than zero")
+    return units_type, duration
 
 
 def config_from_rule(
@@ -126,7 +150,46 @@ def build_xlsx_calculation_breakdown(
     if manual_override_used:
         warnings.append("MANUAL_OVERRIDE_IN_XLSX_MODE")
 
-    if labour_item.labour_type == "hourly":
+    if labour_item.labour_type == "subcontractor":
+        if labour_item.subcontractor_labour_cost is None:
+            raise ValueError("Subcontractor quote requires subcontractor_labour_cost")
+        units_type, duration = _resolve_subcontractor_units(labour_item)
+        subcontractor_name = labour_item.subcontractor_name or ""
+        result = calculate_subcontractor_quote(
+            subcontractor_name=subcontractor_name,
+            trade=trade.trade,
+            units_type=units_type,
+            people_count=labour_item.number_of_engineers,
+            duration=duration,
+            labour_cost=labour_item.subcontractor_labour_cost,
+            materials=materials_input,
+            parking=parking_input,
+            congestion=congestion_input,
+            client_fee_pct=fee_pct,
+            client_name=notes_client_name,
+            config=cfg,
+        )
+        internal_notes = rule.internal_notes_template or build_internal_notes_subcontractor(
+            client_name=notes_client_name,
+            client_fee_pct=fee_pct,
+            trade=trade.trade,
+            subcontractor_name=subcontractor_name,
+            people_count=labour_item.number_of_engineers,
+            units_type=units_type,
+            duration=duration,
+            result=result,
+            parking=parking_input,
+            congestion=congestion_input,
+            materials_amount=materials_input,
+            notes_context=internal_notes_context,
+            using_fallback_rule=using_fallback_rule,
+        )
+        labour_formula = (
+            f"XLSX subcontractor MROUND((labour+OH)/(1-{fee_pct}-{rule.material_charge_denominator}), "
+            f"{rule.mround_increment})"
+        )
+        denominator_used = result.charge_denominator
+    elif labour_item.labour_type == "hourly":
         hours = labour_item.hours_on_site or Decimal("0")
         result = calculate_hourly_quote(
             trade=trade,

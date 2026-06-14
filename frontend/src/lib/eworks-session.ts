@@ -88,6 +88,9 @@ export type WorkBlockSnapshot = {
   hours?: number | string;
   days?: number | string;
   markup_value?: number | string;
+  subcontractor_name?: string | null;
+  subcontractor_labour_cost?: number | string | null;
+  subcontractor_units_type?: string | null;
   // Per-work charges
   parking_required?: boolean;
   parking_type?: string | null;

@@ -61,6 +61,45 @@ def format_time_frame(unit: str, value: Decimal | float) -> str:
 
 
 def work_block_to_step2_snapshot(block: WorkBlockSnapshot, *, trade_name: str) -> Step2Snapshot:
+    if block.labour_type == "subcontractor":
+        units = block.subcontractor_units_type or ("Hours" if block.hours > 0 else "Days")
+        duration = block.hours if units == "Hours" else block.days
+        if duration <= 0:
+            duration = block.engineer_time_value
+        time_frame = block.time_frame or format_time_frame(
+            "hours" if units == "Hours" else "days",
+            duration,
+        )
+        step2 = Step2Snapshot(
+            scope=block.scope,
+            materials_to_order=block.materials_to_order,
+            shelf_materials_rows=block.shelf_materials_rows,
+            shelf_materials=block.shelf_materials,
+            shelf_materials_cost=block.shelf_materials_cost,
+            skill_required=block.skill_required or trade_name,
+            best_engineer=block.best_engineer,
+            subcontractors=block.subcontractors or block.subcontractor_name,
+            time_frame=time_frame,
+            engineers_needed=block.engineers_needed or block.engineers,
+            other_notes=block.other_notes,
+            attachments=block.attachments,
+            findings=block.findings,
+            engineers=block.engineers_needed or block.engineers,
+            labourers=0,
+            labourer_days=Decimal("0"),
+            labour_type="subcontractor",
+            hours=duration if units == "Hours" else Decimal("0"),
+            days=duration if units == "Days" else Decimal("0"),
+            markup_value=block.markup_value,
+            material_name=block.material_name,
+            quantity=block.quantity,
+            unit_cost=block.unit_cost,
+            subcontractor_name=block.subcontractor_name or block.subcontractors,
+            subcontractor_labour_cost=block.subcontractor_labour_cost,
+            subcontractor_units_type=units,
+        )
+        return apply_questionnaire_defaults(step2, trade_name=trade_name)
+
     labour_active = block.labour_required and block.engineers_required and block.engineer_time_unit == "days"
     primary_unit = block.engineer_time_unit if block.engineers_required else "days"
     primary_value = block.engineer_time_value if block.engineers_required else block.labour_time_value
@@ -111,7 +150,7 @@ def apply_questionnaire_defaults(step2: Step2Snapshot, *, trade_name: str, defau
     data = step2.model_copy(deep=True)
     if default_skill and not data.skill_required:
         data.skill_required = trade_name
-    if data.time_frame:
+    if data.time_frame and data.labour_type != "subcontractor":
         labour_type, hours, days = parse_time_frame(data.time_frame)
         data.labour_type = labour_type
         data.hours = hours

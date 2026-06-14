@@ -11,6 +11,7 @@ import {
   mergeQuestionnaireWithSessionStep2,
   migrateLegacyMaterialRows,
   normalizeSharedWorkBlocks,
+  questionnaireSchema,
   questionnaireToStep2,
   shelfMaterialLineTotal,
   shelfMaterialsCostTotal,
@@ -336,5 +337,82 @@ describe("materials subtotals", () => {
     work.shelf_materials_rows = [{ link: "Shelf item", quantity: 3, cost: 15 }];
     expect(grandTotalMaterials(work)).toBe(245);
     expect(formatCurrency(grandTotalMaterials(work))).toBe("£245.00");
+  });
+});
+
+describe("subcontractor labour", () => {
+  it("maps subcontractor work block to step2 snapshot with backend fields", () => {
+    const work = {
+      ...defaultWorkBlockValues("Scaffolder"),
+      labour_entry_type: "subcontractor" as const,
+      subcontractor_name: "Danny Arnold Scaffolding",
+      subcontractor_labour_cost: 1500,
+      subcontractor_units_type: "Days" as const,
+      engineers_needed: 3,
+      engineer_time_value: 6,
+      skill_required: "Scaffolder",
+    };
+    const snapshot = workBlockToSnapshot(work);
+
+    expect(snapshot.labour_type).toBe("subcontractor");
+    expect(snapshot.subcontractor_name).toBe("Danny Arnold Scaffolding");
+    expect(snapshot.subcontractor_labour_cost).toBe(1500);
+    expect(snapshot.subcontractor_units_type).toBe("Days");
+    expect(snapshot.engineers).toBe(3);
+    expect(snapshot.days).toBe(6);
+    expect(snapshot.hours).toBe(0);
+    expect(snapshot.subcontractors).toBe("Danny Arnold Scaffolding");
+  });
+
+  it("restores subcontractor fields from snapshot", () => {
+    const questionnaire = step2ToQuestionnaire(
+      {
+        works: [
+          {
+            scope: "Scaffold access",
+            skill_required: "Scaffolder",
+            labour_type: "subcontractor",
+            subcontractor_name: "Danny Arnold Scaffolding",
+            subcontractor_labour_cost: 1500,
+            subcontractor_units_type: "Days",
+            engineers_needed: 3,
+            days: 6,
+            hours: 0,
+          },
+        ],
+      },
+      "Scaffolder",
+    );
+
+    expect(questionnaire.works[0].labour_entry_type).toBe("subcontractor");
+    expect(questionnaire.works[0].subcontractor_name).toBe("Danny Arnold Scaffolding");
+    expect(questionnaire.works[0].subcontractor_labour_cost).toBe(1500);
+    expect(questionnaire.works[0].subcontractor_units_type).toBe("Days");
+    expect(questionnaire.works[0].engineers_needed).toBe(3);
+    expect(questionnaire.works[0].engineer_time_value).toBe(6);
+  });
+
+  it("rejects invalid subcontractor labour cost and duration", () => {
+    const values = coerceQuestionnaireValues({
+      ...defaultQuestionnaireValues,
+      works: [
+        {
+          ...defaultWorkBlockValues("Scaffolder"),
+          labour_entry_type: "subcontractor",
+          subcontractor_name: "Example Subby",
+          subcontractor_labour_cost: 0,
+          subcontractor_units_type: "Days",
+          engineers_needed: 1,
+          engineer_time_value: 0,
+        },
+      ],
+    });
+    const parsed = questionnaireSchema.safeParse(values);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const messages = parsed.error.issues.map((issue) => issue.message);
+      expect(messages).toContain("Subcontractor labour cost must be greater than 0");
+      expect(messages).toContain("Duration must be greater than 0");
+    }
   });
 });

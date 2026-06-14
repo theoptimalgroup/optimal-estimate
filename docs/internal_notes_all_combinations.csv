@@ -1,0 +1,560 @@
+﻿case_id,calculation_type,charge_case,client,trade,number_of_engineers,hours,skilled_engineer_days,number_of_labourers,labourer_days,subcontractors_name,number_of_guys,hours_or_days,duration,labour_cost_gbp,parking_gbp,congestion_charge_gbp,materials_gbp,internal_notes
+IN-001,Hourly,no_charges,Portico / Leaders,Painter & Decorator,1,2.5,,,,,,,,,0,0,0,"PRODUCT:		
+IMPORTANT INFO:		
+Portico / Leaders Comms @ 12%		
+HOURLY QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		 
+1  Painter & Decorator  for  2.5  Hour/s		
+		
+BUDGET: Materials:  £ / Parking: £0 / CC: £0  / OH:  £71		
+TOTAL COST TO OPTIMAL:  Labour etc:  £105  /  Materials etc:  £0		
+TOTAL CHARGE TO CLIENT:  Labour:  £270  / Materials etc:  £0		
+PROFIT ON JOB:  £165 / 61%		
+		
+EXTERNAL DELIVERY:		
+Parking: £0 / CC: £0		
+Labour Only:  £100 @ £40p/h = Profit: £67 / 25%		
+Labour & Materials:  £100 = Profit: £67 / 25%		
+		"
+IN-002,Hourly,parking_only,Portico / Leaders,Painter & Decorator,1,2.5,,,,,,,,,39.38,0,0,"PRODUCT:		
+IMPORTANT INFO:		
+Portico / Leaders Comms @ 12%		
+HOURLY QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		 
+1  Painter & Decorator  for  2.5  Hour/s		
+		
+BUDGET: Materials:  £ / Parking: £39.38 / CC: £0  / OH:  £71		
+TOTAL COST TO OPTIMAL:  Labour etc:  £105  /  Materials etc:  £47		
+TOTAL CHARGE TO CLIENT:  Labour:  £270  / Materials etc:  £60		
+PROFIT ON JOB:  £179 / 54%		
+		
+EXTERNAL DELIVERY:		
+Parking: £39.38 / CC: £0		
+Labour Only:  £100 @ £40p/h = Profit: £80 / 24%		
+Labour & Materials:  £100 = Profit: £80 / 24%		
+		"
+IN-003,Hourly,congestion_only,Portico / Leaders,Painter & Decorator,1,2.5,,,,,,,,,0,28.8,0,"PRODUCT:		
+IMPORTANT INFO:		
+Portico / Leaders Comms @ 12%		
+HOURLY QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		 
+1  Painter & Decorator  for  2.5  Hour/s		
+		
+BUDGET: Materials:  £ / Parking: £ / CC: £28.8  / OH:  £71		
+TOTAL COST TO OPTIMAL:  Labour etc:  £105  /  Materials etc:  £34		
+TOTAL CHARGE TO CLIENT:  Labour:  £270  / Materials etc:  £40		
+PROFIT ON JOB:  £172 / 55%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £28.8		
+Labour Only:  £100 @ £40p/h = Profit: £73 / 24%		
+Labour & Materials:  £100 = Profit: £73 / 24%		"
+IN-004,Hourly,materials_only,Portico / Leaders,Painter & Decorator,1,2.5,,,,,,,,,0,0,1183.2,"PRODUCT:		
+IMPORTANT INFO:		
+Portico / Leaders Comms @ 12%		
+HOURLY QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		 
+1  Painter & Decorator  for  2.5  Hour/s		
+		
+BUDGET: Materials:  £1183.2 / Parking: £0 / CC: £0  / OH:  £71		
+TOTAL COST TO OPTIMAL:  Labour etc:  £105  /  Materials etc:  £1392		
+TOTAL CHARGE TO CLIENT:  Labour:  £270  / Materials etc:  £1740		
+PROFIT ON JOB:  £513 / 26%		
+		
+EXTERNAL DELIVERY:		
+Parking: £0 / CC: £0		
+Labour Only:  £100 @ £40p/h = Profit: £415 / 21%		
+Labour & Materials:  £1283 = Profit: £415 / 21%		"
+IN-005,Hourly,parking_and_congestion,Portico / Leaders,Painter & Decorator,1,2.5,,,,,,,,,39.38,28.8,0,"PRODUCT:		
+IMPORTANT INFO:		
+Portico / Leaders Comms @ 12%		
+HOURLY QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		 
+1  Painter & Decorator  for  2.5  Hour/s		
+		
+BUDGET: Materials:  £0 / Parking: £39.38 / CC: £28.8  / OH:  £71		
+TOTAL COST TO OPTIMAL:  Labour etc:  £105  /  Materials etc:  £80		
+TOTAL CHARGE TO CLIENT:  Labour:  £270  / Materials etc:  £100		
+PROFIT ON JOB:  £185 / 50%		
+		
+EXTERNAL DELIVERY:		
+Parking: £39.38 / CC: £28.8		
+Labour Only:  £100 @ £40p/h = Profit: £86 / 23%		
+Labour & Materials:  £100 = Profit: £86 / 23%		
+		"
+IN-006,Hourly,parking_and_materials,Portico / Leaders,Painter & Decorator,1,2.5,,,,,,,,,39.38,0,1183.2,"PRODUCT:		
+IMPORTANT INFO:		
+Portico / Leaders Comms @ 12%		
+HOURLY QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		 
+1  Painter & Decorator  for  2.5  Hour/s		
+		
+BUDGET: Materials:  £1183.2 / Parking: £39.38 / CC: £0  / OH:  £71		
+TOTAL COST TO OPTIMAL:  Labour etc:  £105  /  Materials etc:  £1439		
+TOTAL CHARGE TO CLIENT:  Labour:  £270  / Materials etc:  £1800		
+PROFIT ON JOB:  £527 / 25%		
+		
+EXTERNAL DELIVERY:		
+Parking: £39.38 / CC: £0		
+Labour Only:  £100 @ £40p/h = Profit: £428 / 21%		
+Labour & Materials:  £1283 = Profit: £428 / 21%		
+		"
+IN-007,Hourly,congestion_and_materials,Portico / Leaders,Painter & Decorator,1,2.5,,,,,,,,,0,28.8,1183.2,"PRODUCT:		
+IMPORTANT INFO:		
+Portico / Leaders Comms @ 12%		
+HOURLY QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		 
+1  Painter & Decorator  for  2.5  Hour/s		
+		
+BUDGET: Materials:  £1183.2 / Parking: £0 / CC: £28.8  / OH:  £71		
+TOTAL COST TO OPTIMAL:  Labour etc:  £105  /  Materials etc:  £1426		
+TOTAL CHARGE TO CLIENT:  Labour:  £270  / Materials etc:  £1780		
+PROFIT ON JOB:  £520 / 25%		
+		
+EXTERNAL DELIVERY:		
+Parking: £0 / CC: £28.8		
+Labour Only:  £100 @ £40p/h = Profit: £421 / 21%		
+Labour & Materials:  £1283 = Profit: £421 / 21%		
+		"
+IN-008,Hourly,parking_congestion_materials,Portico / Leaders,Painter & Decorator,1,2.5,,,,,,,,,39.38,28.8,1183.2,"PRODUCT:		
+IMPORTANT INFO:		
+Portico / Leaders Comms @ 12%		
+HOURLY QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		 
+1  Painter & Decorator  for  2.5  Hour/s		
+		
+BUDGET: Materials:  £1183.2 / Parking: £39.38 / CC: £28.8  / OH:  £71		
+TOTAL COST TO OPTIMAL:  Labour etc:  £105  /  Materials etc:  £1472		
+TOTAL CHARGE TO CLIENT:  Labour:  £270  / Materials etc:  £1840		
+PROFIT ON JOB:  £533 / 25%		
+		
+EXTERNAL DELIVERY:		
+Parking: £39.38 / CC: £28.8		
+Labour Only:  £100 @ £40p/h = Profit: £434 / 21%		
+Labour & Materials:  £1283 = Profit: £434 / 21%		
+		"
+IN-009,Daily - Up to 2 Days,no_charges,Grays Surveying Services Ltd,Multi-trader,1,,2,0,,,,,,,0,0,0,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (Up to 2 Days) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  2  Day/s  +  0  labourer  for   day/s		
+		
+BUDGET: Materials:  £ / Parking: £ / CC: £  / OH: £160		
+TOTAL COST TO OPTIMAL:  Labour etc:  £638  /  Materials etc:  £0		
+TOTAL CHARGE TO CLIENT:  Labour:  £800  / Materials etc:  £0		
+PROFIT ON JOB:  £162 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £		
+Labour Only:  £479 = Profit: £162 / 20%		
+Labour & Materials:  £479 = Profit: £162 / 20%		
+		"
+IN-010,Daily - Up to 2 Days,parking_only,Grays Surveying Services Ltd,Multi-trader,1,,2,0,,,,,,,200,0,0,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (Up to 2 Days) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  2  Day/s  +  0  labourer  for   day/s		
+		
+BUDGET: Materials:  £ / Parking: £200 / CC: £  / OH: £160		
+TOTAL COST TO OPTIMAL:  Labour etc:  £638  /  Materials etc:  £200		
+TOTAL CHARGE TO CLIENT:  Labour:  £800  / Materials etc:  £250		
+PROFIT ON JOB:  £212 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £200 / CC: £		
+Labour Only:  £479 = Profit: £212 / 20%		
+Labour & Materials:  £479 = Profit: £212 / 20%		"
+IN-011,Daily - Up to 2 Days,congestion_only,Grays Surveying Services Ltd,Multi-trader,1,,2,0,,,,,,,0,18,0,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (Up to 2 Days) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  2  Day/s  +  0  labourer  for   day/s		
+		
+BUDGET: Materials:  £ / Parking: £ / CC: £18  / OH: £160		
+TOTAL COST TO OPTIMAL:  Labour etc:  £638  /  Materials etc:  £18		
+TOTAL CHARGE TO CLIENT:  Labour:  £800  / Materials etc:  £25		
+PROFIT ON JOB:  £169 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £18		
+Labour Only:  £479 = Profit: £169 / 20%		
+Labour & Materials:  £479 = Profit: £169 / 20%		
+		"
+IN-012,Daily - Up to 2 Days,materials_only,Grays Surveying Services Ltd,Multi-trader,1,,2,0,,,,,,,0,0,90,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (Up to 2 Days) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  2  Day/s  +  0  labourer  for   day/s		
+		
+BUDGET: Materials:  £90 / Parking: £ / CC: £  / OH: £160		
+TOTAL COST TO OPTIMAL:  Labour etc:  £638  /  Materials etc:  £90		
+TOTAL CHARGE TO CLIENT:  Labour:  £800  / Materials etc:  £115		
+PROFIT ON JOB:  £187 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £		
+Labour Only:  £479 = Profit: £187 / 20%		
+Labour & Materials:  £569 = Profit: £187 / 20%		"
+IN-013,Daily - Up to 2 Days,parking_and_congestion,Grays Surveying Services Ltd,Multi-trader,1,,2,0,,,,,,,200,18,0,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (Up to 2 Days) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  2  Day/s  +  0  labourer  for   day/s		
+		
+BUDGET: Materials:  £0 / Parking: £200 / CC: £18  / OH: £160		
+TOTAL COST TO OPTIMAL:  Labour etc:  £638  /  Materials etc:  £218		
+TOTAL CHARGE TO CLIENT:  Labour:  £800  / Materials etc:  £275		
+PROFIT ON JOB:  £219 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £200 / CC: £18		
+Labour Only:  £479 = Profit: £219 / 20%		
+Labour & Materials:  £479 = Profit: £219 / 20%		"
+IN-014,Daily - Up to 2 Days,parking_and_materials,Grays Surveying Services Ltd,Multi-trader,1,,2,0,,,,,,,200,0,90,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (Up to 2 Days) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  2  Day/s  +  0  labourer  for   day/s		
+		
+BUDGET: Materials:  £90 / Parking: £200 / CC: £  / OH: £160		
+TOTAL COST TO OPTIMAL:  Labour etc:  £638  /  Materials etc:  £290		
+TOTAL CHARGE TO CLIENT:  Labour:  £800  / Materials etc:  £365		
+PROFIT ON JOB:  £237 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £200 / CC: £		
+Labour Only:  £479 = Profit: £237 / 20%		
+Labour & Materials:  £569 = Profit: £237 / 20%		"
+IN-015,Daily - Up to 2 Days,congestion_and_materials,Grays Surveying Services Ltd,Multi-trader,1,,2,0,,,,,,,0,18,90,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (Up to 2 Days) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  2  Day/s  +  0  labourer  for   day/s		
+		
+BUDGET: Materials:  £90 / Parking: £ / CC: £18  / OH: £160		
+TOTAL COST TO OPTIMAL:  Labour etc:  £638  /  Materials etc:  £108		
+TOTAL CHARGE TO CLIENT:  Labour:  £800  / Materials etc:  £135		
+PROFIT ON JOB:  £189 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £18		
+Labour Only:  £479 = Profit: £189 / 20%		
+Labour & Materials:  £569 = Profit: £189 / 20%		"
+IN-016,Daily - Up to 2 Days,parking_congestion_materials,Grays Surveying Services Ltd,Multi-trader,1,,2,0,,,,,,,200,18,90,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (Up to 2 Days) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  2  Day/s  +  0  labourer  for   day/s		
+		
+BUDGET: Materials:  £90 / Parking: £200 / CC: £18  / OH: £160		
+TOTAL COST TO OPTIMAL:  Labour etc:  £638  /  Materials etc:  £308		
+TOTAL CHARGE TO CLIENT:  Labour:  £800  / Materials etc:  £385		
+PROFIT ON JOB:  £239 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £200 / CC: £18		
+Labour Only:  £479 = Profit: £239 / 20%		
+Labour & Materials:  £569 = Profit: £239 / 20%		"
+IN-017,Daily - 3 Days or More,no_charges,Grays Surveying Services Ltd,Multi-trader,1,,5,1,5,,,,,,0,0,0,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (3 Days >) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  5  Day/s  +  1  labourer  for  5 day/s		
+		
+BUDGET: Materials:  £ / Parking: £ / CC: £  / OH: £449		
+TOTAL COST TO OPTIMAL:  Labour etc:  £2396  /  Materials etc:  £0		
+TOTAL CHARGE TO CLIENT:  Labour:  £2995  / Materials etc:  £0		
+PROFIT ON JOB:  £599 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £		
+Labour Only:  £1947 = Profit: £599 / 20%		
+Labour & Materials:  £1947 = Profit: £599 / 20%		
+		"
+IN-018,Daily - 3 Days or More,parking_only,Grays Surveying Services Ltd,Multi-trader,1,,5,1,5,,,,,,0,18,0,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (3 Days >) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  5  Day/s  +  1  labourer  for  5 day/s		
+		
+BUDGET: Materials:  £ / Parking: £ / CC: £18  / OH: £449		
+TOTAL COST TO OPTIMAL:  Labour etc:  £2396  /  Materials etc:  £18		
+TOTAL CHARGE TO CLIENT:  Labour:  £2995  / Materials etc:  £25		
+PROFIT ON JOB:  £606 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £18		
+Labour Only:  £1947 = Profit: £606 / 20%		
+Labour & Materials:  £1947 = Profit: £606 / 20%		"
+IN-019,Daily - 3 Days or More,congestion_only,Grays Surveying Services Ltd,Multi-trader,1,,5,1,5,,,,,,20,18,380,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (3 Days >) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  5  Day/s  +  1  labourer  for  5 day/s		
+		
+BUDGET: Materials:  £380 / Parking: £20 / CC: £18  / OH: £449		
+TOTAL COST TO OPTIMAL:  Labour etc:  £2396  /  Materials etc:  £418		
+TOTAL CHARGE TO CLIENT:  Labour:  £2995  / Materials etc:  £525		
+PROFIT ON JOB:  £706 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £20 / CC: £18		
+Labour Only:  £1947 = Profit: £706 / 20%		
+Labour & Materials:  £2327 = Profit: £706 / 20%		
+		"
+IN-020,Daily - 3 Days or More,materials_only,Grays Surveying Services Ltd,Multi-trader,1,,5,1,5,,,,,,20,18,0,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (3 Days >) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  5  Day/s  +  1  labourer  for  5 day/s		
+		
+BUDGET: Materials:  £ / Parking: £20 / CC: £18  / OH: £449		
+TOTAL COST TO OPTIMAL:  Labour etc:  £2396  /  Materials etc:  £38		
+TOTAL CHARGE TO CLIENT:  Labour:  £2995  / Materials etc:  £50		
+PROFIT ON JOB:  £611 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £20 / CC: £18		
+Labour Only:  £1947 = Profit: £611 / 20%		
+Labour & Materials:  £1947 = Profit: £611 / 20%		
+		"
+IN-021,Daily - 3 Days or More,parking_and_congestion,Grays Surveying Services Ltd,Multi-trader,1,,5,1,5,,,,,,0,18,380,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (3 Days >) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  5  Day/s  +  1  labourer  for  5 day/s		
+		
+BUDGET: Materials:  £380 / Parking: £ / CC: £18  / OH: £449		
+TOTAL COST TO OPTIMAL:  Labour etc:  £2396  /  Materials etc:  £398		
+TOTAL CHARGE TO CLIENT:  Labour:  £2995  / Materials etc:  £500		
+PROFIT ON JOB:  £701 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £18		
+Labour Only:  £1947 = Profit: £701 / 20%		
+Labour & Materials:  £2327 = Profit: £701 / 20%		"
+IN-022,Daily - 3 Days or More,parking_and_materials,Grays Surveying Services Ltd,Multi-trader,1,,5,1,5,,,,,,0,0,380,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (3 Days >) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  5  Day/s  +  1  labourer  for  5 day/s		
+		
+BUDGET: Materials:  £380 / Parking: £ / CC: £  / OH: £449		
+TOTAL COST TO OPTIMAL:  Labour etc:  £2396  /  Materials etc:  £380		
+TOTAL CHARGE TO CLIENT:  Labour:  £2995  / Materials etc:  £475		
+PROFIT ON JOB:  £694 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £ / CC: £		
+Labour Only:  £1947 = Profit: £694 / 20%		
+Labour & Materials:  £2327 = Profit: £694 / 20%		"
+IN-023,Daily - 3 Days or More,congestion_and_materials,Grays Surveying Services Ltd,Multi-trader,1,,5,1,5,,,,,,20,0,380,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (3 Days >) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  5  Day/s  +  1  labourer  for  5 day/s		
+		
+BUDGET: Materials:  £380 / Parking: £20 / CC: £  / OH: £449		
+TOTAL COST TO OPTIMAL:  Labour etc:  £2396  /  Materials etc:  £400		
+TOTAL CHARGE TO CLIENT:  Labour:  £2995  / Materials etc:  £500		
+PROFIT ON JOB:  £699 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £20 / CC: £		
+Labour Only:  £1947 = Profit: £699 / 20%		
+Labour & Materials:  £2327 = Profit: £699 / 20%		"
+IN-024,Daily - 3 Days or More,parking_congestion_materials,Grays Surveying Services Ltd,Multi-trader,1,,5,1,5,,,,,,20,0,0,"PRODUCT:		
+IMPORTANT INFO:		
+Grays Surveying Services Ltd Comms @ 0%		
+DAILY (3 Days >) QUOTE HELPER USED		
+LINK/S & QUANTITY:		
+WHO QUOTED:		
+BEST ENGINEER:		
+1  Multi-trader  for  5  Day/s  +  1  labourer  for  5 day/s		
+		
+BUDGET: Materials:  £ / Parking: £20 / CC: £  / OH: £449		
+TOTAL COST TO OPTIMAL:  Labour etc:  £2396  /  Materials etc:  £20		
+TOTAL CHARGE TO CLIENT:  Labour:  £2995  / Materials etc:  £25		
+PROFIT ON JOB:  £604 / 20%		
+		
+EXTERNAL DELIVERY:		
+Parking: £20 / CC: £		
+Labour Only:  £1947 = Profit: £604 / 20%		
+Labour & Materials:  £1947 = Profit: £604 / 20%		"
+IN-025,Subcontractor,no_charges,Private Customer,Scaffolder,,,,,,Danny Arnold Scaffolding,3,Days,6,1500,200,0,0,"PRODUCT:		
+SUBBY CALCULATOR with O/H @ 15%		
+Private Customer Comms @ 0%		
+IMPORTANT INFO:		
+LINK/S & QUANTITY:		
+SUBCONTRACTOR:  Danny Arnold Scaffolding		
+WHO WILL PROVIDE MATERIALS:  Subcontractor		
+SUBCONTRACTOR CHARGE TO US:  £1700  /  Breakdown ⬇️		
+Labour: £1500  /  Materials: £0  /  Parking: £200  /  CC: £  / OH: £346		
+3  Scaffolder  for  6  Days		
+		
+TOTAL COST TO OPTIMAL:  £2046		
+TOTAL CHARGE TO CLIENT:  £2560		
+PROFIT ON JOB:  £514 / 20%		
+		"
+IN-026,Subcontractor,parking_only,Private Customer,Scaffolder,,,,,,Danny Arnold Scaffolding,3,Days,6,1500,0,18,0,"PRODUCT:		
+SUBBY CALCULATOR with O/H @ 15%		
+Private Customer Comms @ 0%		
+IMPORTANT INFO:		
+LINK/S & QUANTITY:		
+SUBCONTRACTOR:  Danny Arnold Scaffolding		
+WHO WILL PROVIDE MATERIALS:  Subcontractor		
+SUBCONTRACTOR CHARGE TO US:  £1518  /  Breakdown ⬇️		
+Labour: £1500  /  Materials: £0  /  Parking: £  /  CC: £18  / OH: £346		
+3  Scaffolder  for  6  Days		
+		
+TOTAL COST TO OPTIMAL:  £1864		
+TOTAL CHARGE TO CLIENT:  £2335		
+PROFIT ON JOB:  £471 / 20%		"
+IN-027,Subcontractor,congestion_only,Private Customer,Scaffolder,,,,,,Danny Arnold Scaffolding,3,Days,6,1500,0,0,3500,"PRODUCT:		
+SUBBY CALCULATOR with O/H @ 15%		
+Private Customer Comms @ 0%		
+IMPORTANT INFO:		
+LINK/S & QUANTITY:		
+SUBCONTRACTOR:  Danny Arnold Scaffolding		
+WHO WILL PROVIDE MATERIALS:  Subcontractor		
+SUBCONTRACTOR CHARGE TO US:  £5000  /  Breakdown ⬇️		
+Labour: £1500  /  Materials: £3500  /  Parking: £  /  CC: £  / OH: £346		
+3  Scaffolder  for  6  Days		
+		
+TOTAL COST TO OPTIMAL:  £5346		
+TOTAL CHARGE TO CLIENT:  £6685		
+PROFIT ON JOB:  £1339 / 20%		"
+IN-028,Subcontractor,materials_only,Private Customer,Scaffolder,,,,,,Danny Arnold Scaffolding,3,Days,6,1500,200,0,3500,"PRODUCT:		
+SUBBY CALCULATOR with O/H @ 15%		
+Private Customer Comms @ 0%		
+IMPORTANT INFO:		
+LINK/S & QUANTITY:		
+SUBCONTRACTOR:  Danny Arnold Scaffolding		
+WHO WILL PROVIDE MATERIALS:  Subcontractor		
+SUBCONTRACTOR CHARGE TO US:  £5200  /  Breakdown ⬇️		
+Labour: £1500  /  Materials: £3500  /  Parking: £200  /  CC: £  / OH: £346		
+3  Scaffolder  for  6  Days		
+		
+TOTAL COST TO OPTIMAL:  £5546		
+TOTAL CHARGE TO CLIENT:  £6935		
+PROFIT ON JOB:  £1389 / 20%		
+		"
+IN-029,Subcontractor,parking_and_congestion,Private Customer,Scaffolder,,,,,,Danny Arnold Scaffolding,3,Days,6,1500,0,18,3500,"PRODUCT:		
+SUBBY CALCULATOR with O/H @ 15%		
+Private Customer Comms @ 0%		
+IMPORTANT INFO:		
+LINK/S & QUANTITY:		
+SUBCONTRACTOR:  Danny Arnold Scaffolding		
+WHO WILL PROVIDE MATERIALS:  Subcontractor		
+SUBCONTRACTOR CHARGE TO US:  £5018  /  Breakdown ⬇️		
+Labour: £1500  /  Materials: £3500  /  Parking: £0  /  CC: £18  / OH: £346		
+3  Scaffolder  for  6  Days		
+		
+TOTAL COST TO OPTIMAL:  £5364		
+TOTAL CHARGE TO CLIENT:  £6710		
+PROFIT ON JOB:  £1346 / 20%		"
+IN-030,Subcontractor,parking_and_materials,Private Customer,Scaffolder,,,,,,Danny Arnold Scaffolding,3,Days,6,1500,200,18,0,"PRODUCT:		
+SUBBY CALCULATOR with O/H @ 15%		
+Private Customer Comms @ 0%		
+IMPORTANT INFO:		
+LINK/S & QUANTITY:		
+SUBCONTRACTOR:  Danny Arnold Scaffolding		
+WHO WILL PROVIDE MATERIALS:  Subcontractor		
+SUBCONTRACTOR CHARGE TO US:  £1718  /  Breakdown ⬇️		
+Labour: £1500  /  Materials: £0  /  Parking: £200  /  CC: £18  / OH: £346		
+3  Scaffolder  for  6  Days		
+		
+TOTAL COST TO OPTIMAL:  £2064		
+TOTAL CHARGE TO CLIENT:  £2585		
+PROFIT ON JOB:  £521 / 20%		"
+IN-031,Subcontractor,congestion_and_materials,Private Customer,Scaffolder,,,,,,Danny Arnold Scaffolding,3,Days,6,1500,0,0,0,"PRODUCT:		
+SUBBY CALCULATOR with O/H @ 15%		
+Private Customer Comms @ 0%		
+IMPORTANT INFO:		
+LINK/S & QUANTITY:		
+SUBCONTRACTOR:  Danny Arnold Scaffolding		
+WHO WILL PROVIDE MATERIALS:  Subcontractor		
+SUBCONTRACTOR CHARGE TO US:  £1500  /  Breakdown ⬇️		
+Labour: £1500  /  Materials: £0  /  Parking: £0  /  CC: £  / OH: £346		
+3  Scaffolder  for  6  Days		
+		
+TOTAL COST TO OPTIMAL:  £1846		
+TOTAL CHARGE TO CLIENT:  £2310		
+PROFIT ON JOB:  £464 / 20%		
+		"
+IN-032,Subcontractor,parking_congestion_materials,Private Customer,Scaffolder,,,,,,Danny Arnold Scaffolding,3,Days,6,1500,200,18,3500,"PRODUCT:		
+SUBBY CALCULATOR with O/H @ 15%		
+Private Customer Comms @ 0%		
+IMPORTANT INFO:		
+LINK/S & QUANTITY:		
+SUBCONTRACTOR:  Danny Arnold Scaffolding		
+WHO WILL PROVIDE MATERIALS:  Subcontractor		
+SUBCONTRACTOR CHARGE TO US:  £5218  /  Breakdown ⬇️		
+Labour: £1500  /  Materials: £3500  /  Parking: £200  /  CC: £18  / OH: £346		
+3  Scaffolder  for  6  Days		
+		
+TOTAL COST TO OPTIMAL:  £5564		
+TOTAL CHARGE TO CLIENT:  £6960		
+PROFIT ON JOB:  £1396 / 20%		
+		"
