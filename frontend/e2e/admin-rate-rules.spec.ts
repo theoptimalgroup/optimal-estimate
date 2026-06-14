@@ -113,7 +113,10 @@ test.describe("admin rate rules page", () => {
 
     await expect(page.getByTestId("admin-rate-rules-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Rate Rules" })).toBeVisible();
+    await expect(page.getByTestId("rate-rules-info-panel")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Excel Pricing Inputs" })).toBeVisible();
     await expect(page.getByTestId("rate-rules-table")).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Client hourly rate" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "Acme Ltd" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "Electrical" })).toBeVisible();
   });

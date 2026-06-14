@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
   DataTable,
@@ -39,12 +39,31 @@ import {
 const FORMULA_SOURCES = ["", "simplified", "xlsx"] as const;
 const PAGE_SIZE = 25;
 
+const CALCULATION_METHOD_HELP = {
+  xlsx: "Uses the Excel-parity calculation engine",
+  simplified: "Uses the legacy simplified engine",
+} as const;
+
+function formatCalculationMethod(source: string | null | undefined): string {
+  if (!source) return "—";
+  return source;
+}
+
 function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div>
       <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
       <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-900">{value?.trim() ? value : "—"}</dd>
     </div>
+  );
+}
+
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+      <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{children}</dl>
+    </section>
   );
 }
 
@@ -87,48 +106,80 @@ function RateRuleDetailPanel({
           </button>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-6">
-          <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="max-h-[70vh] overflow-y-auto px-6 py-6 space-y-8">
+          <DetailSection title="Client & Trade">
             <DetailField label="Client" value={rule.client_name} />
             <DetailField label="Trade" value={rule.trade_name} />
-            <DetailField label="Formula Source" value={rule.formula_source} />
-            <DetailField label="Status" value={rule.is_active ? "Active" : "Inactive"} />
-            <DetailField label="Hourly Rate" value={formatRate(rule.hourly_rate)} />
-            <DetailField label="Half Day Rate" value={formatRate(rule.half_day_rate)} />
-            <DetailField label="Day Rate" value={formatRate(rule.day_rate)} />
-            <DetailField label="Material Markup" value={formatMarkup(rule)} />
-            <DetailField label="VAT Rate" value={formatPercent(rule.vat_rate)} />
-            <DetailField label="Active From" value={formatDate(rule.active_from)} />
-            <DetailField label="Active To" value={formatDate(rule.active_to)} />
             <DetailField label="XLSX Client Name" value={rule.xlsx_client_name} />
             <DetailField label="XLSX Trade Name" value={rule.xlsx_trade_name} />
             <DetailField label="Lookup Priority" value={rule.usage.lookup_priority} />
             <DetailField label="Quotes Using Rule" value={String(rule.usage.quotes_using_version)} />
             <DetailField label="Jobs For Client" value={String(rule.usage.jobs_for_client)} />
-            <DetailField label="Hourly Overhead %" value={formatFractionAsPercent(rule.hourly_overhead_pct)} />
-            <DetailField label="Daily Overhead %" value={formatFractionAsPercent(rule.daily_overhead_pct)} />
+            <DetailField label="Status" value={rule.is_active ? "Active" : "Inactive"} />
+          </DetailSection>
+
+          <DetailSection title="Pricing Inputs">
+            <DetailField label="Client hourly rate" value={formatRate(rule.hourly_rate)} />
+            <DetailField label="Direct half-day cost" value={formatRate(rule.half_day_rate)} />
+            <DetailField label="Direct day cost" value={formatRate(rule.day_rate)} />
+            <DetailField label="Material formula %" value={formatMarkup(rule)} />
+            <DetailField label="Direct hourly cost" value={formatRate(rule.direct_hourly_cost)} />
+            <DetailField label="Direct daily cost" value={formatRate(rule.direct_daily_cost)} />
+            <DetailField label="Labourer hourly cost" value={formatRate(rule.labourer_hourly_cost)} />
+            <DetailField label="Labourer daily cost" value={formatRate(rule.labourer_daily_cost)} />
+            <DetailField label="Minimum hours" value={rule.minimum_hours ?? "—"} />
+            <DetailField label="Minimum charge" value={formatRate(rule.minimum_charge)} />
+            <DetailField label="Approval threshold" value={formatRate(rule.approval_threshold)} />
             <DetailField
-              label="Daily Overhead (Long Job) %"
-              value={formatFractionAsPercent(rule.daily_overhead_long_job_pct)}
-            />
-            <DetailField label="Client Fee %" value={formatFractionAsPercent(rule.client_fee_pct)} />
-            <DetailField label="Direct Hourly Cost" value={formatRate(rule.direct_hourly_cost)} />
-            <DetailField label="Direct Daily Cost" value={formatRate(rule.direct_daily_cost)} />
-            <DetailField label="Labourer Hourly Cost" value={formatRate(rule.labourer_hourly_cost)} />
-            <DetailField label="Labourer Daily Cost" value={formatRate(rule.labourer_daily_cost)} />
-            <DetailField label="Minimum Hours" value={rule.minimum_hours ?? "—"} />
-            <DetailField label="Minimum Charge" value={formatRate(rule.minimum_charge)} />
-            <DetailField label="Approval Threshold" value={formatRate(rule.approval_threshold)} />
-            <DetailField
-              label="Minimum Margin %"
+              label="Minimum margin %"
               value={rule.minimum_margin_percentage ? formatPercent(rule.minimum_margin_percentage) : "—"}
             />
-            <DetailField label="Rounding Rule" value={rule.rounding_rule} />
-            <DetailField label="Created At" value={formatDate(rule.created_at)} />
-          </dl>
+            <DetailField label="Client fee %" value={formatFractionAsPercent(rule.client_fee_pct)} />
+            <DetailField label="Hourly overhead %" value={formatFractionAsPercent(rule.hourly_overhead_pct)} />
+            <DetailField label="Daily overhead %" value={formatFractionAsPercent(rule.daily_overhead_pct)} />
+            <DetailField
+              label="Daily overhead (long job) %"
+              value={formatFractionAsPercent(rule.daily_overhead_long_job_pct)}
+            />
+          </DetailSection>
 
-          <div className="mt-6">
-            <DetailField label="Internal Notes Template" value={rule.internal_notes_template} />
+          <DetailSection title="Formula Settings">
+            <div className="sm:col-span-2 lg:col-span-3">
+              <DetailField label="Calculation method" value={formatCalculationMethod(rule.formula_source)} />
+              <p className="mt-2 text-xs text-slate-600">
+                <span className="font-medium text-slate-700">xlsx</span> — {CALCULATION_METHOD_HELP.xlsx}.{" "}
+                <span className="font-medium text-slate-700">simplified</span> — {CALCULATION_METHOD_HELP.simplified}.
+              </p>
+            </div>
+            <DetailField label="Rounding rule" value={rule.rounding_rule} />
+            <DetailField
+              label="Material charge denominator"
+              value={formatFractionAsPercent(rule.material_charge_denominator)}
+            />
+            <DetailField
+              label="Parking charge denominator"
+              value={formatFractionAsPercent(rule.parking_charge_denominator)}
+            />
+            <DetailField
+              label="Congestion charge denominator"
+              value={formatFractionAsPercent(rule.congestion_charge_denominator)}
+            />
+            <DetailField label="MROUND increment" value={formatRate(rule.mround_increment)} />
+            <DetailField label="OJ uplift %" value={formatPercent(rule.oj_uplift_pct)} />
+            <DetailField label="NHS overhead uplift %" value={formatPercent(rule.nhs_overhead_uplift_pct)} />
+            <DetailField label="EAF flat fee" value={formatRate(rule.eaf_flat_fee)} />
+          </DetailSection>
+
+          <DetailSection title="VAT & Active Dates">
+            <DetailField label="VAT rate" value={formatPercent(rule.vat_rate)} />
+            <DetailField label="Active from" value={formatDate(rule.active_from)} />
+            <DetailField label="Active to" value={formatDate(rule.active_to)} />
+            <DetailField label="Version" value={rule.version} />
+            <DetailField label="Created at" value={formatDate(rule.created_at)} />
+          </DetailSection>
+
+          <div>
+            <DetailField label="Internal notes template" value={rule.internal_notes_template} />
           </div>
         </div>
 
@@ -250,13 +301,25 @@ export default function AdminRateRulesPage() {
     <div className="space-y-6" data-testid="admin-rate-rules-page">
       <PageHeader
         title="Rate Rules"
-        description="View labour rates, markups, and pricing rules used across estimates."
+        description="View Excel pricing inputs stored per client and trade. Final quote totals are calculated by the backend engine."
         actions={
           <SecondaryButton onClick={() => void loadRules()} disabled={loading}>
             Refresh
           </SecondaryButton>
         }
       />
+
+      <div
+        className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm text-blue-900"
+        data-testid="rate-rules-info-panel"
+      >
+        <h2 className="font-semibold text-blue-950">Excel Pricing Inputs</h2>
+        <p className="mt-1 leading-relaxed text-blue-900/90">
+          These values are imported from the Quote Calculator workbook and stored per Client + Trade. The database
+          stores pricing inputs only. Final labour, materials, VAT, profit, discount, and quote totals are calculated
+          by the backend calculation engine.
+        </p>
+      </div>
 
       <FilterBar>
         <FilterField label="Search client">
@@ -280,7 +343,7 @@ export default function AdminRateRulesPage() {
             data-testid="rate-rules-trade-filter"
           />
         </FilterField>
-        <FilterField label="Formula source">
+        <FilterField label="Calculation method">
           <select
             value={formulaSource}
             onChange={(event) => {
@@ -292,10 +355,14 @@ export default function AdminRateRulesPage() {
           >
             {FORMULA_SOURCES.map((source) => (
               <option key={source || "all"} value={source}>
-                {source ? source : "All sources"}
+                {source ? source : "All methods"}
               </option>
             ))}
           </select>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+            <span className="font-medium text-slate-600">xlsx</span> — {CALCULATION_METHOD_HELP.xlsx}.{" "}
+            <span className="font-medium text-slate-600">simplified</span> — {CALCULATION_METHOD_HELP.simplified}.
+          </p>
         </FilterField>
         <FilterField label="Filters" className="sm:min-w-[160px]">
           <label className="flex min-h-[40px] items-center gap-2 text-sm text-slate-700">
@@ -330,12 +397,12 @@ export default function AdminRateRulesPage() {
               {[
                 "Client",
                 "Trade",
-                "Formula Source",
+                "Calculation method",
                 "Status",
-                "Hourly",
-                "Half Day",
-                "Day",
-                "Material Markup",
+                "Client hourly rate",
+                "Direct half-day cost",
+                "Direct day cost",
+                "Material formula %",
                 "VAT",
                 "Active From",
                 "Active To",
